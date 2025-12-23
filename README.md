@@ -1,4 +1,4 @@
-# SkiaHelios (SH Tools)
+# SkiaHelios (The Shadow Sun)
 > **"Ex Umbra in Solem"** (From the Shadows into the Sun)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -55,60 +55,62 @@ graph TD
 
 ```text
 SkiaHelios/
-├── README.md               ... Documentation
+├── README.md               ... Documentation & Philosophy
 ├── requirements.txt        ... Python Dependencies (Polars, etc.)
-├── SH_HeliosConsole/       ... Interactive Commander (Entry Point)
-├── SH_ChaosGrasp/          ... Master Timeline Generator (The Chaos)
-├── SH_PandorasLink/        ... Ghost Hunting Engine (The Space)
-├── SH_ChronosSift/         ... Timestamp Verification (The Time)
-└── libs/                   ... Shared Libraries
+├── SH_HeliosConsole.py     ... The Throne (Unified Interactive Console)
+└── tools/                  ... Specialized Modules
+    ├── SH_ChaosGrasp/      ... Master Timeline Generator (The Chaos)
+    ├── SH_PandorasLink/    ... Ghost Hunting Engine (The Space)
+    ├── SH_ChronosSift/     ... Timestamp Verification (The Time)
+    ├── SH_AIONDetector/    ... Persistence Scoring (The Eternity)
+    ├── SH_PlutosGate/      ... Exfiltration Tracking (The Boundary)
+    └── SH_SphinxDeciphering/ ... Obfuscation Decoder (The Riddle)
 ```
 
 ## 🛠️ Module Lineup
 
 ### 1. SH_ChaosGrasp (The Chaos)
 * **Mission**: Aggregate, Align, and Prepare.
-* **Function**: Generates a normalized "Master Timeline" from heterogeneous artifacts (Registry, Prefetch, Amcache, UserAssist) using robust timezone handling.
-* **Key Tech**: Automatic Timezone Bias detection, Raw Registry parsing, Polars Streaming.
+* **Function**: Registry, Prefetch, Amcache, UserAssistなどの異種アーティファクトから、タイムゾーン補正済みの正規化「マスタータイムライン」を生成。
+* **Key Tech**: Timezone Biasの自動検出, Raw Registryパース, Polars Streaming。
 
 ### 2. SH_ChronosSift (The Time)
 * **Mission**: Detect Temporal Anomalies.
-* **Function**: Identifies "Timestomping" by comparing `$STANDARD_INFORMATION` vs `$FILE_NAME` attributes with nanosecond precision. Validates time integrity against physical log sequences.
-* **Key Tech**: Nanosecond-level timestamp verification, Zero-filling detection.
+* **Function**: `$STANDARD_INFORMATION` と `$FILE_NAME` 属性をナノ秒精度で比較し、「Timestomping（タイムスタンプ偽装）」を特定。物理的なログシーケンスとの整合性を検証。
+* **Key Tech**: ナノ秒精度比較, ゼロ埋め（Zero-precision）検知。
 
 ### 3. SH_PandorasLink (The Space)
 * **Mission**: Reveal the "Absence", "Intent" & "Risk".
-* **Function**: Reconstructs deleted file history ("Ghosts") by cross-referencing **MFT (Live/VSS)** and **USN Journal**. It correlates these ghosts with execution logs from ChaosGrasp to prove malicious intent.
-* **Key Tech**: NTFS `$MFT`/`$J` gap analysis, Path Backfill (Grandparent reconstruction), Risk Assessment (Sequence Number Anomaly).
+* **Function**: **MFT (Live/VSS)** と **USN Journal** をクロスリファレンスし、削除済みファイルの履歴（Ghost）を再構築。ChaosGraspの実行ログと相関させ、悪意ある意図を立証。
+* **Key Tech**: NTFS `$MFT`/`$J` ギャップ分析, 親ディレクトリ再構築, リスクアセスメント。
 
 ### 4. SH_AIONDetector (The Eternity)
 * **Mission**: Persistence Analysis.
-* **Function**: Scores persistence mechanisms (WMI, COM Hijack, Services, RunKeys) to detect "stay-behind" threats and advanced APT techniques.
-* **Key Tech**: Persistence scoring algorithm, Registry cross-referencing.
+* **Function**: WMI, COM Hijack, Services, RunKeysなどの永続化メカニズムをスコアリング。ファイルレス脅威や高度なAPT手法を検知。
+* **Key Tech**: 永続化スコアリングアルゴリズム, レジストリ相互参照。
 
-### 5. SH_SphinxDeciphering (The Riddle)
+### 5. SH_PlutosGate (The Boundary)
+* **Mission**: Exfiltration Verification.
+* **Function**: LNKファイルやShellBagsを、Pandoraが特定した「Ghostファイル」にリンク。境界（USB、ネットワーク）を越えたデータ移動を追跡。
+* **Key Tech**: ボリュームシリアル番号(VSN)追跡, ShellBag解析。
+
+### 6. SH_SphinxDeciphering (The Riddle)
 * **Mission**: Obfuscation Decoding.
-* **Function**: Extracts and decodes obfuscated strings from Event Logs and scripts using entropy analysis and multi-layer decoding strategies.
-* **Key Tech**: Entropy calculation, Automated encoding detection (Base64/XOR/ROT13).
-
-### 6. SH_HekateWeaver (The Will)
-* **Mission**: Narrative Reconstruction.
-* **Function**: Connects the "Ghost" files, "Timeline" events, and decoded intent to reconstruct the attacker's will and actions on a unified timeline.
-* **Key Tech**: LSN (Log Sequence Number) chaining, Event correlation engine.
+* **Function**: イベントログやスクリプトから難読化された文字列を抽出。エントロピー解析と多層デコード戦略を用いて復号。
+* **Key Tech**: エントロピー計算, 自動エンコーディング検出 (Base64/XOR/ROT13)。
 
 ## 🚀 Capabilities & Outcomes
 
-With SkiaHelios, an analyst can:
-* **Process Gigabytes of Data in Seconds**: Utilizing Rust-based Polars streaming engine.
-* **Reveal Hidden Intent**: Automatically tag deleted-then-executed binaries (`[EXEC]`, `[ANOMALY]`).
-* **Defeat Anti-Forensics**: Detect statistical anomalies in MFT Sequence Numbers to identify wiped directories.
-* **Establish Attribution**: Provide irrefutable, binary-level proof for Incident Response reports.
+* **Process Gigabytes of Data in Seconds**: RustベースのPolarsストリーミングエンジンにより、数ギガのMFTを数秒で処理。
+* **Reveal Hidden Intent**: 削除後に実行されたバイナリを自動的にタグ付け (`[EXEC]`, `[ANOMALY]`)。
+* **Defeat Anti-Forensics**: MFTシーケンス番号の統計的異常を検知し、ディレクトリ・ワイピングを特定。
+* **Establish Attribution**: インシデントレスポンスにおいて、バイナリレベルの反論不可能な証拠を提供。
 
 ## 📦 Installation & Usage
 
 ### Prerequisites
 * Python 3.10+
-* **Data Sources**: Artifacts parsed by **KAPE** or Eric Zimmerman's **MFTECmd** (CSV format).
+* **Data Sources**: **KAPE** または Eric Zimmerman's **MFTECmd** (CSV形式) で出力されたアーティファクト。
 
 ### Setup
 ```bash
@@ -117,18 +119,24 @@ cd SkiaHelios
 pip install -r requirements.txt
 ```
 
-### Example: Running ChaosGrasp (Triage)
-Generates the Master Timeline required for subsequent analysis.
+### 🎮 Unified Console (Recommended)
+統合コンソールを起動し、すべてのツールを自動的に連携させます。
 
 ```bash
-python SH_ChaosGrasp/SH_ChaosGrasp.py -d "C:\Case\KAPE_Out" -o "output/chaos.csv"
+python SH_HeliosConsole.py
 ```
 
-### Example: Running PandorasLink (Gap Analysis)
-Detects ghosts, reconstructs their paths, and links them to execution intent.
+```text
+(Helios) > load C:\Case\KAPE_Output
+[*] Target Locked: C:\Case\KAPE_Output
 
-```bash
-python SH_PandorasLink/SH_PandorasLink.py -d "C:\Case\KAPE_Out" --chaos "output/chaos.csv" --start "2025-01-01" --end "2025-01-07"
+(Helios:out) > autopilot
+[!] INITIATING HELIOS AUTOPILOT SEQUENCE
+============================================================
+>>> STEP 1: CHRONOS (Time Verification)
+>>> STEP 2: PANDORA (Recovering Ghosts)
+>>> STEP 3: CHAOS (Timeline Construction)
+...
 ```
 
 ---
