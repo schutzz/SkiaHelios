@@ -1,0 +1,12 @@
+[submodule "tools/SH_ChaosGrasp"]
+	path = tools/SH_ChaosGrasp
+	url = https://github.com/schutzz/SH_ChaosGrasp
+[submodule "tools/SH_PandorasLink"]
+	path = tools/SH_PandorasLink
+	url = https://github.com/schutzz/SH_PandorasLink
+[submodule "tools/SH_ChronosSift"]
+	path = tools/SH_ChronosSift
+	url = https://github.com/schutzz/SH_ChronosSift
+[submodule "tools/SH_AION_Detector"]
+	path = tools/SH_AION_Detector
+	url = https://github.com/schutzz/SH_AION_Detector
