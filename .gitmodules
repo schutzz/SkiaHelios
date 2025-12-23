@@ -7,6 +7,6 @@
 [submodule "tools/SH_ChronosSift"]
 	path = tools/SH_ChronosSift
 	url = https://github.com/schutzz/SH_ChronosSift
-[submodule "tools/SH_AION_Detector"]
-	path = tools/SH_AION_Detector
-	url = https://github.com/schutzz/SH_AION_Detector
+[submodule "tools/SH_AIONDetector"]
+	path = tools/SH_AIONDetector
+	url = https://github.com/schutzz/SH_AIONDetector
