@@ -23,18 +23,18 @@ graph TD
     %% Helios Console Styling
     style Helios fill:#f9f,stroke:#333,stroke-width:4px,color:black
 
-    %% Phase 1: Foundation
-    Helios -->|1. Normalize| Chaos[SH_ChaosGrasp<br/>Master Timeline]
+    %% Phase 1: Foundation & Verification
+    Helios -->|1. Verify Time| Chronos[SH_ChronosSift<br/>Time Verification]
+    Chronos -->|Verification Data| Chaos[SH_ChaosGrasp<br/>Master Timeline]
+    Helios -->|2. Normalize| Chaos
     
     %% Phase 2: Deep Analysis Modules
-    Helios -->|2. Verify Time| Chronos[SH_ChronosSift<br/>Time Verification]
     Helios -->|3. Find Ghosts| Pandora[SH_PandorasLink<br/>Gap Analysis]
     Helios -->|4. Detect Persistence| AION[SH_AIONDetector<br/>Persistence Scoring]
     Helios -->|5. Decode Obfuscation| Sphinx[SH_SphinxDeciphering<br/>Entropy & Decoding]
 
     %% Internal Data Flow
     Chaos -->|Input| Pandora
-    Chronos -.->|Validation| Chaos
     
     %% Phase 3: Exfiltration Tracking
     Pandora -->|Ghosts & Risks| Plutos[SH_PlutosGate<br/>Boundary Analysis]
@@ -69,15 +69,15 @@ SkiaHelios/
 
 ## 🛠️ Module Lineup
 
-### 1. SH_ChaosGrasp (The Chaos)
-* **Mission**: Aggregate, Align, and Prepare.
-* **Function**: Registry, Prefetch, Amcache, UserAssistなどの異種アーティファクトから、タイムゾーン補正済みの正規化「マスタータイムライン」を生成。
-* **Key Tech**: Timezone Biasの自動検出, Raw Registryパース, Polars Streaming。
-
-### 2. SH_ChronosSift (The Time)
+### 1. SH_ChronosSift (The Time)
 * **Mission**: Detect Temporal Anomalies.
 * **Function**: `$STANDARD_INFORMATION` と `$FILE_NAME` 属性をナノ秒精度で比較し、「Timestomping（タイムスタンプ偽装）」を特定。物理的なログシーケンスとの整合性を検証。
 * **Key Tech**: ナノ秒精度比較, ゼロ埋め（Zero-precision）検知。
+
+### 2. SH_ChaosGrasp (The Chaos)
+* **Mission**: Aggregate, Align, and Prepare.
+* **Function**: Registry, Prefetch, Amcache, UserAssistなどの異種アーティファクトから、正規化「マスタータイムライン」を生成。**ChronosSiftの結果を取り込み、偽装された時刻を自動修正する。**
+* **Key Tech**: Timezone Biasの自動検出, ChronosSift連携アルゴリズム, Polars Streaming。
 
 ### 3. SH_PandorasLink (The Space)
 * **Mission**: Reveal the "Absence", "Intent" & "Risk".
@@ -102,15 +102,11 @@ SkiaHelios/
 ## 🚀 Capabilities & Outcomes
 
 * **Process Gigabytes of Data in Seconds**: RustベースのPolarsストリーミングエンジンにより、数ギガのMFTを数秒で処理。
+* **Defeat Anti-Forensics**: ChronosSift連携により、偽装されたタイムスタンプを無効化し、真実のイベント順序を復元。
 * **Reveal Hidden Intent**: 削除後に実行されたバイナリを自動的にタグ付け (`[EXEC]`, `[ANOMALY]`)。
-* **Defeat Anti-Forensics**: MFTシーケンス番号の統計的異常を検知し、ディレクトリ・ワイピングを特定。
 * **Establish Attribution**: インシデントレスポンスにおいて、バイナリレベルの反論不可能な証拠を提供。
 
 ## 📦 Installation & Usage
-
-### Prerequisites
-* Python 3.10+
-* **Data Sources**: **KAPE** または Eric Zimmerman's **MFTECmd** (CSV形式) で出力されたアーティファクト。
 
 ### Setup
 ```bash
@@ -124,19 +120,6 @@ pip install -r requirements.txt
 
 ```bash
 python SH_HeliosConsole.py
-```
-
-```text
-(Helios) > load C:\Case\KAPE_Output
-[*] Target Locked: C:\Case\KAPE_Output
-
-(Helios:out) > autopilot
-[!] INITIATING HELIOS AUTOPILOT SEQUENCE
-============================================================
->>> STEP 1: CHRONOS (Time Verification)
->>> STEP 2: PANDORA (Recovering Ghosts)
->>> STEP 3: CHAOS (Timeline Construction)
-...
 ```
 
 ---
