@@ -137,11 +137,11 @@ python SH_HeliosConsole.py
 ```
 > Select **[9] FULL AUTO SCAN** to run the complete pipeline (Chaos -> Chronos -> AION -> Pandora -> Plutos -> Hekate).
 
-# 🦁 SkiaHelios v2.5 (Chimera Update)
+# SkiaHelios (The Shadow Sun) v2.6 [Correlation Edition]
 
-> **"Ex Umbra in Solem" - From Shadow into Light.**
+> **"Ex Umbra in Solem"** (From the Shadows into the Sun)
 
-SkiaHelios is an automated DFIR triage suite designed for rapid artifact analysis and timeline reconstruction.
+**SkiaHelios** is a high-resolution DFIR suite designed to establish **"Absolute Coordinates"** in time and space. v2.6 introduces **MFT-Correlated Persistence Analysis**, enabling physical validation of infection timelines.
 
 ## 🏆 Validated Capabilities (v2.6 Correlation)
 **Operation Chimera** (2025-12-24 最新検証結果)
