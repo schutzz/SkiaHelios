@@ -28,11 +28,13 @@ graph TD
     %% Helios Console Styling
     style Helios fill:#f9f,stroke:#333,stroke-width:4px,color:black
 
-    %% Phase 1: Foundation & Verification
-    Helios -->|1. Normalize| Chaos[SH_ChaosGrasp<br/>Master Timeline]
-    Helios -->|1.5 Verify Time| Chronos[SH_ChronosSift<br/>Time Verification]
+    %% Phase 1: Foundation
+    Helios -->|1. Build Timeline| Chaos[SH_ChaosGrasp<br/>Master Timeline]
     
-    %% Phase 2: Deep Analysis Modules
+    %% Phase 1.5: Verification (The correction)
+    Chaos -->|Input for Audit| Chronos[SH_ChronosSift<br/>Time Verification]
+    
+    %% Phase 2: Deep Analysis
     Helios -->|2. Detect Persistence| AION[SH_AIONDetector<br/>Persistence Scoring]
     Helios -->|3. Find Ghosts| Pandora[SH_PandorasLink<br/>Gap Analysis]
 
@@ -45,6 +47,9 @@ graph TD
     Plutos -->|Exfil Evidence| Hekate
     AION -->|Persistence Alerts| Hekate
     Sphinx -->|Decoded Payload| Hekate
+    
+    %% Chronos is a sidecar audit, doesn't feed Hekate yet
+    style Chronos stroke-dasharray: 5 5
 ```
 
 ## 📂 Directory Structure
