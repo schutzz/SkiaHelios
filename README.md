@@ -28,28 +28,29 @@ graph TD
     style Helios fill:#f9f,stroke:#333,stroke-width:4px,color:black
 
     %% Phase 1: Foundation
-    Helios -->|1. Build Timeline| Chaos[SH_ChaosGrasp<br/>Master Timeline]
+    Helios -->|1. Build Timeline| Chaos[SH_ChaosGrasp]
     
-    %% Phase 1.5: Verification (The correction)
-    Chaos -->|Input for Audit| Chronos[SH_ChronosSift<br/>Time Verification]
+    %% Phase 1.5: Verification
+    Chaos -->|Input for Audit| Chronos[SH_ChronosSift]
     
     %% Phase 2: Deep Analysis
-    Helios -->|2. Detect Persistence| AION[SH_AIONDetector<br/>Persistence Scoring]
-    Helios -->|3. Find Ghosts| Pandora[SH_PandorasLink<br/>Gap Analysis]
+    Helios -->|2. Detect Persistence| AION[SH_AIONDetector]
+    Helios -->|3. Find Ghosts| Pandora[SH_PandorasLink]
 
     %% Phase 3: Exfiltration & Decoding
-    Pandora -->|Ghosts & Risks| Plutos[SH_PlutosGate<br/>Boundary Analysis]
-    Helios -->|4.5 Decode Riddle| Sphinx[SH_SphinxDeciphering<br/>Obfuscation Decoder]
+    Pandora -->|Ghosts & Risks| Plutos[SH_PlutosGate]
+    Helios -->|4.5 Decode Riddle| Sphinx[SH_SphinxDeciphering]
 
-    %% Phase 4: Final Narrative (Chronosを合流！)
-    Chaos -->|Timeline| Hekate[SH_HekateWeaver<br/>Narrative Engine]
-    Plutos -->|Exfil Evidence| Hekate
-    AION -->|Persistence Alerts| Hekate
-    Sphinx -->|Decoded Payload| Hekate
-    Chronos -->|Critical Time Anomalies| Hekate %% 調教済みなら堂々と合流！
+    %% Phase 4: Final Narrative
+    Chaos --> Hekate[SH_HekateWeaver]
+    Plutos --> Hekate
+    AION --> Hekate
+    Sphinx --> Hekate
+    Chronos -->|Critical Time Anomalies| Hekate
     
-    %% スタイル更新：Chronosを実線に（信頼の証）
+    %% Styles
     style Chronos stroke:#f00,stroke-width:2px
+    style Hekate fill:#dfd,stroke:#333,stroke-width:2px
 ```
 
 ## 📂 Directory Structure
