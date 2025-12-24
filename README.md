@@ -25,7 +25,6 @@ SkiaHelios operates as a unified monorepo, orchestrating 7 specialized modules t
 graph TD
     User[Analyst] -->|Control| Helios(SH_HeliosConsole)
     
-    %% Helios Console Styling
     style Helios fill:#f9f,stroke:#333,stroke-width:4px,color:black
 
     %% Phase 1: Foundation
@@ -42,14 +41,15 @@ graph TD
     Pandora -->|Ghosts & Risks| Plutos[SH_PlutosGate<br/>Boundary Analysis]
     Helios -->|4.5 Decode Riddle| Sphinx[SH_SphinxDeciphering<br/>Obfuscation Decoder]
 
-    %% Phase 4: Final Narrative
+    %% Phase 4: Final Narrative (Chronosを合流！)
     Chaos -->|Timeline| Hekate[SH_HekateWeaver<br/>Narrative Engine]
     Plutos -->|Exfil Evidence| Hekate
     AION -->|Persistence Alerts| Hekate
     Sphinx -->|Decoded Payload| Hekate
+    Chronos -->|Critical Time Anomalies| Hekate %% 調教済みなら堂々と合流！
     
-    %% Chronos is a sidecar audit, doesn't feed Hekate yet
-    style Chronos stroke-dasharray: 5 5
+    %% スタイル更新：Chronosを実線に（信頼の証）
+    style Chronos stroke:#f00,stroke-width:2px
 ```
 
 ## 📂 Directory Structure
