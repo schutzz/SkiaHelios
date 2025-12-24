@@ -102,9 +102,12 @@ SkiaHelios/
 
 ---
 
-## 🦁 The "Chimera" Benchmark
+## SkiaHelios (The Shadow Sun) v2.6
 
-SkiaHelios has been rigorously tested against **"The Chimera"** - a custom Atomic Red Team scenario designed to defeat traditional forensics.
+> **"Ex Umbra in Solem"** (From the Shadows into the Sun)
+
+SkiaHelios is a definitive DFIR suite for high-resolution analysis, 
+featuring MFT-correlated persistence hunting (AION v10.2).
 
 | Attack Vector | Traditional Tool Result | SkiaHelios Result |
 |---|---|---|
