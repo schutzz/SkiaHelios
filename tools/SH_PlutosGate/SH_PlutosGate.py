@@ -146,13 +146,13 @@ class PlutosEngine:
             print(f"[!] SRUM Analysis Failed: {e}")
             return None
 
-def main():
+def main(argv=None):
     print_logo()
     parser = argparse.ArgumentParser()
     parser.add_argument("--dir", required=True, help="KAPE Output Directory")
     parser.add_argument("--pandora", help="Path to Pandora Ghost List CSV")
     parser.add_argument("-o", "--out", default="plutos_report.csv")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     engine = PlutosEngine(args.dir, args.pandora)
 

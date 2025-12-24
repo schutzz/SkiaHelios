@@ -1,306 +1,215 @@
 import polars as pl
 import argparse
 from pathlib import Path
-import hashlib
 import sys
 import datetime
 
-# ==========================================
-#  SH_HekateWeaver v2.4 [Chronos Integrated]
-#  Mission: Weave "Human Intent" (Full Suite)
-#  Updates: Added Chronos (Time Anomaly) integration
-# ==========================================
+# ============================================================
+#  SH_HekateWeaver v2.8.9 [Resilient Binder]
+#  Mission: Bind threads of evidence without crashing on null times.
+#  Fix: Added robust null-check for AION correlated timestamps.
+#  Goal: Finalize the story for the Challenge Coin.
+# ============================================================
 
 def print_logo():
     print(r"""
       | | | | | |
-    -- HEKATE  --   [ The Grand Weaver v2.4 ]
-      | | | | | |   "Binding the threads of fate."
+    -- HEKATE  --   [ The Grand Weaver v2.8.9 ]
+      | | | | | |   "Resilience is the soul of forensics."
     """)
 
-# --- Language Dictionary ---
 TEXT_RES = {
     "en": {
-        "title": "HekateWeaver Forensic Report (Digest)",
-        "concept": "Tracing Human Intent through Physical Laws",
-        "h1_summary": "1. Executive Threat Summary",
-        "h1_cols": ["Module", "Status", "Findings"],
-        "status_crit": "🔴 CRITICAL",
-        "status_clean": "🟢 Clean",
-        "h2_threats": "2. High Priority Threats (Sample)",
-        "desc_threats": "Immediate Action Required: Verified traces of persistence, concealment, exfiltration, obfuscation, or timestomping.",
-        "h3_exfil": "🚨 Data Exfiltration (Top 5)",
-        "h3_persist": "💀 Persistence Mechanisms (Top 5)",
-        "h3_ghost": "👻 Ghost Artifacts (Top 5)",
-        "h3_time": "⏳ Timestomping Anomalies (Top 5)",
-        "h3_sphinx": "🧩 Decoded Riddles (Top 5)",
-        "col_verdict": "Verdict",
-        "col_drive": "Drive/Dest",
-        "col_tags": "Tags",
-        "col_path": "Path",
-        "col_hint": "Decoded Hint",
-        "col_variance": "Variance (ns)",
-        "h3_timeline": "3. Woven Timeline of Intent (Digest)",
-        "desc_timeline": "Filter: Displaying top {} tagged/suspicious events.",
-        "col_cmd": "Verification Cmd",
-        "more_events": "...and {} more tagged events. Check CSV."
+        "title": "SkiaHelios Forensic Analysis Report",
+        "intro": "Custom DFIR framework for high-resolution artifact correlation.",
+        "h1_legend": "0. Methodology & Artifact Legend",
+        "legend_desc": "SkiaHelios correlates disparate artifacts to reconstruct attacker intent.",
+        "tool_list": [
+            ("Chaos", "Master Timeline construction."),
+            ("Chronos", "MFT Time Paradox (Timestomp) detection."),
+            ("AION", "Persistence hunting correlated with MFT."),
+            ("Plutos", "Exfiltration tracking via USB/Network."),
+            ("Sphinx", "Decoding obfuscated scripts.")
+        ],
+        "tag_legend": [
+            ("TIMESTOMP_BACKDATE", "$SI < $FN Creation Time discrepancy."),
+            ("USER_PERSISTENCE", "Persistence detected in HKCU (User-level)."),
+            ("WMI_PERSISTENCE", "WMI Eventing used for fileless persistence.")
+        ],
+        "h1_summary": "1. Executive Summary",
+        "h1_cols": ["Module", "Risk Level", "Detection Count"],
+        "status_crit": "CRITICAL",
+        "h2_story": "2. Anomalous Storyline (Event Sequence)",
+        "desc_story": "Chronological fusion of all high-priority anomalies.",
+        "h2_threats": "3. High-Priority Detection Details",
+        "h3_exfil": "Exfiltration & Access (Plutos)",
+        "h3_persist": "Persistence Mechanism (AION)",
+        "h3_time": "Timeline Anomaly (Chronos)",
+        "h3_sphinx": "Obfuscation Decoded (Sphinx)",
+        "col_time": "Timestamp",
+        "col_mod": "Module",
+        "col_desc": "Anomaly Description"
     },
-    # (JP辞書は省略しますが、同様に追加が必要です)
+    "jp": {
+        "title": "SkiaHelios フォレンジック解析報告書",
+        "intro": "アーティファクト間の相関分析に特化した自動生成報告書。",
+        "h1_legend": "0. 調査手法および凡例",
+        "legend_desc": "SkiaHeliosは、分散した証拠を紐付け、攻撃者の意図を再構成します。",
+        "tool_list": [
+            ("Chaos", "マスタータイムラインの構築"),
+            ("Chronos", "MFTタイムスタンプ矛盾の検知"),
+            ("AION", "MFT相関型永続化メカニズムの探索"),
+            ("Plutos", "情報持ち出しトラッキング"),
+            ("Sphinx", "難読化スクリプトの解読")
+        ],
+        "tag_legend": [
+            ("TIMESTOMP_BACKDATE", "$SI時刻が$FN時刻より古い矛盾"),
+            ("USER_PERSISTENCE", "HKCU(ユーザー権限)での永続化検知"),
+            ("WMI_PERSISTENCE", "WMIを利用したファイルレス潜伏")
+        ],
+        "h1_summary": "1. エグゼクティブ・サマリー",
+        "h1_cols": ["モジュール", "リスクレベル", "検知件数"],
+        "status_crit": "【警告】要調査",
+        "h2_story": "2. 異常イベント・ストーリーライン",
+        "desc_story": "各モジュールが検知した不審なイベントを時系列で構成しています。",
+        "h2_threats": "3. 高優先度検知詳細",
+        "h3_exfil": "情報持ち出し痕跡 (Plutos)",
+        "h3_persist": "永続化メカニズム (AION)",
+        "h3_time": "タイムスタンプ異常 (Chronos)",
+        "h3_sphinx": "難読化解除結果 (Sphinx)",
+        "col_time": "発生時刻",
+        "col_mod": "検知モジュール",
+        "col_desc": "イベント内容"
+    }
 }
 
 class HekateWeaver:
     def __init__(self, timeline_csv, aion_csv=None, pandora_csv=None, plutos_csv=None, sphinx_csv=None, chronos_csv=None, lang="en"):
-        self.timeline_csv = timeline_csv
-        self.aion_csv = aion_csv
-        self.pandora_csv = pandora_csv
-        self.plutos_csv = plutos_csv
-        self.sphinx_csv = sphinx_csv
-        self.chronos_csv = chronos_csv
         self.lang = lang if lang in TEXT_RES else "en"
         self.txt = TEXT_RES[self.lang]
-        
-        self.df_timeline = None
-        self.df_aion = None
-        self.df_pandora = None
-        self.df_plutos = None
-        self.df_sphinx = None
-        self.df_chronos = None
+        self.df_timeline = self._safe_load(timeline_csv, "Timeline")
+        self.df_aion     = self._safe_load(aion_csv, "AION")
+        self.df_pandora  = self._safe_load(pandora_csv, "Pandora")
+        self.df_plutos   = self._safe_load(plutos_csv, "Plutos")
+        self.df_sphinx   = self._safe_load(sphinx_csv, "Sphinx")
+        self.df_chronos  = self._safe_load(chronos_csv, "Chronos")
 
-    def load_all(self):
-        print(f"[*] Hekate is gathering threads (Language: {self.lang.upper()})...")
-        
-        # 1. Timeline
-        try:
-            self.df_timeline = pl.read_csv(self.timeline_csv, ignore_errors=True)
-            print(f"  [+] Timeline: Loaded {len(self.df_timeline)} events.")
-        except Exception as e:
-            print(f"  [!] Critical: Failed to load Timeline ({e})")
-            sys.exit(1)
-
-        # 2. AION
-        if self.aion_csv and Path(self.aion_csv).exists():
+    def _safe_load(self, path, name):
+        if path and Path(path).exists():
             try:
-                self.df_aion = pl.read_csv(self.aion_csv, ignore_errors=True)
-                print(f"  [+] AION: Loaded {len(self.df_aion)} persistence items.")
-            except: pass
+                df = pl.read_csv(path, ignore_errors=True, infer_schema_length=0)
+                print(f"  [+] {name}: Loaded {len(df)} records.")
+                return df
+            except: return None
+        return None
 
-        # 3. Pandora
-        if self.pandora_csv and Path(self.pandora_csv).exists():
-            try:
-                self.df_pandora = pl.read_csv(self.pandora_csv, ignore_errors=True)
-                print(f"  [+] Pandora: Loaded {len(self.df_pandora)} ghosts.")
-            except: pass
+    def weave_storyline(self):
+        print("[*] Weaving the Anomalous Storyline with MFT-Correlated evidence...")
+        parts = []
 
-        # 4. Plutos
-        if self.plutos_csv and Path(self.plutos_csv).exists():
-            try:
-                self.df_plutos = pl.read_csv(self.plutos_csv, ignore_errors=True)
-                print(f"  [+] Plutos: Loaded {len(self.df_plutos)} exfil artifacts.")
-            except: pass
+        # Chronos
+        if self.df_chronos is not None and len(self.df_chronos) > 0:
+            ts_col = next((c for c in ["Created0x10", "si_dt", "Timestamp_UTC"] if c in self.df_chronos.columns), None)
+            if ts_col:
+                parts.append(self.df_chronos.select([
+                    pl.col(ts_col).alias("Time"), pl.lit("Chronos").alias("Module"),
+                    pl.format("{} (Score: {}) in {}", "Anomaly_Time", "Chronos_Score", "FileName").alias("Desc")
+                ]))
+
+        # AION: [FIX] 堅牢なヌルチェックを追加っス！
+        if self.df_aion is not None and len(self.df_aion) > 0:
+            time_col = next((c for c in ["Last_Executed_Time", "Timestamp_UTC"] if c in self.df_aion.columns), None)
+            if time_col:
+                # 時刻があるものだけストーリーラインへ、無いものは詳細セクションへ
+                df_timed = self.df_aion.filter(pl.col(time_col).is_not_null())
+                if not df_timed.is_empty():
+                    parts.append(df_timed.select([
+                        pl.col(time_col).alias("Time"),
+                        pl.lit("AION").alias("Module"),
+                        pl.format("Persist: {} in {} ({})", 
+                                  "Target_FileName", "Entry_Location", "AION_Tags").alias("Desc")
+                    ]))
+
+        # Plutos:
+        if self.df_plutos is not None and len(self.df_plutos) > 0:
+            ts_col = next((c for c in ["SourceModified", "Timestamp", "Timestamp_UTC"] if c in self.df_plutos.columns), None)
+            if ts_col:
+                parts.append(self.df_plutos.select([
+                    pl.col(ts_col).alias("Time"), pl.lit("Plutos").alias("Module"),
+                    pl.format("Exfil/Access: {} ({})", "Target_FileName", "Plutos_Verdict").alias("Desc")
+                ]))
+
+        # Sphinx:
+        if self.df_sphinx is not None and len(self.df_sphinx) > 0:
+            ts_col = next((c for c in ["TimeCreated", "Timestamp", "Timestamp_UTC"] if c in self.df_sphinx.columns), None)
+            if ts_col:
+                parts.append(self.df_sphinx.select([
+                    pl.col(ts_col).alias("Time"), pl.lit("Sphinx").alias("Module"),
+                    pl.format("Decoded: {} ({})", "Decoded_Hint", "Sphinx_Tags").alias("Desc")
+                ]))
+
+        if parts:
+            res = pl.concat(parts).sort("Time")
+            print(f"  [+] Storyline: Successfully woven {len(res)} events.")
+            return res
+        return None
+
+    def generate_grimoire(self, output_path):
+        t = self.txt
+        has_chronos = self.df_chronos is not None and len(self.df_chronos) > 0
+        has_aion    = self.df_aion is not None and len(self.df_aion) > 0
+        has_exfil   = self.df_plutos is not None and len(self.df_plutos) > 0
+        has_sphinx  = self.df_sphinx is not None and len(self.df_sphinx) > 0
+
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(f"# {t['title']}\n\n- **Generated:** {datetime.datetime.now()}\n- {t['intro']}\n\n")
             
-        # 5. Sphinx
-        if self.sphinx_csv and Path(self.sphinx_csv).exists():
-            try:
-                self.df_sphinx = pl.read_csv(self.sphinx_csv, ignore_errors=True)
-                print(f"  [+] Sphinx: Loaded {len(self.df_sphinx)} decoded riddles.")
-            except: pass
+            # 0. Methodology
+            f.write(f"## {t['h1_legend']}\n{t['legend_desc']}\n\n")
+            f.write("### Modules:\n")
+            for m, desc in t['tool_list']: f.write(f"- **{m}**: {desc}\n")
+            f.write("\n### Tag Legend:\n")
+            for tag, desc in t['tag_legend']: f.write(f"- `{tag}`: {desc}\n")
 
-        # 6. Chronos (New!)
-        if self.chronos_csv and Path(self.chronos_csv).exists():
-            try:
-                self.df_chronos = pl.read_csv(self.chronos_csv, ignore_errors=True)
-                # Filter only actual anomalies if the CSV contains all checked files
-                # Assuming Chronos output contains an 'Anomaly_Score' or similar, or just lists anomalies.
-                # If it's a raw list, we take it all.
-                print(f"  [+] Chronos: Loaded {len(self.df_chronos)} time anomalies.")
-            except: pass
+            # 1. Summary
+            f.write(f"\n## {t['h1_summary']}\n\n| {t['h1_cols'][0]} | {t['h1_cols'][1]} | {t['h1_cols'][2]} |\n|---|---|---|\n")
+            if has_chronos: f.write(f"| Chronos | {t['status_crit']} | {len(self.df_chronos)} |\n")
+            if has_aion:    f.write(f"| AION | {t['status_crit']} | {len(self.df_aion)} |\n")
+            if has_exfil:   f.write(f"| Plutos | {t['status_crit']} | {len(self.df_plutos)} |\n")
+            if has_sphinx:  f.write(f"| Sphinx | {t['status_crit']} | {len(self.df_sphinx)} |\n\n")
 
-    def _generate_evid(self, row_struct):
-        src = str(row_struct.get('Source_File') or "")
-        ts = str(row_struct.get('Timestamp_UTC') or "")
-        act = str(row_struct.get('Action') or "")
-        seed = f"{src}_{ts}_{act}"
-        h = hashlib.md5(seed.encode()).hexdigest()[:4].upper()
-        atype = str(row_struct.get('Artifact_Type') or "UNK")[:4].upper()
-        return f"EVID-{atype}-{h}"
+            # 2. Storyline
+            df_story = self.weave_storyline()
+            if df_story is not None:
+                f.write(f"## {t['h2_story']}\n> {t['desc_story']}\n\n| {t['col_time']} | {t['col_mod']} | {t['col_desc']} |\n|---|---|---|\n")
+                for row in df_story.iter_rows(named=True):
+                    f.write(f"| {row['Time']} | **{row['Module']}** | {row['Desc']} |\n")
 
-    def _generate_verify_cmd(self, artifact_type, source_file, target_path):
-        source = str(source_file or "").replace("\\", "\\\\")
-        atype = str(artifact_type or "").upper()
-        if "PREFETCH" in atype: return f'PECmd.exe -f "{source}" --json .'
-        elif "USER_ASSIST" in atype or "USERASSIST" in atype: return f'RECmd.exe -f "{source}" --bn'
-        elif "AMCACHE" in atype: return f'AmcacheParser.exe -f "{source}" --csv .'
-        elif "RECENT" in atype or "DOCS" in atype: return f'LECmd.exe -f "{source}" --csv .'
-        elif "MFT" in atype: return f'MFTCmd.exe -f "{source}" --csv .'
-        elif "REGISTRY" in atype: return f'RECmd.exe -f "{source}" --csv .'
-        return "Manual Verify"
+            # 3. Details
+            f.write(f"\n## {t['h2_threats']}\n\n")
+            if has_aion:
+                f.write(f"### {t['h3_persist']}\n| Score | Target | Location | Path |\n|---|---|---|---|\n")
+                # 時刻の有無に関わらず、上位スコアを表示っス！
+                for r in self.df_aion.sort("AION_Score", descending=True).head(15).iter_rows(named=True):
+                    f.write(f"| **{r['AION_Score']}** | {r['Target_FileName']} | {r['Entry_Location']} | `{r['Full_Path']}` |\n")
 
-    def weave_intent(self):
-        print("[*] Weaving Intent & Generating Verification Traces...")
-        self.df_timeline = self.df_timeline.with_columns([
-            pl.struct(["Artifact_Type", "Source_File", "Timestamp_UTC", "Action"])
-            .map_elements(self._generate_evid, return_dtype=pl.Utf8)
-            .alias("Evidence_ID"),
-            
-            pl.struct(["Artifact_Type", "Source_File", "Target_Path"])
-            .map_elements(lambda x: self._generate_verify_cmd(x.get("Artifact_Type"), x.get("Source_File"), x.get("Target_Path")), return_dtype=pl.Utf8)
-            .alias("Verify_Cmd")
-        ])
+            if has_sphinx:
+                f.write(f"\n### {t['h3_sphinx']}\n| Score | Tags | Hint |\n|---|---|---|\n")
+                for r in self.df_sphinx.sort("Sphinx_Score", descending=True).head(5).iter_rows(named=True):
+                    f.write(f"| **{r['Sphinx_Score']}** | {r['Sphinx_Tags']} | {r['Decoded_Hint']} |\n")
 
-    def generate_grimoire(self, output_path, max_rows=100):
-        print(f"[*] Writing the Grimoire to: {output_path}")
-        t = self.txt 
-        
-        try:
-            with open(output_path, "w", encoding="utf-8") as f:
-                # Header
-                f.write(f"# 🧵 {t['title']}\n\n")
-                f.write(f"**Generated:** {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write(f"**Concept:** {t['concept']}\n\n")
-                
-                # 1. Summary
-                f.write(f"## {t['h1_summary']}\n\n")
-                headers = t['h1_cols']
-                f.write(f"| {headers[0]} | {headers[1]} | {headers[2]} |\n")
-                f.write("|---|---|---|\n")
-                
-                # AION
-                aion_count = len(self.df_aion) if self.df_aion is not None else 0
-                aion_st = t['status_crit'] if aion_count > 0 else t['status_clean']
-                f.write(f"| **AION** | {aion_st} | **{aion_count}** items |\n")
-                
-                # Pandora
-                ghost_count = len(self.df_pandora) if self.df_pandora is not None else 0
-                pan_st = t['status_crit'] if ghost_count > 0 else t['status_clean']
-                f.write(f"| **Pandora** | {pan_st} | **{ghost_count}** items |\n")
+            f.write(f"\n---\n*End of SkiaHelios Report.*")
 
-                # Plutos
-                exfil_count = len(self.df_plutos) if self.df_plutos is not None else 0
-                plu_st = t['status_crit'] if exfil_count > 0 else t['status_clean']
-                f.write(f"| **Plutos** | {plu_st} | **{exfil_count}** items |\n")
-
-                # Chronos (New!)
-                chronos_count = len(self.df_chronos) if self.df_chronos is not None else 0
-                chronos_st = t['status_crit'] if chronos_count > 0 else t['status_clean']
-                f.write(f"| **Chronos** | {chronos_st} | **{chronos_count}** items |\n")
-
-                # Sphinx
-                sphinx_count = len(self.df_sphinx) if self.df_sphinx is not None else 0
-                sphinx_st = t['status_crit'] if sphinx_count > 0 else t['status_clean']
-                f.write(f"| **Sphinx** | {sphinx_st} | **{sphinx_count}** items |\n")
-                f.write("\n")
-
-                # 2. Threats
-                f.write(f"## {t['h2_threats']}\n")
-                f.write(f"> {t['desc_threats']}\n\n")
-                
-                if exfil_count > 0:
-                    f.write(f"### {t['h3_exfil']}\n")
-                    f.write(f"| Time | File | {t['col_verdict']} | {t['col_drive']} |\n")
-                    f.write("|---|---|---|---|\n")
-                    for row in self.df_plutos.head(5).iter_rows(named=True):
-                        f.write(f"| {row.get('SourceModified','')} | **{row.get('Target_FileName','')}** | {row.get('Plutos_Verdict','')} | {row.get('LocalPath','')} |\n")
-                    f.write("\n")
-
-                if chronos_count > 0:
-                    f.write(f"### {t['h3_time']}\n")
-                    f.write(f"| File Name | {t['col_variance']} | $SI (Standard Info) |\n")
-                    f.write("|---|---|---|\n")
-                    for row in self.df_chronos.head(5).iter_rows(named=True):
-                        # Adapting to Chronos CSV structure
-                        fname = row.get('FileName', 'Unknown')
-                        var = row.get('Variance_ns', 'N/A')
-                        si_time = row.get('SI_CreationTime', 'N/A')
-                        f.write(f"| **{fname}** | {var} | {si_time} |\n")
-                    f.write("\n")
-
-                if aion_count > 0:
-                    f.write(f"### {t['h3_persist']}\n")
-                    f.write(f"| Score | File | {t['col_tags']} |\n")
-                    f.write("|---|---|---|\n")
-                    for row in self.df_aion.sort("AION_Score", descending=True).head(5).iter_rows(named=True):
-                        f.write(f"| **{row.get('AION_Score')}** | {row.get('Target_FileName')} | {row.get('AION_Tags')} |\n")
-                    f.write("\n")
-
-                if ghost_count > 0:
-                    f.write(f"### {t['h3_ghost']}\n")
-                    f.write(f"| Risk | Ghost File | {t['col_path']} |\n")
-                    f.write("|---|---|---|\n")
-                    for row in self.df_pandora.filter(pl.col("Risk_Tag") != "").head(5).iter_rows(named=True):
-                        f.write(f"| **{row.get('Risk_Tag')}** | {row.get('Ghost_FileName')} | `{row.get('ParentPath')}` |\n")
-                    f.write("\n")
-
-                if sphinx_count > 0:
-                    f.write(f"### {t['h3_sphinx']}\n")
-                    f.write(f"| Score | {t['col_hint']} | {t['col_tags']} |\n")
-                    f.write("|---|---|---|\n")
-                    for row in self.df_sphinx.sort("Sphinx_Score", descending=True).head(5).iter_rows(named=True):
-                        hint = row.get('Decoded_Hint', 'N/A')
-                        if len(hint) > 50: hint = hint[:50] + "..."
-                        f.write(f"| **{row.get('Sphinx_Score')}** | `{hint}` | {row.get('Sphinx_Tags')} |\n")
-                    f.write("\n")
-                
-                f.write("---\n\n")
-
-                # 3. Timeline
-                f.write(f"## {t['h3_timeline']}\n")
-                f.write(f"> {t['desc_timeline'].format(max_rows)}\n\n")
-                f.write(f"| EVID | Time (Local) | Type | Action | Tag | {t['col_cmd']} |\n")
-                f.write("|---|---|---|---|---|---|\n")
-                
-                target_df = self.df_timeline.filter(pl.col("Tag").is_not_null())
-                total_tagged = len(target_df)
-                
-                if total_tagged == 0:
-                    target_df = self.df_timeline.tail(max_rows)
-                else:
-                    target_df = target_df.head(max_rows)
-                
-                for row in target_df.iter_rows(named=True):
-                    evid = row.get('Evidence_ID', '')
-                    ts = row.get('Timestamp_Local', '')
-                    atype = row.get('Artifact_Type', '')
-                    action = str(row.get('Action', ''))[:50].replace("|", " ")
-                    tag = f"**{row.get('Tag')}**" if row.get('Tag') else ""
-                    cmd = str(row.get('Verify_Cmd', ''))
-                    if len(cmd) > 20: cmd = "`Cmd`"
-                    else: cmd = f"`{cmd}`"
-
-                    f.write(f"| **{evid}** | {ts} | {atype} | {action} | {tag} | {cmd} |\n")
-
-                if total_tagged > max_rows:
-                    f.write(f"\n> **{t['more_events'].format(total_tagged - max_rows)}**\n")
-
-            print(f"[+] Grimoire sealed successfully ({self.lang.upper()} Mode).")
-            
-        except Exception as e:
-            print(f"[!] Failed to write report: {e}")
-
-def main():
+def main(argv=None):
     print_logo()
-    parser = argparse.ArgumentParser(description="SH_HekateWeaver v2.4")
-    parser.add_argument("-i", "--input", required=True, help="Input ChaosGrasp Timeline CSV")
-    parser.add_argument("-o", "--out", default="Hekate_Grimoire.md", help="Output Markdown Report")
-    
-    parser.add_argument("--aion", help="Input AION Persistence CSV")
-    parser.add_argument("--pandora", help="Input Pandora Ghost CSV")
-    parser.add_argument("--plutos", help="Input Plutos Exfiltration CSV")
-    parser.add_argument("--sphinx", help="Input Sphinx Decoded CSV")
-    parser.add_argument("--chronos", help="Input Chronos Time Verification CSV") # Added!
-    
-    # Language Toggle
-    parser.add_argument("--lang", choices=["en", "jp"], default="en", help="Report Language (en/jp)")
-    
-    args = parser.parse_args()
-    
-    if not Path(args.input).exists():
-        print(f"[!] Input timeline not found: {args.input}")
-        sys.exit(1)
-
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-i", "--input", required=True, help="Master Timeline CSV (Chaos)")
+    parser.add_argument("-o", "--out", default="Final_Grimoire.md")
+    parser.add_argument("--aion"); parser.add_argument("--pandora"); parser.add_argument("--plutos"); parser.add_argument("--sphinx"); parser.add_argument("--chronos")
+    parser.add_argument("--lang", default="en")
+    args = parser.parse_args(argv)
     weaver = HekateWeaver(args.input, args.aion, args.pandora, args.plutos, args.sphinx, args.chronos, args.lang)
-    weaver.load_all()
-    weaver.weave_intent()
-    weaver.generate_grimoire(args.out, max_rows=100)
+    weaver.generate_grimoire(args.out)
 
 if __name__ == "__main__":
     main()
