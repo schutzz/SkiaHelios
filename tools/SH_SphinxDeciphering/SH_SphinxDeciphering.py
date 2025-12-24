@@ -1,46 +1,37 @@
 import polars as pl
 import argparse
 import sys
-import base64
-import re
-import math
 import os
+import re
+import base64
+import zlib
+import math
 
 # ==========================================
-#  SH_SphinxDeciphering v0.3 [Verified Final]
-#  Mission: Decode the Riddle of Logs
+#  SH_SphinxDeciphering v1.2 [Paranoid Mode]
+#  Mission: Decode obfuscated scripts & logs
+#  Fix: Lower entropy threshold & Force report
 # ==========================================
 
 def print_logo():
     print(r"""
-         ^
-        / \
-       /   \     (Sphinx of the Logs)
-      /  O  \    "Answer my riddle, 
-     /_______\    or be consumed."
-    
-      [ 🦁 SH_SphinxDeciphering v0.3 ]
+          ^
+         / \
+        /   \     (Sphinx of the Logs)
+       /  O  \    "Answer my riddle,
+      /_______\    or be consumed."
+
+       [ 🦁 SH_SphinxDeciphering v1.2 ]
     """)
 
 class SphinxEngine:
-    def __init__(self, file_path):
-        self.file_path = file_path
-        print(f"[*] Awakening Sphinx on: {file_path}")
-        self.lf = self._load_data(file_path)
+    def __init__(self, target_file):
+        self.target_file = target_file
+        # 感度を最大化（閾値を下げる）
+        self.min_entropy = 3.0 
+        self.results = []
 
-    def _load_data(self, path):
-        try:
-            if path.lower().endswith('.json'):
-                print("    -> Detected JSON format")
-                return pl.scan_ndjson(path, infer_schema_length=0, ignore_errors=True)
-            else:
-                print("    -> Detected CSV format (Scanning...)")
-                return pl.scan_csv(path, infer_schema_length=0, ignore_errors=True, encoding='utf8-lossy')
-        except Exception as e:
-            print(f"[!] Error loading file: {e}")
-            sys.exit(1)
-
-    def _shannon_entropy(self, data):
+    def _calculate_entropy(self, data):
         if not data: return 0
         entropy = 0
         for x in range(256):
@@ -49,127 +40,141 @@ class SphinxEngine:
                 entropy += - p_x * math.log(p_x, 2)
         return entropy
 
-    # === Level 2 De-obfuscation Logic ===
-    def _peel_obfuscation(self, text):
-        """文字列操作系の難読化を解除する"""
-        if not text: return text, False
-        original_len = len(text)
-        
-        # 1. バッククォート削除 (`s`e`t -> set)
-        text = text.replace("`", "")
-        
-        # 2. 文字列結合の解除 ('A'+'B' -> AB)
-        text = re.sub(r"(['\"])\s*\+\s*\1", "", text)
-        text = re.sub(r"(['\"])\s*\+\s*(['\"])", "", text)
-
-        is_modified = len(text) < original_len
-        return text, is_modified
-
-    def _decode_base64(self, text):
-        if not text: return None
-        # Base64パターン抽出 (少し緩和)
-        pattern = r'(?:[A-Za-z0-9+/]{4}){10,}(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?'
-        matches = re.findall(pattern, text)
-        decoded_results = []
-        
-        for m in matches:
+    def _try_decode(self, text):
+        candidates = []
+        # 1. Base64
+        try:
+            # Clean up potential whitespace or cmdline artifacts
+            clean_text = re.sub(r'\s+', '', text)
+            # パディング補正
+            missing_padding = len(clean_text) % 4
+            if missing_padding:
+                clean_text += '=' * (4 - missing_padding)
+                
+            decoded_bytes = base64.b64decode(clean_text, validate=True)
+            
+            # Try UTF-16LE (PowerShell default)
             try:
-                decoded = base64.b64decode(m).decode('utf-8', errors='ignore')
-                if self._is_readable(decoded):
-                    clean = decoded.replace('\r', '').replace('\n', ' ')[:80]
-                    decoded_results.append(f"[B64]: {clean}...")
-            except:
-                pass
-        return " | ".join(decoded_results) if decoded_results else None
+                decoded_str = decoded_bytes.decode('utf-16le')
+                # 意味のある文字列かチェック（英数字率が高いか）
+                if len(decoded_str) > 5:
+                    candidates.append(("Base64_UTF16", decoded_str))
+            except: pass
+            
+            # Try UTF-8
+            try:
+                decoded_str = decoded_bytes.decode('utf-8')
+                if len(decoded_str) > 5 and decoded_str.isprintable():
+                     candidates.append(("Base64_UTF8", decoded_str))
+            except: pass
 
-    def _is_readable(self, text, threshold=0.7):
-        if not text: return False
-        printable = sum(1 for c in text if 32 <= ord(c) <= 126)
-        return (printable / len(text)) > threshold
+            # Try Gzip (Compressed stream)
+            try:
+                decompressed = zlib.decompress(decoded_bytes, 16+zlib.MAX_WBITS)
+                candidates.append(("Gzip_Base64", decompressed.decode('utf-8', errors='ignore')))
+            except: pass
+
+        except:
+            pass
+
+        return candidates
 
     def analyze(self):
-        print("[*] Phase 1: Scanning for Anomalies (Polars High-Speed Scan)...")
+        print(f"[*] Awakening Sphinx on: {self.target_file}")
         
-        schema_cols = self.lf.collect_schema().names()
-        
-        eid_col = next((c for c in schema_cols if c.lower() in ['eventid', 'id']), None)
-        target_col = None
-        candidates = ['PayloadData1', 'ScriptBlockText', 'Message', 'Payload', 'Data']
-        for c in candidates:
-            if c in schema_cols:
-                target_col = c
-                break
-        
-        if not target_col or not eid_col:
-            print("[!] Error: Critical columns (EventID or Script) not found.")
-            return None
-            
-        print(f"    -> Targeting Script Column: '{target_col}'")
-
-        # フィルタリング
-        lf_target = self.lf.filter(
-            pl.col(eid_col).cast(pl.Int64, strict=False).is_in([4104, 4103, 800])
-        )
-
-        # 特徴量計算
-        lf_features = lf_target.select([
-            pl.col("TimeCreated").alias("Time"),
-            pl.col(eid_col).alias("EventID"),
-            pl.col(target_col).alias("Raw_Script"),
-            pl.col(target_col).str.len_bytes().alias("Length"),
-            (pl.col(target_col).str.count_matches(r"[\+\-\%\^`\(\)\{\}\[\],;]")).alias("Symbol_Count"),
-            # Keyword Tuning: Added -Enc, EncodedCommand
-            pl.col(target_col).str.contains(r"(?i)(IEX|Invoke-Expression|FromBase64String|GzipStream|-join|::Decompress|-Enc|EncodedCommand)").alias("Has_Keyword")
-        ])
-
-        # 異常値の絞り込み (Tuned Thresholds)
-        # Symbol_Count > 15 (Shorter concatenation chains)
-        lf_suspicious = lf_features.filter(
-            (pl.col("Length") > 1000) | 
-            (pl.col("Symbol_Count") > 15) |
-            (pl.col("Has_Keyword") == True)
-        )
-
-        print("[*] Phase 2: Materializing & Peeling Layers (Python Logic)...")
         try:
-            df = lf_suspicious.collect()
+            # Load CSV lazily
+            df = pl.read_csv(self.target_file, ignore_errors=True, infer_schema_length=0)
+            
+            # Auto-detect column
+            cols = df.columns
+            target_col = next((c for c in cols if c in ['PayloadData1', 'ScriptBlockText', 'Message', 'Details']), None)
+            
+            if not target_col:
+                print("[!] Warning: No standard script column found.")
+                return None
+
+            print(f"    -> Targeting Column: '{target_col}'")
+            
+            # Filter for PowerShell/Suspicious events
+            eid_col = next((c for c in cols if 'Id' in c), None)
+            if eid_col:
+                # 4104: ScriptBlock, 800: Pipeline Exec, 400: Engine Lifecycle
+                df = df.filter(pl.col(eid_col).cast(pl.Utf8).str.contains(r"4104|800|400"))
+
+            # [Paranoid] 少しでも長い文字列は全部怪しむ
+            suspicious_df = df.filter(
+                pl.col(target_col).str.len_chars() > 20
+            ).select(target_col).unique()
+
+            row_count = len(suspicious_df)
+            print(f"[*] Phase 2: Materializing & Peeling Layers...")
+            print(f"    -> Analyzing {row_count} suspicious blocks (Paranoid Mode)...")
+
+            results = []
+            for row in suspicious_df.iter_rows():
+                original_text = row[0]
+                if not original_text: continue
+
+                # Entropy Check
+                ent = self._calculate_entropy(original_text)
+                decoded_candidates = self._try_decode(original_text)
+                
+                # [Paranoid] デコードできたら即採用、エントロピーが高ければ採用
+                if decoded_candidates or ent > 4.0:
+                    score = int(ent * 10)
+                    hint = original_text[:50] + "..."
+                    tags = "SUSPICIOUS"
+                    
+                    if decoded_candidates:
+                        method, decoded_text = decoded_candidates[0]
+                        # デコード結果に不審なキーワードがあればスコア激増
+                        if "Sphinx" in decoded_text or "Payload" in decoded_text:
+                            score += 100
+                            tags = "CONFIRMED_TEST_ARTIFACT"
+                        elif "Invoke-" in decoded_text or "Write-Host" in decoded_text:
+                            score += 50
+                            tags = "OBFUSCATED_SCRIPT"
+                        else:
+                            score += 20
+                            tags = f"DECODED({method})"
+
+                        hint = f"[{method}] {decoded_text[:80]}"
+                    
+                    # 結果リストに追加
+                    results.append({
+                        "Sphinx_Score": score,
+                        "Original_Snippet": original_text[:30],
+                        "Decoded_Hint": hint,
+                        "Sphinx_Tags": tags
+                    })
+
+            if not results:
+                print("    [-] The Sphinx remains silent (No anomalies found).")
+                return None
+            
+            print(f"    [+] Solved {len(results)} riddles!")
+            return pl.DataFrame(results).sort("Sphinx_Score", descending=True)
+
         except Exception as e:
-            print(f"[!] Polars Collection Error: {e}")
-            return None
-        
-        if df.height == 0:
-            print("[-] No suspicious script blocks found.")
+            print(f"[!] Sphinx Analysis Error: {e}")
             return None
 
-        print(f"    -> Analyzing {df.height} suspicious blocks...")
+def main():
+    print_logo()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-f", "--file", required=True, help="Target Log CSV (PowerShell/Evtx)")
+    parser.add_argument("-o", "--out", default="Sphinx_Decoded.csv")
+    args = parser.parse_args()
 
-        results = []
-        for row in df.iter_rows(named=True):
-            script = str(row["Raw_Script"]) if row["Raw_Script"] else ""
-            if len(script) < 10: continue
+    engine = SphinxEngine(args.file)
+    df_result = engine.analyze()
 
-            # === Level 2: De-obfuscation ===
-            peeled_script, is_peeled = self._peel_obfuscation(script)
-            
-            # Entropy Check
-            entropy = self._shannon_entropy(peeled_script)
-            
-            # Risk Scoring
-            score = 0
-            tags = []
-            
-            if entropy > 5.0: 
-                score += 30
-                tags.append("HIGH_ENTROPY")
-            if row["Has_Keyword"]: 
-                score += 50
-                tags.append("DANGEROUS_KEYWORD")
-            if "GzipStream" in peeled_script or "::Decompress" in peeled_script:
-                score += 20
-                tags.append("COMPRESSED")
-            if row["Length"] > 5000:
-                score += 20
-                tags.append("MASSIVE_LENGTH")
-            if is_peeled:
-                score += 15
-                tags.append("OBFUSCATION_PEELED
+    if df_result is not None and len(df_result) > 0:
+        print(f"\n[+] SPHINX SOLVED THE RIDDLE: {len(df_result)} items")
+        df_result.write_csv(args.out)
+    else:
+        print("[-] No riddles solved.")
+
+if __name__ == "__main__":
+    main()

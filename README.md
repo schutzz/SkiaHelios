@@ -122,5 +122,26 @@ pip install -r requirements.txt
 python SH_HeliosConsole.py
 ```
 
+# 🦁 SkiaHelios v2.5 (Chimera Update)
+
+> **"Ex Umbra in Solem" - From Shadow into Light.**
+
+SkiaHelios is an automated DFIR triage suite designed for rapid artifact analysis and timeline reconstruction.
+
+## 🏆 Validated Capabilities (Operation Chimera)
+Tested against **Atomic Red Team** simulation (Windows 10 Enterprise).
+
+| Module | Function | Detection Status | Notes |
+|---|---|---|---|
+| **AION** | Persistence Hunter | **🔴 CRITICAL** | Detected **WMI Event Subscription (T1546.003)** & Hidden RunKeys. |
+| **Chronos** | Time Verification | **🔴 CRITICAL** | Detected **Timestomping (T1070.006)** via `$MFT` attribute mismatch. *(High Sensitivity)* |
+| **Sphinx** | Script Deciphering | **🔴 CRITICAL** | Decoded obfuscated **PowerShell (Base64)** payloads from Event Logs. |
+| **Plutos** | Exfiltration Tracker | **🔴 CRITICAL** | Identified data theft via **OneDrive** & USB devices. |
+| **Pandora** | Ghost Detection | **🔴 CRITICAL** | Recovered deleted artifacts via USN Journal analysis. |
+
+## ⚠️ Known Limitations
+* **Chronos Sensitivity:** Currently flagged 40,000+ time anomalies in a standard environment due to strict `$SI` vs `$FN` comparison. Requires manual filtering for system files (Future v3.0 update planned).
+* **Offline Analysis:** The `AION` module requires raw CSV input from `autorunsc.exe` (Sysinternals) executed within the target environment for maximum accuracy.
+
 ---
 *Developed by schutzz. Targeted for SANS FOR500 CTF Challenge Coin.*
