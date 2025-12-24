@@ -70,35 +70,35 @@ SkiaHelios/
     └── SH_HekateWeaver/    ... Report Generator (The Narrative)
 ```
 
-## 🛠️ Module Lineup (v2.3)
+## 🛠️ Module Lineup (v2.6 [Correlation Edition])
 
 ### 1. SH_ChaosGrasp (The Chaos)
 * **Mission**: Master Timeline Construction.
-* **Function**: Aggregates disparate artifacts (MFT, USN, EventLogs, Prefetch, Registry) into a single, normalized timeline using Polars Streaming.
+* **Function**: Aggregates MFT, USN, EventLogs, and Registry into a normalized timeline using Polars Streaming.
 
 ### 2. SH_ChronosSift (The Time)
 * **Mission**: Detect Temporal Anomalies.
-* **Function**: Compares `$STANDARD_INFORMATION` vs `$FILE_NAME` timestamps at nanosecond precision to detect **Timestomping**.
+* **Function**: Compares $SI vs $FN timestamps to detect **Timestomping**. (Today: Identified 14 anomalies).
 
 ### 3. SH_AIONDetector (The Eternity)
-* **Mission**: Persistence Analysis.
-* **Function**: Hunts for persistence mechanisms (WMI, RunKeys, Services) and scores them based on "Live off the Land" (LoLBin) usage.
+* **Mission**: MFT-Correlated Persistence Analysis.
+* **Function**: Hunts for WMI, RunKeys, and Services. **v2.6**: Correlates entries with MFT for an absolute timeline. (Today: 48 items).
 
 ### 4. SH_PandorasLink (The Space)
 * **Mission**: Reveal the "Absence".
-* **Function**: Cross-references **Live MFT** vs **USN Journal** vs **VSS** to reconstruct deleted "Ghost" files and tag them with risk levels.
+* **Function**: Cross-references Live MFT vs USN Journal to reconstruct deleted "Ghost" files.
 
 ### 5. SH_PlutosGate (The Boundary)
 * **Mission**: Exfiltration Verification.
-* **Function**: Correlates "Ghost" files with **USB connection history** and **Network traffic** to prove data exfiltration (e.g., files accessed on mounted VHDX).
+* **Function**: Correlates "Ghost" files with USB and SRUM logs. (Today: Captured OneDrive exfiltration).
 
 ### 6. SH_SphinxDeciphering (The Riddle)
 * **Mission**: Obfuscation Decoding.
-* **Function**: Decodes obfuscated PowerShell scripts and ADS payloads using Entropy analysis, Base64/Gzip decompression, and string peeling.
+* **Function**: Decodes PowerShell payloads using Entropy analysis. (Today: 4 riddles solved).
 
 ### 7. SH_HekateWeaver (The Grand Weaver)
-* **Mission**: The Grimorie (Report) Generation.
-* **Function**: Weaves all findings into a human-readable Markdown report. Supports **Bilingual Output (EN/JP)** for team consensus.
+* **Mission**: The Grimoire (Report) Generation.
+* **Function**: Weaves findings into a bilingual narrative. **v2.6**: High null-resilience for incomplete artifacts.
 
 ---
 
@@ -140,20 +140,20 @@ python SH_HeliosConsole.py
 
 SkiaHelios is an automated DFIR triage suite designed for rapid artifact analysis and timeline reconstruction.
 
-## 🏆 Validated Capabilities (Operation Chimera)
-Tested against **Atomic Red Team** simulation (Windows 10 Enterprise).
+## 🏆 Validated Capabilities (v2.6 Correlation)
+**Operation Chimera** (2025-12-24 最新検証結果)
 
 | Module | Function | Detection Status | Notes |
 |---|---|---|---|
-| **AION** | Persistence Hunter | **🔴 CRITICAL** | Detected **WMI Event Subscription (T1546.003)** & Hidden RunKeys. |
-| **Chronos** | Time Verification | **🔴 CRITICAL** | Detected **Timestomping (T1070.006)** via `$MFT` attribute mismatch. *(High Sensitivity)* |
-| **Sphinx** | Script Deciphering | **🔴 CRITICAL** | Decoded obfuscated **PowerShell (Base64)** payloads from Event Logs. |
-| **Plutos** | Exfiltration Tracker | **🔴 CRITICAL** | Identified data theft via **OneDrive** & USB devices. |
-| **Pandora** | Ghost Detection | **🔴 CRITICAL** | Recovered deleted artifacts via USN Journal analysis. |
+| **AION** | Persistence | **🔴 CRITICAL** | 48件の永続化特定。MFT相関で登録時刻確定。 |
+| **Chronos** | Time Audit | **🔴 CRITICAL** | 14件の **TIMESTOMP_BACKDATE** を特定。 |
+| **Sphinx** | Deciphering | **🔴 CRITICAL** | 4件の難読化解除。不審な **sc.exe** 挙動を特定。 |
+| **Plutos** | Exfiltration | **🔴 CRITICAL** | 5件の流出追跡。**OneDrive** 経由を捕捉。 |
+| **Pandora** | Ghost Hunt | **🔴 CRITICAL** | 削除済み攻撃スクリプトの復元に成功。 |
 
-## ⚠️ Known Limitations
-* **Chronos Sensitivity:** Currently flagged 40,000+ time anomalies in a standard environment due to strict `$SI` vs `$FN` comparison. Requires manual filtering for system files (Future v3.0 update planned).
-* **Offline Analysis:** The `AION` module requires raw CSV input from `autorunsc.exe` (Sysinternals) executed within the target environment for maximum accuracy.
+## ⚠️ Known Limitations & Roadmap
+* **Noise Reduction**: v3.0 で $SI/$FN 矛盾の自動フィルタリングを実装。
+* **Persistence**: 最大精度にはautorunsc.exeのCSV入力が必要。
 
 ---
 
