@@ -1,0 +1,22 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.so
+
+# Data & Logs (Evidence)
+*.csv
+*.log
+*.evtx
+*.bin
+*.db
+*.dat
+
+# Output Directories
+Helios_Output/
+Chaos_ART_Final/
+Chaos_ART_Final_out/
+C:\Temp\
+
+# System
+.DS_Store
+Thumbs.db

@@ -1,0 +1,26 @@
+
+       ______   __       __  __   ______  ______   ______    
+      /\  == \ /\ \     /\ \/\ \ /\__  _\/\  __ \ /\  ___\   
+      \ \  _-/ \ \ \____\ \ \_\ \\/_/\ \/\ \ \/\ \\ \___  \  
+       \ \_\    \ \_____\\ \_____\  \ \_\ \ \_____\\/\_____\ 
+        \/_/     \/_____/ \/_____/   \/_/  \/_____/ \/_____/ 
+      
+          [ SH_PlutosGate v1.1 ]
+       "Exposing the escape routes of data."
+    
+    -> Linking with Pandora Ghost List: c:\Users\user\.gemini\antigravity\scratch\SkiaHelios\tools\SH_PlutosGate\pandora_test.csv
+[*] Initializing Plutos Gate on: c:\Users\user\.gemini\antigravity\scratch\SkiaHelios\tools\SH_PlutosGate\kape_dummy
+[*] Phase 1: Analyzing USB Exfiltration...
+    -> Found Lnk log: Lnk_test.csv
+[DEBUG] LNK Schema: ['SourceCreated', 'SourceModified', 'LocalPath', 'DriveType']
+[DEBUG] Filtered by DriveType. Count: 1
+
+[!] USB EXFILTRATION ARTIFACTS FOUND: 1
+------------------------------------------------------------
+[*] Phase 2: Profiling Network Traffic (SRUM)...
+    -> Found Srum log: Srum_test.csv
+
+[!] HIGH VOLUME TRAFFIC DETECTED (Top 5):
+------------------------------------------------------------
+
+[*] Analysis Complete. 'Ex Umbra in Solem'.
