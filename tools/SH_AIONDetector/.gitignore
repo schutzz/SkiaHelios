@@ -1,0 +1,26 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+
+# Sysinternals Binary (DO NOT COMMIT THIS)
+# License forbids redistribution
+autorunsc64.exe
+autorunsc.exe
+
+# Analysis Results & Logs (Evidence Protection)
+*.csv
+*.log
+aion_temp_scan.csv
+AION_Final_Report.csv
+
+# PyInstaller builds (if you make EXE)
+build/
+dist/
+*.spec
+
+# IDE settings
+.vscode/
+.idea/
