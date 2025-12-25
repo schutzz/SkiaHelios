@@ -51,12 +51,8 @@ graph TD
     %% Styles
     style Chronos stroke:#f00,stroke-width:2px
     style Hekate fill:#dfd,stroke:#333,stroke-width:2px
+```
 
----
-
-### 2. ディレクトリ構成 ～ 機能紹介（Key Features）
-
-```markdown
 ## 📂 Directory Structure
 
 ```text
@@ -102,51 +98,9 @@ SkiaHelios/
 ### 6. HekateWeaver (v3.3) - The Grand Weaver
 - **Grimoire Generation:** Compiles all findings into a single, narrative-driven Markdown report.
 - **Storyline Construction:** Merges anomalies from all modules into a coherent attack timeline.
----
-
-## SkiaHelios (The Shadow Sun) v2.6
-
-> **"Ex Umbra in Solem"** (From the Shadows into the Sun)
-
-SkiaHelios is a definitive DFIR suite for high-resolution analysis, 
-featuring MFT-correlated persistence hunting (AION v10.2).
-
-| Attack Vector | Traditional Tool Result | SkiaHelios Result |
-|---|---|---|
-| **Timestomping** (Kernel32.dll) | Missed (Looks normal) | **Detected** (Chronos: Nanosecond anomaly) |
-| **VHDX Exfiltration** (USB) | Generic Volume Access | **CONFIRMED_EXFILTRATION** (Plutos: USB+LNK correlation) |
-| **ADS Hiding** (Payload.bin) | Hidden | **Revealed & Decoded** (Pandora + Sphinx) |
-| **WMI Persistence** | Buried in Logs | **CRITICAL Alert** (AION: Score 16) |
-
-**Analysis Time Reduced:** 8 Hours (Manual) -> **5 Minutes (Full Auto Scan)**
 
 ---
 
-## 🛠️ Usage
-
-### 📦 Setup
-```bash
-git clone [https://github.com/schutzz/SkiaHelios.git](https://github.com/schutzz/SkiaHelios.git)
-cd SkiaHelios
-pip install -r requirements.txt
-
-### 🎮 Unified Console (Coin Slayer Mode)
-Launch the commander to orchestrate the full suite.
-
-```bash
-python SH_HeliosConsole.py
-```
-> Select **[9] FULL AUTO SCAN** to run the complete pipeline (Chaos -> Chronos -> AION -> Pandora -> Plutos -> Hekate).
-
-# SkiaHelios (The Shadow Sun) v2.6 [Correlation Edition]
-
-> **"Ex Umbra in Solem"** (From the Shadows into the Sun)
-
-**SkiaHelios** is a high-resolution DFIR suite designed to establish **"Absolute Coordinates"** in time and space. v2.6 introduces **MFT-Correlated Persistence Analysis**, enabling physical validation of infection timelines.
-
-### 3. 検証結果（Infect28） ～ インストール方法
-
-```markdown
 ## 🏆 Validated Capabilities (v3.3 Verification)
 **Operation Sun Shadow (Infect28)** - 2025-12-25 Validation Results
 
@@ -159,11 +113,15 @@ python SH_HeliosConsole.py
 
 ---
 
-### 4. コンソール実行例 ～ フッター
+## 🛠️ Usage
 
-ここが一番崩れやすいところっスね！慎重に貼ってくださいっス！
+### 📦 Setup
+```bash
+git clone [https://github.com/schutzz/SkiaHelios.git](https://github.com/schutzz/SkiaHelios.git)
+cd SkiaHelios
+pip install -r requirements.txt
+```
 
-```markdown
 ### 🎮 Unified Console (Coin Slayer Mode)
 Launch the commander to orchestrate the full suite.
 
@@ -189,8 +147,21 @@ Case Name: Infect28
 [*] Scanning artifacts in: C:\Temp\Case\out
 ...
 [*] ALL SYSTEMS GO. Grimoire woven at: Helios_Output\Infect28_20251225_XXXXXX
+```
+
+### Output
+Results are saved in `Helios_Output\<CaseName>_<Timestamp>\`:
+- `Grimoire_<Case>_en.md`: The final executive report.
+- `Master_Timeline.csv`: The complete event timeline.
+- `Time_Anomalies.csv`: List of timestomped files.
+- `Persistence_Report.csv`: Detected persistence mechanisms.
+- `Exfil_Report_Network.csv`: Suspicious network traffic.
 
 ---
 
-*Targeted for SANS FOR500 CTF Challenge Coin.*
-*Developed by schutzz.*
+## 📦 Requirements
+- Python 3.10+
+- Polars (`pip install polars`)
+
+## 🛡️ License
+MIT License. Use responsibly for DFIR investigations and research.
