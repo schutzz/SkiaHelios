@@ -6,9 +6,8 @@ import glob
 import re
 
 # ==========================================
-#  SH_PlutosGate v1.3 [Linker Fix]
-#  Mission: Exposing the escape routes of data.
-#  Fix: Output filename consistency & C-Drive filter
+#  SH_PlutosGate v1.10 [Final Gatekeeper]
+#  Fix: Explorer logic moved to global scope.
 # ==========================================
 
 def print_logo():
@@ -19,7 +18,7 @@ def print_logo():
        \ \_\    \ \_____\\ \_____\  \ \_\ \ \_____\\/\_____\ 
         \/_/     \/_____/ \/_____/   \/_/  \/_____/ \/_____/ 
       
-          [ SH_PlutosGate v1.3 ]
+          [ SH_PlutosGate v1.10 ]
        "Exposing the escape routes of data."
     """)
 
@@ -66,19 +65,16 @@ class PlutosEngine:
             return None
 
         try:
-            # [Fix] Lazyではなく一旦 collect() して物理構造を確定させるっス！
             df_lnk = pl.read_csv(lnk_file, infer_schema_length=0, ignore_errors=True)
-            cols = df_lnk.columns # これで確実にカラム名が取れるっス！
+            cols = df_lnk.columns 
             path_col = next((c for c in cols if c in ['LocalPath', 'Path', 'Target']), 'LocalPath')
             dtype_col = next((c for c in cols if 'DriveType' in c), None)
             
-            # Filter Logic: Not C: OR DriveType is Removable/Fixed(External)
             if dtype_col:
                 df_usb_access = df_lnk.filter(
                     pl.col(dtype_col).cast(pl.Utf8).str.contains(r"(?i)Removable|Fixed|^2$") 
                 )
             else:
-                # Fallback: Path does not start with C:
                 df_usb_access = df_lnk.filter(
                     ~pl.col(path_col).str.to_uppercase().str.starts_with("C:") & 
                     pl.col(path_col).str.contains(r"^[A-Z]:")
@@ -88,20 +84,16 @@ class PlutosEngine:
                 pl.col(path_col).str.extract(r"\\([^\\]+)$", 1).str.to_lowercase().alias("Target_FileName")
             )
 
-            # [Fix] Physical Filter for System Noise
             SYSTEM_NOISE_RE = r"(?i)\\Windows\\|\\Program Files|\\AppData\\Local\\Microsoft\\(OneDrive|Edge)"
 
-            # df_usb_access is already a DataFrame (eager), so we don't need .collect()
             df_usb = df_usb_access
             
             if self.pandora_df is not None:
                 df_usb = df_usb.join(self.pandora_df, on="Target_FileName", how="left")
                 
-                # 判定ロジックの高度化
                 df_usb = df_usb.with_columns(
                     pl.when(pl.col("Risk_Tag").is_not_null())
                     .then(
-                        # GhostかつLNKありの場合でも、システムパスの実行ファイルならダウングレードっス
                         pl.when(
                             (pl.col("Target_FileName").str.ends_with(".exe") | 
                              pl.col("Target_FileName").str.ends_with(".dll")) &
@@ -111,7 +103,6 @@ class PlutosEngine:
                         .otherwise(pl.lit("CONFIRMED_EXFILTRATION"))
                     )
                     .otherwise(
-                        # PandoraにないがLNKがある場合
                         pl.when(pl.col(path_col).str.contains(SYSTEM_NOISE_RE))
                         .then(pl.lit("NORMAL_APP_ACCESS"))
                         .otherwise(pl.lit("POTENTIAL_EXFILTRATION"))
@@ -135,40 +126,70 @@ class PlutosEngine:
         app_path = str(row.get("AppId", "") or "").lower()
         vol_mb = row.get("Total_Sent_MB", 0.0)
 
-        # [Fix] Known System Actors (Services & Updates)
-        KNOWN_SYSTEM = [
-            "tiworker.exe", "svchost.exe", "wuaucltcore.exe", "msmpeng.exe", 
-            "searchindexer.exe", "system", "dosvc", "wuauserv", 
-            "licensemanager", "diagtrack", "null"
-        ]
+        SYSTEM_WHITELIST = {
+            "wlidsvc": "system32",
+            "dosvc": "system32",
+            "svchost.exe": "system32",
+            "bits": "system32",
+            "dnscache": "system32",
+            "wuauserv": "system32",
+            "licensemanager": "system32",
+            "diagtrack": "system32",
+            "cryptsvc": "system32",
+            "appxsvc": "system32",
+            "spooler": "system32",
+            "wpnservice": "system32",
+            "waasmedicsvc": "system32",
+            "wmansvc": "system32",
+            "wisvc": "system32",
+            "dhcp": "system32",
+            "netprofm": "system32",
+            "epmapper": "system32",
+            "cdpsvc": "system32",
+            "system": "", 
+            "msedge.exe": "program files",
+            "onedrive.exe": "program files"
+        }
 
-        if app_path in KNOWN_SYSTEM or app_path == "null" or app_path == "":
-             return "NORMAL_SYSTEM_ACTIVITY"
+        if app_path == "null" or not app_path:
+            return "NORMAL_SYSTEM_ACTIVITY"
 
-        # 1. 通信主体のプロファイリング
+        for proc, expected_dir in SYSTEM_WHITELIST.items():
+            if proc in app_path and expected_dir in app_path:
+                return "NORMAL_SYSTEM_ACTIVITY"
+            if app_path == proc.lower():
+                return "NORMAL_SYSTEM_ACTIVITY"
+            if "cloudexperiencehost" in app_path or "webexperience" in app_path:
+                return "NORMAL_SYSTEM_ACTIVITY"
+
+        if "windows\\uus" in app_path:
+            return "NORMAL_SYSTEM_ACTIVITY"
+
+        # [Fix] Global check for Explorer (before system check)
+        # This handles paths like \device\harddiskvolume3\windows\explorer.exe
+        if "explorer.exe" in app_path:
+            if vol_mb < 5: return "NORMAL_SYSTEM_ACTIVITY"
+            else: return "SUSPICIOUS_EXPLORER_TRAFFIC"
+
         is_system = any(sys_p in app_path for sys_p in ["windows\\system32", "winsxs", "program files"])
         is_script = any(scr_p in app_path for scr_p in ["powershell.exe", "cmd.exe", "wscript.exe", "sqlservr.exe"])
         
-        # 2. 物理的な判定のクロスオーバー
         if is_script:
-            return "CRITICAL_SCRIPT_COMM" # スクリプト通信は量に関係なく即通報っス！
+            return "CRITICAL_SCRIPT_COMM"
         
         if is_system:
-            # システムプロセスの場合 (10GB超えは異常)
             if vol_mb > 10240:
                 return "ANOMALOUS_SYSTEM_VOL"
             else:
-                return "NORMAL_SYSTEM_ACTIVITY" # Trigger0で定義した「ゴミ」っス
+                return "NORMAL_SYSTEM_ACTIVITY"
         else:
-            # 未知のバイナリ（beacon.exe等）
             if vol_mb < 5:
-                return "C2_BEACON_DETECTED" # 低流量の「忍びの足音」をキャッチっス！
+                return "C2_BEACON_DETECTED"
             else:
                 return "UNKNOWN_ACTOR_EXFIL"
 
     def analyze_network_traffic(self):
         print("[*] Phase 2: Profiling Network Traffic (SRUM)...")
-        # [Fix] NetworkUsage という物理キーワードを最優先にするっス！
         srum_file = self._find_csv("NetworkUsage") or self._find_csv("SrumECmd") or self._find_csv("Srum")
         
         if not srum_file:
@@ -179,37 +200,30 @@ class PlutosEngine:
             lf_srum = pl.scan_csv(srum_file, infer_schema_length=0, ignore_errors=True)
             schema = lf_srum.collect_schema().names()
             
-            # アプリ識別カラムの絶対座標を特定
             app_col = next((c for c in schema if c in ['ExeInfo', 'AppId', 'Description']), 'AppId')
-            
-            # [Fix] カラム名に 'BytesSent' が含まれるものを抽出 (NetworkUsage では 'Bytes Sent' の場合もあるため)
             sent_col = next((c for c in schema if "BytesSent" in c or "Bytes Sent" in c), None)
             
             if not sent_col:
                 print("[!] Error: BytesSent column not found in SRUM data.")
                 return None
 
-            # 物理流量の計算 (Bytes -> MB)
             lf_traffic = lf_srum.group_by(app_col).agg([
                 (pl.col(sent_col).cast(pl.Float64).sum() / (1024*1024)).alias("Total_Sent_MB"),
                 pl.col(app_col).count().alias("Connection_Count")
             ])
             
-            # [Fix] apply correlation logic via map_elements (eager execution safe)
             df_traffic = lf_traffic.collect()
             
-            # Rename app_col to 'AppId' for consistency in helper
             if app_col != "AppId":
                 df_traffic = df_traffic.rename({app_col: "AppId"})
 
             df_traffic = df_traffic.with_columns(
                 pl.struct(["AppId", "Total_Sent_MB"]).map_elements(
-                    lambda x: self._correlate_actor_volume(x), # ラムダで包んで確実に self を通すっス！
+                    lambda x: self._correlate_actor_volume(x), 
                     return_dtype=pl.Utf8
                 ).alias("Plutos_Verdict")
             )
 
-            # Filter out normal system activity to reduce noise
             df_heavy = df_traffic.filter(pl.col("Plutos_Verdict") != "NORMAL_SYSTEM_ACTIVITY").sort("Total_Sent_MB", descending=True)
             return df_heavy
 
@@ -225,32 +239,26 @@ def main(argv=None):
     parser.add_argument("--dir", required=True, help="KAPE Output Directory")
     parser.add_argument("--pandora", help="Path to Pandora Ghost List CSV")
     parser.add_argument("-o", "--out", default="plutos_report.csv")
+    parser.add_argument("--net-out", default="plutos_network.csv", help="Output path for network report")
     args = parser.parse_args(argv)
 
     engine = PlutosEngine(args.dir, args.pandora)
 
-    # 1. USB Analysis
     df_usb = engine.analyze_usb_exfiltration()
     if df_usb is not None and df_usb.height > 0:
         print(f"\n[!] USB EXFILTRATION ARTIFACTS FOUND: {df_usb.height}")
-        try: print(df_usb.head(5))
-        except: pass
-        # [Fix] Use the output path from arguments!
         df_usb.write_csv(args.out)
-        print(f"[*] Saved Exfil Report to: {args.out}")
     else:
         print("[-] No specific USB exfiltration artifacts correlated.")
 
-    # 2. Network Analysis
     df_net = engine.analyze_network_traffic()
     if df_net is not None and df_net.height > 0:
-        print(f"\n[!] HIGH VOLUME TRAFFIC DETECTED (Top 5):")
+        print(f"\n[!] SUSPICIOUS TRAFFIC DETECTED (Top 5):")
         try: print(df_net.head(5))
         except: pass
-        # Network report is separate
-        base_name = os.path.splitext(args.out)[0]
-        net_out = f"{base_name}_Network.csv"
-        df_net.write_csv(net_out)
+        net_out_path = args.net_out
+        df_net.write_csv(net_out_path)
+        print(f"[*] Network Report saved to: {net_out_path}")
 
     print("\n[*] Analysis Complete. 'Ex Umbra in Solem'.")
 
