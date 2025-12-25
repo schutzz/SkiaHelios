@@ -98,10 +98,50 @@ class HekateWeaver:
         if path and Path(path).exists():
             try:
                 df = pl.read_csv(path, ignore_errors=True, infer_schema_length=0)
-                print(f"  [+] {name}: Loaded {len(df)} records.")
+                # [Fix] 読み込み時点での表示を消し、結合後の数を出すように変更っス
+                # print(f"  [+] {name}: Loaded {len(df)} records.")
                 return df
             except: return None
         return None
+
+    def hunt_execution_anomalies(self, timeline_df):
+        """
+        タイムラインから「実行された危険なプロセス」を直接抽出するっス！
+        """
+        # 指名手配リスト (Regex)
+        WANTED_PROCESSES = [
+            r"(?i)timestomp\.exe", r"(?i)beacon\.exe",
+            r"(?i)mimikatz", r"(?i)cobaltstrike",
+            r"(?i)metasploit", r"(?i)powershell_ise\.exe",
+            r"(?i)cmd\.exe", r"(?i)psexec", r"(?i)vssadmin",
+            r"(?i)Trigger2" # Added user's trigger name
+        ]
+        
+        # Prefetch, Amcache, UserAssist 等の実行痕跡に絞る
+        if "Artifact_Type" not in timeline_df.columns: return []
+        
+        exec_df = timeline_df.filter(
+            pl.col("Artifact_Type").str.contains("(?i)(Prefetch|Amcache|UserAssist|ShimCache)")
+        )
+        
+        detected_executions = []
+        
+        for pattern in WANTED_PROCESSES:
+            # Target_Path OR Action (some parsers put path in Action)
+            hits = exec_df.filter(
+                pl.col("Target_Path").str.contains(pattern)
+            )
+            
+            if not hits.is_empty():
+                for row in hits.iter_rows(named=True):
+                    detected_executions.append({
+                        "Time": row['Timestamp_UTC'],
+                        "Module": "**Execution**",
+                        "Risk_Level": "CRITICAL",
+                        "Desc": f"MALICIOUS_EXECUTION: {row['Target_Path']} ({row['Artifact_Type']})"
+                    })
+                    
+        return detected_executions
 
     def weave_storyline(self):
         print("[*] Weaving the Anomalous Storyline with MFT-Correlated evidence...")
@@ -132,26 +172,50 @@ class HekateWeaver:
 
         # Plutos:
         if self.df_plutos is not None and len(self.df_plutos) > 0:
-            ts_col = next((c for c in ["SourceModified", "Timestamp", "Timestamp_UTC"] if c in self.df_plutos.columns), None)
-            if ts_col:
-                parts.append(self.df_plutos.select([
+            # [Purification] ストーリーラインを紡ぐ前に、物理的な「ゴミ（NORMAL）」を焼き払うっス！
+            plutos_clean = self.df_plutos.filter(
+                ~pl.col("Plutos_Verdict").is_in(["NORMAL_APP_ACCESS", "SYSTEM_INTERNAL_ACTIVITY"])
+            )
+            
+            ts_col = next((c for c in ["SourceModified", "Timestamp", "Timestamp_UTC"] if c in plutos_clean.columns), None)
+            if ts_col and not plutos_clean.is_empty():
+                parts.append(plutos_clean.select([
                     pl.col(ts_col).alias("Time"), pl.lit("Plutos").alias("Module"),
                     pl.format("Exfil/Access: {} ({})", "Target_FileName", "Plutos_Verdict").alias("Desc")
                 ]))
+            
+            # [Fix] コンソール出力を「織り込まれた数」に変更するっス！！
+            print(f" [+] Plutos Artifacts woven: {plutos_clean.height}")
 
-        # Sphinx:
+        # Sphinx: [Patch] Infect7 Integration
         if self.df_sphinx is not None and len(self.df_sphinx) > 0:
+            # 攻撃シグネチャを持つものだけを抽出 (CRITICAL only for Storyline)
+            critical_sphinx = self.df_sphinx.filter(
+                pl.col("Sphinx_Tags").str.contains("ATTACK_SIG_DETECTED")
+            )
+            
+            # Standard Sphinx logs (if any)
             ts_col = next((c for c in ["TimeCreated", "Timestamp", "Timestamp_UTC"] if c in self.df_sphinx.columns), None)
+            
             if ts_col:
-                parts.append(self.df_sphinx.select([
-                    pl.col(ts_col).alias("Time"), pl.lit("Sphinx").alias("Module"),
-                    pl.format("Decoded: {} ({})", "Decoded_Hint", "Sphinx_Tags").alias("Desc")
-                ]))
+                # 1. Critical Attacks
+                if not critical_sphinx.is_empty():
+                    parts.append(critical_sphinx.select([
+                        pl.col(ts_col).alias("Time"), 
+                        pl.lit("**Sphinx**").alias("Module"), # Bold for emphasis
+                        pl.format("OBFUSCATION_DECODED: {}...", pl.col("Decoded_Hint").str.slice(0, 200)).alias("Desc")
+                    ]))
+
+        # Execution Hunter: [Patch] Infect7 Direct Hunting
+        if self.df_timeline is not None:
+             execution_alerts = self.hunt_execution_anomalies(self.df_timeline)
+             if execution_alerts:
+                 parts.append(pl.DataFrame(execution_alerts).select(["Time", "Module", "Desc"]))
 
         if parts:
-            res = pl.concat(parts).sort("Time")
-            print(f"  [+] Storyline: Successfully woven {len(res)} events.")
-            return res
+            story_df = pl.concat(parts).sort("Time")
+            print(f" [+] Storyline: Successfully woven {story_df.height} events.")
+            return story_df
         return None
 
     def generate_grimoire(self, output_path):
@@ -175,7 +239,14 @@ class HekateWeaver:
             f.write(f"\n## {t['h1_summary']}\n\n| {t['h1_cols'][0]} | {t['h1_cols'][1]} | {t['h1_cols'][2]} |\n|---|---|---|\n")
             if has_chronos: f.write(f"| Chronos | {t['status_crit']} | {len(self.df_chronos)} |\n")
             if has_aion:    f.write(f"| AION | {t['status_crit']} | {len(self.df_aion)} |\n")
-            if has_exfil:   f.write(f"| Plutos | {t['status_crit']} | {len(self.df_plutos)} |\n")
+            
+            if has_exfil:
+                # [Zero-Calibration] 正常系を除外してカウントっス！
+                plutos_warn = self.df_plutos.filter(
+                    ~pl.col("Plutos_Verdict").is_in(["NORMAL_APP_ACCESS", "SYSTEM_INTERNAL_ACTIVITY"])
+                ).height
+                f.write(f"| Plutos | {t['status_crit']} | {plutos_warn} |\n")
+            
             if has_sphinx:  f.write(f"| Sphinx | {t['status_crit']} | {len(self.df_sphinx)} |\n\n")
 
             # 2. Storyline

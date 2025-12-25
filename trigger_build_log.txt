@@ -1,0 +1,65 @@
+227 INFO: PyInstaller: 6.17.0, contrib hooks: 2025.10
+227 INFO: Python: 3.10.11
+244 INFO: Platform: Windows-10-10.0.26100-SP0
+244 INFO: Python environment: C:\Program Files\Python310
+246 INFO: wrote C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\SkiaHelios_Trigger.spec
+250 INFO: Removing temporary files and cleaning cache in C:\Users\user\AppData\Local\pyinstaller
+252 INFO: Module search paths (PYTHONPATH):
+['C:\\Program Files\\Python310\\Scripts\\pyinstaller.exe',
+ 'C:\\Program Files\\Python310\\python310.zip',
+ 'C:\\Program Files\\Python310\\DLLs',
+ 'C:\\Program Files\\Python310\\lib',
+ 'C:\\Program Files\\Python310',
+ 'C:\\Users\\user\\AppData\\Roaming\\Python\\Python310\\site-packages',
+ 'C:\\Program Files\\Python310\\lib\\site-packages',
+ 'C:\\Program Files\\Python310\\lib\\site-packages\\win32',
+ 'C:\\Program Files\\Python310\\lib\\site-packages\\win32\\lib',
+ 'C:\\Program Files\\Python310\\lib\\site-packages\\Pythonwin',
+ 'C:\\Users\\user\\.gemini\\antigravity\\scratch\\SkiaHelios\\TestCase']
+pygame 2.6.1 (SDL 2.28.4, Python 3.10.11)
+Hello from the pygame community. https://www.pygame.org/contribute.html
+1103 INFO: checking Analysis
+1103 INFO: Building Analysis because Analysis-00.toc is non existent
+1104 INFO: Looking for Python shared library...
+1104 INFO: Using Python shared library: C:\Program Files\Python310\python310.dll
+1104 INFO: Running Analysis Analysis-00.toc
+1104 INFO: Target bytecode optimization level: 0
+1104 INFO: Initializing module dependency graph...
+1106 INFO: Initializing module graph hook caches...
+1134 INFO: Analyzing modules for base_library.zip ...
+2467 INFO: Processing standard module hook 'hook-heapq.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+2581 INFO: Processing standard module hook 'hook-encodings.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+4409 INFO: Processing standard module hook 'hook-pickle.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+5780 INFO: Caching module dependency graph...
+5830 INFO: Analyzing C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\TestCase\SkiaHelios_Trigger.py
+5834 INFO: Processing module hooks (post-graph stage)...
+5844 INFO: Performing binary vs. data reclassification (1 entries)
+5846 INFO: Looking for ctypes DLLs
+5850 INFO: Analyzing run-time hooks ...
+5851 INFO: Including run-time hook 'pyi_rth_inspect.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+5858 INFO: Creating base_library.zip...
+5881 INFO: Looking for dynamic libraries
+6014 INFO: Extra DLL search directories (AddDllDirectory): []
+6014 INFO: Extra DLL search directories (PATH): []
+6372 INFO: Warnings written to C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\build\SkiaHelios_Trigger\warn-SkiaHelios_Trigger.txt
+6406 INFO: Graph cross-reference written to C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\build\SkiaHelios_Trigger\xref-SkiaHelios_Trigger.html
+6427 INFO: checking PYZ
+6427 INFO: Building PYZ because PYZ-00.toc is non existent
+6428 INFO: Building PYZ (ZlibArchive) C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\build\SkiaHelios_Trigger\PYZ-00.pyz
+6541 INFO: Building PYZ (ZlibArchive) C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\build\SkiaHelios_Trigger\PYZ-00.pyz completed successfully.
+6548 INFO: checking PKG
+6548 INFO: Building PKG because PKG-00.toc is non existent
+6548 INFO: Building PKG (CArchive) SkiaHelios_Trigger.pkg
+8334 INFO: Building PKG (CArchive) SkiaHelios_Trigger.pkg completed successfully.
+8340 INFO: Bootloader C:\Program Files\Python310\lib\site-packages\PyInstaller\bootloader\Windows-64bit-intel\run.exe
+8340 INFO: checking EXE
+8340 INFO: Building EXE because EXE-00.toc is non existent
+8340 INFO: Building EXE from EXE-00.toc
+8340 INFO: Copying bootloader EXE to C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\dist\SkiaHelios_Trigger.exe
+8349 INFO: Copying icon to EXE
+8359 INFO: Copying 0 resources to EXE
+8359 INFO: Embedding manifest in EXE
+8368 INFO: Appending PKG archive to EXE
+8394 INFO: Fixing EXE headers
+8644 INFO: Building EXE from EXE-00.toc completed successfully.
+8649 INFO: Build complete! The results are available in: C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\dist

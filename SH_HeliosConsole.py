@@ -1,24 +1,36 @@
 import sys
 import os
-import subprocess
 from pathlib import Path
 import time
 
+# --- Monolith Imports ---
+try:
+    from tools.SH_ChaosGrasp.SH_ChaosGrasp import main as chaos_main
+    from tools.SH_PandorasLink.SH_PandorasLink import main as pandora_main
+    from tools.SH_ChronosSift.SH_ChronosSift import main as chronos_main
+    from tools.SH_AIONDetector.SH_AIONDetector import main as aion_main
+    from tools.SH_PlutosGate.SH_PlutosGate import main as plutos_main
+    from tools.SH_HekateWeaver.SH_HekateWeaver import main as hekate_main
+    from tools.SH_SphinxDeciphering.SH_SphinxDeciphering import main as sphinx_main
+except ImportError as e:
+    print(f"[!] Import Error (Monolith): {e}")
+    sys.exit(1)
+
 # ============================================================
-#  SH_HeliosConsole v2.6.7 [Pandora Fix]
-#  Mission: Coordinate all modules and fix Pandora argument error.
-#  Updates: Added --start/--end to Pandora stage.
+#  SH_HeliosConsole v2.7 [Monolith Core]
+#  Mission: Coordinate all modules within a single executable.
+#  Updates: Replaced subprocess with direct function calls.
 #  "The sun must shine on every hidden artifact."
 # ============================================================
 
 MODULE_MAP = {
-    "chaos":   Path("tools/SH_ChaosGrasp/SH_ChaosGrasp.py"),
-    "pandora": Path("tools/SH_PandorasLink/SH_PandorasLink.py"),
-    "chronos": Path("tools/SH_ChronosSift/SH_ChronosSift.py"),
-    "aion":    Path("tools/SH_AIONDetector/SH_AIONDetector.py"),
-    "plutos":  Path("tools/SH_PlutosGate/SH_PlutosGate.py"),
-    "hekate":  Path("tools/SH_HekateWeaver/SH_HekateWeaver.py"),
-    "sphinx":  Path("tools/SH_SphinxDeciphering/SH_SphinxDeciphering.py")
+    "chaos":   chaos_main,
+    "pandora": pandora_main,
+    "chronos": chronos_main,
+    "aion":    aion_main,
+    "plutos":  plutos_main,
+    "hekate":  hekate_main,
+    "sphinx":  sphinx_main
 }
 
 def print_logo():
@@ -29,7 +41,7 @@ def print_logo():
     ,      |_______|      ,
    ,        _______        ,
   ,        |_______|        ,  < SKIA HELIOS >
-  ,        _______          ,  v2.6.7 - Final Sync
+  ,        _______          ,  v2.7 - Monolith Core
    ,       |_______|       ,
     ,                     ,
       , _ _ _ _ _ _ _ _ ,
@@ -39,21 +51,23 @@ def print_logo():
 
 class HeliosCommander:
     def __init__(self):
-        self.root_dir = Path(__file__).parent.resolve()
-        self.modules = {k: self.root_dir / v for k, v in MODULE_MAP.items() if (self.root_dir / v).exists()}
+        pass
 
     def run_module(self, key, args):
-        if key not in self.modules:
-            print(f"[!] Module {key} not found at {MODULE_MAP.get(key)}")
+        func = MODULE_MAP.get(key)
+        if not func:
+            print(f"[!] Module {key} not found.")
             return False
         
-        cmd = [sys.executable, str(self.modules[key])] + args
         print(f"\n>>> [EXECUTING] {key.upper()} Stage...")
         try:
-            subprocess.run(cmd, check=True)
+            # Direct call with argument list
+            func(args)
             return True
-        except subprocess.CalledProcessError as e:
+        except Exception as e:
             print(f"[!] {key.upper()} Error: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def full_auto_scan(self, kape_dir, out_dir, case_name):
@@ -85,9 +99,12 @@ class HeliosCommander:
 
         # 4. Pandora & Plutos (Fix: Added missing --start/--end)
         pandora_out = case_dir / "Ghost_Report.csv"
+        # [FIX] Default range if not provided?
+        # Since this is full auto, we pick a wide range or need config.
+        # "2000-01-01" to "2030-12-31" is safe.
         self.run_module("pandora", [
             "-d", kape_dir, 
-            "--start", "2000-01-01", "--end", "2030-12-31", # [FIX] 必須引数を追加！
+            "--start", "2000-01-01", "--end", "2030-12-31", 
             "--out", str(pandora_out)
         ])
         
@@ -116,10 +133,15 @@ def main():
     commander = HeliosCommander()
     kape = input("Target Artifact Path: ").strip()
     case = input("Case Name: ").strip() or "Standard_Investigation"
-    if os.path.isdir(kape):
+    
+    # [FIX] Remove quotes if user dragged & dropped path
+    kape = kape.strip('"').strip("'")
+    
+    if os.path.exists(kape) and os.path.isdir(kape):
         commander.full_auto_scan(kape, "Helios_Output", case)
     else:
         print("[!] Target path invalid.")
+        input("Press Enter to exit...")
 
 if __name__ == "__main__":
     main()
