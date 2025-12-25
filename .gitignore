@@ -1,30 +1,15 @@
-﻿# Python
+# Python
 __pycache__/
-*.py[cod]
-*.so
+*.pyc
+*.pyo
+*.pyd
 
-# Data & Logs (Evidence)
-*.csv
-*.log
-*.evtx
-*.bin
-*.db
-*.dat
-
-# Output Directories
-Helios_Output/
-Chaos_ART_Final/
-Chaos_ART_Final_out/
-C:\Temp\
-
-# System
-.DS_Store
-Thumbs.db
-
+# PyInstaller & Build Artifacts (Anywhere)
 build/
-
 dist/
-
 *.spec
+*.pkg
+*.toc
 
-__pycache__/
+# Logs
+*_log.txt
