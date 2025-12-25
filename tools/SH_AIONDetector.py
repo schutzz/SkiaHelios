@@ -5,8 +5,8 @@ import sys
 import io
 
 # ============================================================
-#  SH_AIONDetector v10.11 [Clean Sweep]
-#  Fix: Target specific WindowsApps noise (triggerTrees).
+#  SH_AIONDetector v10.12 [Time Keeper]
+#  Fix: Apply Time Range filter to persistence artifacts.
 # ============================================================
 
 def print_logo():
@@ -16,14 +16,16 @@ def print_logo():
       / | | \    "Timestamps are the ultimate evidence."
      /_/   \_\
 
-      [ SH_AIONDetector v10.11 ]
+      [ SH_AIONDetector v10.12 ]
     """)
 
 class AIONEngine:
-    def __init__(self, target_dir=None, file_path=None, mft_csv=None):
+    def __init__(self, target_dir=None, file_path=None, mft_csv=None, start_time=None, end_time=None):
         self.target_dir = target_dir
         self.file_path = file_path
         self.mft_csv = mft_csv
+        self.start_time = start_time
+        self.end_time = end_time
         self.signatures = {
             "High_Risk": {"keywords": ["powershell", "cmd.exe", "wscript", "mshta", "rundll32", "certutil"], "score": 10},
             "User_Persistence": {"keywords": ["hkey_current_user", "hkcu", "software\\microsoft\\windows\\currentversion\\run"], "score": 9},
@@ -50,6 +52,16 @@ class AIONEngine:
             return df
         return None
 
+    def _is_in_time_range(self, time_str):
+        if not time_str: return False
+        if not self.start_time and not self.end_time: return True
+        try:
+            # Simple string comparison for ISO8601 usually works
+            if self.start_time and str(time_str) < self.start_time: return False
+            if self.end_time and str(time_str) > self.end_time: return False
+            return True
+        except: return True # Default to keep if parse fails
+
     def hunt_persistence(self, mft_df, suspects_list):
         PERSISTENCE_HOTSPOTS = [r"(?i)Tasks", r"(?i)Startup"]
         RISKY_EXTENSIONS = r"(?i)\.(exe|lnk|bat|ps1|vbs|xml|dll|jar|hta)$"
@@ -72,12 +84,16 @@ class AIONEngine:
              for row in suspect_files.iter_rows(named=True):
                 path_lower = str(row.get('ParentPath') or "").lower()
                 fname_lower = str(row.get('FileName') or "").lower()
+                ts = row.get("Timestamp_UTC") or row.get("Created0x10")
                 
+                # [Fix] Time Filter
+                if not self._is_in_time_range(ts): continue
+
                 if any(z in path_lower for z in SAFE_ZONES): continue
                 if "onedrive" in fname_lower: continue
 
                 detected.append({
-                    "Last_Executed_Time": row.get("Timestamp_UTC") or row.get("Created0x10"),
+                    "Last_Executed_Time": ts,
                     "AION_Score": 15, 
                     "AION_Tags": "FILE_PERSISTENCE (HOTSPOT)",
                     "Target_FileName": row.get("FileName"),
@@ -86,12 +102,11 @@ class AIONEngine:
                 })
 
         WANTED_FILES = ["Windows_Security_Audit", "win_optimizer.lnk", "SunShadow", "Trigger"]
-        
         TRIGGER_BLACKLIST = [
             "msmq-triggers", "vpnconnectiontrigger", "jobtrigger", 
             "sbservicetrigger", "servicetrigger", "trigger.js", 
             "trigger.dat", "etw", "wdi", "box",
-            "triggertrees" # [Fix] Added triggerTrees specifically
+            "triggertrees"
         ]
         
         for wanted in WANTED_FILES:
@@ -102,15 +117,19 @@ class AIONEngine:
                     path = str(row.get('ParentPath') or "")
                     fname_lower = fname.lower()
                     path_lower = path.lower()
+                    ts = row.get("Timestamp_UTC") or row.get("Created0x10")
+
+                    # [Fix] Time Filter
+                    if not self._is_in_time_range(ts): continue
 
                     if wanted == "Trigger":
                         if any(b in fname_lower for b in TRIGGER_BLACKLIST): continue
                         if any(z in path_lower for z in SAFE_ZONES): continue
-                        if "adaptive-expressions" in path_lower: continue # [Fix] Block path context
+                        if "adaptive-expressions" in path_lower: continue
                         if fname_lower.endswith(".dat") or fname_lower.endswith(".xml"): continue
 
                     detected.append({
-                        "Last_Executed_Time": row.get("Timestamp_UTC") or row.get("Created0x10"),
+                        "Last_Executed_Time": ts,
                         "AION_Score": 20, 
                         "AION_Tags": "NAMED_PERSISTENCE (WANTED)",
                         "Target_FileName": fname,
@@ -161,6 +180,9 @@ class AIONEngine:
                         match = df_mft.filter(pl.col("Target_Path").str.to_lowercase().str.contains(img_path.lower(), literal=True))
                         if not match.is_empty():
                             mft_time = match.get_column("Timestamp_UTC")[0]
+                    
+                    # [Fix] Time Filter for Autoruns (if MFT correlated)
+                    if mft_time and not self._is_in_time_range(mft_time): continue
 
                     final_list.append({
                         "Last_Executed_Time": mft_time,
@@ -203,9 +225,11 @@ def main(argv=None):
     parser.add_argument("--dir", help="Artifacts Directory (containing autoruns CSVs)")
     parser.add_argument("--mft", help="Master_Timeline.csv (from Chaos/Chronos)")
     parser.add_argument("-o", "--out", default="Persistence_Report.csv")
+    parser.add_argument("--start", help="Filter Start Date")
+    parser.add_argument("--end", help="Filter End Date")
     args = parser.parse_args(argv)
 
-    engine = AIONEngine(target_dir=args.dir, mft_csv=args.mft)
+    engine = AIONEngine(target_dir=args.dir, mft_csv=args.mft, start_time=args.start, end_time=args.end)
     df = engine.analyze()
 
     if df is not None:

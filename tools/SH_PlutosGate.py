@@ -6,8 +6,8 @@ import glob
 import re
 
 # ==========================================
-#  SH_PlutosGate v1.10 [Final Gatekeeper]
-#  Fix: Explorer logic moved to global scope.
+#  SH_PlutosGate v1.11 [Net Clipper]
+#  Fix: Apply Time Range filter to USB and SRUM.
 # ==========================================
 
 def print_logo():
@@ -18,14 +18,16 @@ def print_logo():
        \ \_\    \ \_____\\ \_____\  \ \_\ \ \_____\\/\_____\ 
         \/_/     \/_____/ \/_____/   \/_/  \/_____/ \/_____/ 
       
-          [ SH_PlutosGate v1.10 ]
+          [ SH_PlutosGate v1.11 ]
        "Exposing the escape routes of data."
     """)
 
 class PlutosEngine:
-    def __init__(self, kape_dir, pandora_csv=None):
+    def __init__(self, kape_dir, pandora_csv=None, start_time=None, end_time=None):
         self.kape_dir = kape_dir
         self.pandora_df = self._load_pandora(pandora_csv) if pandora_csv else None
+        self.start_time = start_time
+        self.end_time = end_time
         print(f"[*] Initializing Plutos Gate on: {kape_dir}")
 
     def _load_pandora(self, path):
@@ -79,6 +81,12 @@ class PlutosEngine:
                     ~pl.col(path_col).str.to_uppercase().str.starts_with("C:") & 
                     pl.col(path_col).str.contains(r"^[A-Z]:")
                 )
+
+            # [Fix] Time Filter for USB (SourceModified)
+            if self.start_time:
+                df_usb_access = df_usb_access.filter(pl.col("SourceModified") >= self.start_time)
+            if self.end_time:
+                df_usb_access = df_usb_access.filter(pl.col("SourceModified") <= self.end_time)
 
             df_usb_access = df_usb_access.with_columns(
                 pl.col(path_col).str.extract(r"\\([^\\]+)$", 1).str.to_lowercase().alias("Target_FileName")
@@ -165,8 +173,6 @@ class PlutosEngine:
         if "windows\\uus" in app_path:
             return "NORMAL_SYSTEM_ACTIVITY"
 
-        # [Fix] Global check for Explorer (before system check)
-        # This handles paths like \device\harddiskvolume3\windows\explorer.exe
         if "explorer.exe" in app_path:
             if vol_mb < 5: return "NORMAL_SYSTEM_ACTIVITY"
             else: return "SUSPICIOUS_EXPLORER_TRAFFIC"
@@ -200,6 +206,12 @@ class PlutosEngine:
             lf_srum = pl.scan_csv(srum_file, infer_schema_length=0, ignore_errors=True)
             schema = lf_srum.collect_schema().names()
             
+            # [Fix] Time Filter for SRUM (Timestamp)
+            if self.start_time:
+                lf_srum = lf_srum.filter(pl.col("Timestamp") >= self.start_time)
+            if self.end_time:
+                lf_srum = lf_srum.filter(pl.col("Timestamp") <= self.end_time)
+
             app_col = next((c for c in schema if c in ['ExeInfo', 'AppId', 'Description']), 'AppId')
             sent_col = next((c for c in schema if "BytesSent" in c or "Bytes Sent" in c), None)
             
@@ -240,9 +252,11 @@ def main(argv=None):
     parser.add_argument("--pandora", help="Path to Pandora Ghost List CSV")
     parser.add_argument("-o", "--out", default="plutos_report.csv")
     parser.add_argument("--net-out", default="plutos_network.csv", help="Output path for network report")
+    parser.add_argument("--start", help="Filter Start Date")
+    parser.add_argument("--end", help="Filter End Date")
     args = parser.parse_args(argv)
 
-    engine = PlutosEngine(args.dir, args.pandora)
+    engine = PlutosEngine(args.dir, args.pandora, args.start, args.end)
 
     df_usb = engine.analyze_usb_exfiltration()
     if df_usb is not None and df_usb.height > 0:

@@ -8,9 +8,9 @@ import zlib
 import math
 
 # ============================================================
-#  SH_SphinxDeciphering v1.4 [Context Hunter]
+#  SH_SphinxDeciphering v1.5 [Temporal Enigma]
 #  Mission: Decode and PRESERVE Evidence Context (Parent/ID)
-#  Fix: Capture ProcessId/ThreadId for Parent Process Hunting
+#  Fix: Apply Time Range filter to Event Logs.
 # ============================================================
 
 def print_logo():
@@ -21,12 +21,14 @@ def print_logo():
        /  O  \    "Answer my riddle,
       /_______\    or be consumed."
 
-       [ 🦁 SH_SphinxDeciphering v1.4 ]
+       [ 🦁 SH_SphinxDeciphering v1.5 ]
     """)
 
 class SphinxEngine:
-    def __init__(self, target_file):
+    def __init__(self, target_file, start_time=None, end_time=None):
         self.target_file = target_file
+        self.start_time = start_time
+        self.end_time = end_time
         self.min_entropy = 3.0 
         self.results = []
 
@@ -46,19 +48,16 @@ class SphinxEngine:
             if missing_padding: clean_text += '=' * (4 - missing_padding)
             decoded_bytes = base64.b64decode(clean_text, validate=True)
             
-            # UTF-16LE
             try:
                 decoded_str = decoded_bytes.decode('utf-16le')
                 if len(decoded_str) > 5: candidates.append(("Base64_UTF16", decoded_str))
             except: pass
             
-            # UTF-8
             try:
                 decoded_str = decoded_bytes.decode('utf-8')
                 if len(decoded_str) > 5 and decoded_str.isprintable(): candidates.append(("Base64_UTF8", decoded_str))
             except: pass
 
-            # Gzip
             try:
                 decompressed = zlib.decompress(decoded_bytes, 16+zlib.MAX_WBITS)
                 candidates.append(("Gzip_Base64", decompressed.decode('utf-8', errors='ignore')))
@@ -75,7 +74,6 @@ class SphinxEngine:
             target_col = next((c for c in cols if c in ['PayloadData1', 'ScriptBlockText', 'Message', 'Details']), None)
             time_col = next((c for c in cols if c in ['TimeCreated', 'EventTime', 'Timestamp']), None)
             
-            # [Fix] Identify Context Columns for Parent Hunting
             pid_col = next((c for c in cols if c in ['ProcessId', 'ExecutionProcessID']), None)
             tid_col = next((c for c in cols if c in ['ThreadId', 'ExecutionThreadID']), None)
             pname_col = next((c for c in cols if c in ['ProviderName', 'Channel']), None)
@@ -84,9 +82,15 @@ class SphinxEngine:
                 print("[!] Warning: No standard script column found.")
                 return None
 
+            # [Fix] Time Filter
+            if time_col:
+                if self.start_time:
+                    df = df.filter(pl.col(time_col) >= self.start_time)
+                if self.end_time:
+                    df = df.filter(pl.col(time_col) <= self.end_time)
+
             print(f"    -> Targeting Column: '{target_col}'")
             if time_col: print(f"    -> Preserving Timeline via: '{time_col}'")
-            if pid_col: print(f"    -> Preserving Execution Context: '{pid_col}'")
             
             row_count = len(df)
             print(f"[*] Phase 2: Analyzing {row_count} blocks while maintaining context...")
@@ -96,7 +100,6 @@ class SphinxEngine:
 
             results = []
 
-            # Helper to extract context
             def get_context(row):
                 return {
                     "TimeCreated": row.get(time_col, "N/A"),
@@ -105,7 +108,6 @@ class SphinxEngine:
                     "Provider": row.get(pname_col, "N/A")
                 }
 
-            # 1. 攻撃シグネチャ（最優先）
             keyword_hits = df.filter(pl.col(target_col).str.contains(ATTACK_SIGS_REGEX))
             
             for row in keyword_hits.iter_rows(named=True):
@@ -118,11 +120,9 @@ class SphinxEngine:
                 })
                  results.append(item)
 
-            # 2. その他（エントロピー検査）
             remaining_df = df.filter(~pl.col(target_col).str.contains(ATTACK_SIGS_REGEX))
             suspicious_df = remaining_df.filter(pl.col(target_col).is_not_null())
             
-            # 4104 only if mixed logs
             eid_col = next((c for c in cols if 'Id' in c), None)
             if eid_col:
                  suspicious_df = suspicious_df.filter(pl.col(eid_col).cast(pl.Utf8).str.contains(r"4104|800|400"))
@@ -160,7 +160,6 @@ class SphinxEngine:
                     results.append(item)
             
             if not results: return None
-            # [Fix] Sort by score but keep ProcessId visible
             return pl.DataFrame(results).sort("Sphinx_Score", descending=True)
 
         except Exception as e:
@@ -172,9 +171,11 @@ def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("-f", "--file", required=True)
     parser.add_argument("-o", "--out", default="Sphinx_Decoded.csv")
+    parser.add_argument("--start", help="Filter Start Date")
+    parser.add_argument("--end", help="Filter End Date")
     args = parser.parse_args(argv)
 
-    engine = SphinxEngine(args.file)
+    engine = SphinxEngine(args.file, args.start, args.end)
     df_result = engine.analyze()
 
     if df_result is not None and len(df_result) > 0:
