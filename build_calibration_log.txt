@@ -1,0 +1,127 @@
+197 INFO: PyInstaller: 6.17.0, contrib hooks: 2025.10
+197 INFO: Python: 3.10.11
+211 INFO: Platform: Windows-10-10.0.26100-SP0
+211 INFO: Python environment: C:\Program Files\Python310
+212 INFO: wrote C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\SkiaHelios.spec
+217 INFO: Removing temporary files and cleaning cache in C:\Users\user\AppData\Local\pyinstaller
+252 INFO: Module search paths (PYTHONPATH):
+['C:\\Program Files\\Python310\\Scripts\\pyinstaller.exe',
+ 'C:\\Program Files\\Python310\\python310.zip',
+ 'C:\\Program Files\\Python310\\DLLs',
+ 'C:\\Program Files\\Python310\\lib',
+ 'C:\\Program Files\\Python310',
+ 'C:\\Users\\user\\AppData\\Roaming\\Python\\Python310\\site-packages',
+ 'C:\\Program Files\\Python310\\lib\\site-packages',
+ 'C:\\Program Files\\Python310\\lib\\site-packages\\win32',
+ 'C:\\Program Files\\Python310\\lib\\site-packages\\win32\\lib',
+ 'C:\\Program Files\\Python310\\lib\\site-packages\\Pythonwin',
+ 'C:\\Users\\user\\.gemini\\antigravity\\scratch\\SkiaHelios']
+pygame 2.6.1 (SDL 2.28.4, Python 3.10.11)
+Hello from the pygame community. https://www.pygame.org/contribute.html
+826 INFO: checking Analysis
+826 INFO: Building Analysis because Analysis-00.toc is non existent
+826 INFO: Looking for Python shared library...
+826 INFO: Using Python shared library: C:\Program Files\Python310\python310.dll
+826 INFO: Running Analysis Analysis-00.toc
+826 INFO: Target bytecode optimization level: 0
+826 INFO: Initializing module dependency graph...
+828 INFO: Initializing module graph hook caches...
+847 INFO: Analyzing modules for base_library.zip ...
+1896 INFO: Processing standard module hook 'hook-heapq.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+2003 INFO: Processing standard module hook 'hook-encodings.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+3354 INFO: Processing standard module hook 'hook-pickle.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+4668 INFO: Caching module dependency graph...
+4710 INFO: Analyzing C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\SH_HeliosConsole.py
+4746 INFO: Processing standard module hook 'hook-_ctypes.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+4920 INFO: Processing standard module hook 'hook-zoneinfo.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+4943 INFO: Processing standard module hook 'hook-sysconfig.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+5061 INFO: Processing standard module hook 'hook-numpy.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+5351 INFO: Processing standard module hook 'hook-platform.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+6357 INFO: Processing standard module hook 'hook-difflib.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+6540 INFO: Processing standard module hook 'hook-multiprocessing.util.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+6664 INFO: Processing standard module hook 'hook-xml.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+8086 INFO: Processing standard module hook 'hook-psutil.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+8832 INFO: Processing pre-safe-import-module hook 'hook-typing_extensions.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+8833 INFO: SetuptoolsInfo: initializing cached setuptools info...
+10006 INFO: Processing standard module hook 'hook-charset_normalizer.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+10382 INFO: Processing standard module hook 'hook-pandas.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+12234 INFO: Processing standard module hook 'hook-pytz.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+12548 INFO: Processing standard module hook 'hook-scipy.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+14591 INFO: Processing standard module hook 'hook-scipy.linalg.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+14696 INFO: Processing standard module hook 'hook-scipy.special._ufuncs.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+14796 INFO: Processing standard module hook 'hook-scipy.special._ellip_harm_2.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+15135 INFO: Processing standard module hook 'hook-scipy.spatial._ckdtree.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+16455 INFO: Processing standard module hook 'hook-scipy.sparse.csgraph.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+16773 INFO: Processing standard module hook 'hook-scipy.spatial.transform.rotation.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+17740 INFO: Processing standard module hook 'hook-scipy.stats._stats.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+20819 INFO: Processing standard module hook 'hook-numba.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+20846 INFO: Processing standard module hook 'hook-llvmlite.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+21440 INFO: Processing standard module hook 'hook-pygments.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+23838 INFO: Processing standard module hook 'hook-setuptools.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+23843 INFO: Processing pre-safe-import-module hook 'hook-distutils.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+23844 INFO: Processing pre-find-module-path hook 'hook-distutils.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks\\pre_find_module_path'
+24619 INFO: Processing standard module hook 'hook-distutils.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+24662 INFO: Processing standard module hook 'hook-distutils.util.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+24686 INFO: Processing standard module hook 'hook-_osx_support.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+25041 INFO: Processing standard module hook 'hook-pkg_resources.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+26254 INFO: Processing pre-safe-import-module hook 'hook-importlib_metadata.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+26329 INFO: Processing pre-safe-import-module hook 'hook-packaging.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+29238 INFO: Processing pre-safe-import-module hook 'hook-win32com.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\pre_safe_import_module'
+29320 INFO: Processing standard module hook 'hook-win32com.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+29322 INFO: Processing standard module hook 'hook-pythoncom.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+29417 INFO: Processing standard module hook 'hook-pywintypes.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+31613 INFO: Processing standard module hook 'hook-pandas.io.formats.style.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+34953 INFO: Processing standard module hook 'hook-pandas.plotting.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+35465 INFO: Processing standard module hook 'hook-openpyxl.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+35785 INFO: Processing standard module hook 'hook-xml.etree.cElementTree.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+36382 INFO: Processing standard module hook 'hook-PIL.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+36457 INFO: Processing standard module hook 'hook-PIL.Image.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+37013 INFO: Processing standard module hook 'hook-PIL.ImageFilter.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+38888 INFO: Processing standard module hook 'hook-sqlite3.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+39271 INFO: Processing standard module hook 'hook-pandas.io.clipboard.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+39518 INFO: Processing standard module hook 'hook-dateutil.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+39649 INFO: Processing pre-safe-import-module hook 'hook-six.moves.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+40088 INFO: Processing standard module hook 'hook-xml.dom.domreg.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+41963 INFO: Processing module hooks (post-graph stage)...
+42484 INFO: Processing standard module hook 'hook-PIL.SpiderImagePlugin.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+46264 WARNING: Hidden import "scipy.special._cdflib" not found!
+46402 INFO: Processing standard module hook 'hook-setuptools._vendor.importlib_metadata.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+46537 INFO: Processing standard module hook 'hook-setuptools._vendor.jaraco.text.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+47617 INFO: Processing standard module hook 'hook-tzdata.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+48529 INFO: Performing binary vs. data reclassification (1224 entries)
+48715 INFO: Looking for ctypes DLLs
+48892 INFO: Analyzing run-time hooks ...
+48907 INFO: Including run-time hook 'pyi_rth_inspect.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+48910 INFO: Including run-time hook 'pyi_rth_pkgutil.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+48912 INFO: Including run-time hook 'pyi_rth_multiprocessing.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+48913 INFO: Including run-time hook 'pyi_rth_pywintypes.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\rthooks'
+48915 INFO: Including run-time hook 'pyi_rth_pythoncom.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\rthooks'
+48915 INFO: Including run-time hook 'pyi_rth_pkgres.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+48921 INFO: Including run-time hook 'pyi_rth_setuptools.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+49028 INFO: Creating base_library.zip...
+49098 INFO: Looking for dynamic libraries
+53620 INFO: Extra DLL search directories (AddDllDirectory): ['C:\\Program Files\\Python310\\lib\\site-packages\\pandas.libs', 'C:\\Program Files\\Python310\\lib\\site-packages\\numpy.libs', 'C:\\Users\\user\\AppData\\Roaming\\Python\\Python310\\site-packages\\scipy.libs', 'C:\\Users\\user\\AppData\\Roaming\\Python\\Python310\\site-packages\\llvmlite.libs']
+53620 INFO: Extra DLL search directories (PATH): []
+56725 WARNING: Library not found: could not resolve 'tbb12.dll', dependency of 'C:\\Users\\user\\AppData\\Roaming\\Python\\Python310\\site-packages\\numba\\np\\ufunc\\tbbpool.cp310-win_amd64.pyd'.
+56826 INFO: Warnings written to C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\build\SkiaHelios\warn-SkiaHelios.txt
+57172 INFO: Graph cross-reference written to C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\build\SkiaHelios\xref-SkiaHelios.html
+57324 INFO: checking PYZ
+57325 INFO: Building PYZ because PYZ-00.toc is non existent
+57325 INFO: Building PYZ (ZlibArchive) C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\build\SkiaHelios\PYZ-00.pyz
+59083 INFO: Building PYZ (ZlibArchive) C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\build\SkiaHelios\PYZ-00.pyz completed successfully.
+59178 INFO: checking PKG
+59179 INFO: Building PKG because PKG-00.toc is non existent
+59179 INFO: Building PKG (CArchive) SkiaHelios.pkg
+101955 INFO: Building PKG (CArchive) SkiaHelios.pkg completed successfully.
+101992 INFO: Bootloader C:\Program Files\Python310\lib\site-packages\PyInstaller\bootloader\Windows-64bit-intel\run.exe
+101992 INFO: checking EXE
+101992 INFO: Building EXE because EXE-00.toc is non existent
+101992 INFO: Building EXE from EXE-00.toc
+102011 INFO: Copying bootloader EXE to C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\dist\SkiaHelios.exe
+102057 INFO: Copying icon to EXE
+102064 INFO: Copying 0 resources to EXE
+102064 INFO: Embedding manifest in EXE
+102068 INFO: Appending PKG archive to EXE
+102280 INFO: Fixing EXE headers
+103437 INFO: Building EXE from EXE-00.toc completed successfully.
+103476 INFO: Build complete! The results are available in: C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\dist

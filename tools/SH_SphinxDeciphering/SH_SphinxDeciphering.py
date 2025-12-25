@@ -30,14 +30,14 @@ class SphinxEngine:
         self.min_entropy = 3.0 
         self.results = []
 
-    def _calculate_entropy(self, data):
-        if not data: return 0
-        entropy = 0
-        for x in range(256):
-            p_x = float(data.count(chr(x))) / len(data)
-            if p_x > 0:
-                entropy += - p_x * math.log(p_x, 2)
-        return entropy
+    def _entropy(self, s):
+        # 短すぎる文字列（"PowerShell"など）の高エントロピー誤検知を防ぐっス
+        if len(s) < 15: return 0.0
+        import math
+        p, lns = {}, float(len(s))
+        for c in s:
+            p[c] = p.get(c, 0) + 1
+        return -sum(count/lns * math.log(count/lns, 2) for count in p.values())
 
     def _try_decode(self, text):
         candidates = []
@@ -86,29 +86,61 @@ class SphinxEngine:
             if time_col: print(f"    -> Preserving Timeline via: '{time_col}'")
             
             # 2. PowerShell関連イベント(4104等)にフィルタリング
-            if eid_col:
-                df = df.filter(pl.col(eid_col).cast(pl.Utf8).str.contains(r"4104|800|400"))
+            # if eid_col:
+            #     df = df.filter(pl.col(eid_col).cast(pl.Utf8).str.contains(r"4104|800|400"))
 
             # 3. [修正] 時刻カラムを残したままユニーク抽出を行うっス！
             # 以前のコードでは .select(target_col) で時刻を捨てていたっスね。
             select_cols = [target_col]
             if time_col: select_cols.append(time_col)
             
-            suspicious_df = df.filter(
-                pl.col(target_col).str.len_chars() > 20
-            ).select(select_cols).unique(subset=[target_col])
+            # suspicious_df = df.filter(
+            #     pl.col(target_col).str.len_chars() > 20
+            # ).select(select_cols).unique(subset=[target_col])
 
-            row_count = len(suspicious_df)
+            row_count = len(df) # suspicious_df ではなく全体からフィルタする形に変えるっス
             print(f"[*] Phase 2: Analyzing {row_count} blocks while maintaining context...")
 
+            # [Patch] Infect6: Variable Scope Fix & Keyword Priority
+            NOISE_GUID = "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}"
+            # 'payload' is handled via lowercase conversion below
+            ATTACK_SIGS_REGEX = r"(?i)(bypass|hidden|-enc|payload|dwbo)" 
+
             results = []
+
+            # 1. 攻撃シグネチャ（最優先・即時確保）
+            # エントロピー計算やノイズ判定の前に、全文検索で確保するっス！
+            keyword_hits = df.filter(
+                pl.col(target_col).str.contains(ATTACK_SIGS_REGEX)
+            )
+            
+            for row in keyword_hits.iter_rows(named=True):
+                 results.append({
+                    "TimeCreated": row.get(time_col, "N/A"),
+                    "Sphinx_Score": 150,
+                    "Original_Snippet": row[target_col][:30],
+                    "Decoded_Hint": f"[FORCE DECODE] Attack Keyword Found: {row[target_col][:50]}...",
+                    "Sphinx_Tags": "ATTACK_SIG_DETECTED"
+                })
+
+            # 2. その他（エントロピー検査）
+            # キーワードヒット以外を対象にするっス
+            remaining_df = df.filter(
+                ~pl.col(target_col).str.contains(ATTACK_SIGS_REGEX)
+            )
+            
+            suspicious_df = remaining_df.filter(pl.col(target_col).is_not_null())
+            if eid_col:
+                 suspicious_df = suspicious_df.filter(pl.col(eid_col).cast(pl.Utf8).str.contains(r"4104|800|400"))
+
             for row in suspicious_df.iter_rows(named=True):
                 original_text = row[target_col]
-                event_time = row.get(time_col, "N/A") # 時刻を取得！
-                
+                event_time = row.get(time_col, "N/A")
                 if not original_text: continue
 
-                ent = self._calculate_entropy(original_text)
+                if NOISE_GUID in original_text: continue
+
+                ent = self._entropy(original_text)
                 decoded_candidates = self._try_decode(original_text)
                 
                 if decoded_candidates or ent > 4.0:
@@ -127,13 +159,13 @@ class SphinxEngine:
                         hint = f"[{method}] {decoded_text[:80]}"
                     
                     results.append({
-                        "TimeCreated": event_time, # ここに時刻を戻したっス！！
+                        "TimeCreated": event_time,
                         "Sphinx_Score": score,
                         "Original_Snippet": original_text[:30],
                         "Decoded_Hint": hint,
                         "Sphinx_Tags": tags
                     })
-
+            
             if not results: return None
             return pl.DataFrame(results).sort("Sphinx_Score", descending=True)
 

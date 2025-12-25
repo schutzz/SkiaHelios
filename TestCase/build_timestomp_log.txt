@@ -1,0 +1,66 @@
+200 INFO: PyInstaller: 6.17.0, contrib hooks: 2025.10
+200 INFO: Python: 3.10.11
+222 INFO: Platform: Windows-10-10.0.26100-SP0
+223 INFO: Python environment: C:\Program Files\Python310
+224 INFO: wrote C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\TestCase\timestomp.spec
+227 INFO: Removing temporary files and cleaning cache in C:\Users\user\AppData\Local\pyinstaller
+231 INFO: Module search paths (PYTHONPATH):
+['C:\\Program Files\\Python310\\Scripts\\pyinstaller.exe',
+ 'C:\\Program Files\\Python310\\python310.zip',
+ 'C:\\Program Files\\Python310\\DLLs',
+ 'C:\\Program Files\\Python310\\lib',
+ 'C:\\Program Files\\Python310',
+ 'C:\\Users\\user\\AppData\\Roaming\\Python\\Python310\\site-packages',
+ 'C:\\Program Files\\Python310\\lib\\site-packages',
+ 'C:\\Program Files\\Python310\\lib\\site-packages\\win32',
+ 'C:\\Program Files\\Python310\\lib\\site-packages\\win32\\lib',
+ 'C:\\Program Files\\Python310\\lib\\site-packages\\Pythonwin',
+ 'C:\\Users\\user\\.gemini\\antigravity\\scratch\\SkiaHelios\\TestCase']
+pygame 2.6.1 (SDL 2.28.4, Python 3.10.11)
+Hello from the pygame community. https://www.pygame.org/contribute.html
+851 INFO: checking Analysis
+851 INFO: Building Analysis because Analysis-00.toc is non existent
+851 INFO: Looking for Python shared library...
+851 INFO: Using Python shared library: C:\Program Files\Python310\python310.dll
+852 INFO: Running Analysis Analysis-00.toc
+852 INFO: Target bytecode optimization level: 0
+852 INFO: Initializing module dependency graph...
+854 INFO: Initializing module graph hook caches...
+877 INFO: Analyzing modules for base_library.zip ...
+1669 INFO: Processing standard module hook 'hook-heapq.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+1759 INFO: Processing standard module hook 'hook-encodings.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+2922 INFO: Processing standard module hook 'hook-pickle.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+4028 INFO: Caching module dependency graph...
+4068 INFO: Analyzing C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\TestCase\timestomp.py
+4083 INFO: Processing standard module hook 'hook-_ctypes.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+4094 INFO: Processing module hooks (post-graph stage)...
+4101 INFO: Performing binary vs. data reclassification (1 entries)
+4102 INFO: Looking for ctypes DLLs
+4105 INFO: Analyzing run-time hooks ...
+4106 INFO: Including run-time hook 'pyi_rth_inspect.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+4112 INFO: Creating base_library.zip...
+4132 INFO: Looking for dynamic libraries
+4259 INFO: Extra DLL search directories (AddDllDirectory): []
+4259 INFO: Extra DLL search directories (PATH): []
+4538 INFO: Warnings written to C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\TestCase\build\timestomp\warn-timestomp.txt
+4595 INFO: Graph cross-reference written to C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\TestCase\build\timestomp\xref-timestomp.html
+4610 INFO: checking PYZ
+4610 INFO: Building PYZ because PYZ-00.toc is non existent
+4610 INFO: Building PYZ (ZlibArchive) C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\TestCase\build\timestomp\PYZ-00.pyz
+4706 INFO: Building PYZ (ZlibArchive) C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\TestCase\build\timestomp\PYZ-00.pyz completed successfully.
+4712 INFO: checking PKG
+4712 INFO: Building PKG because PKG-00.toc is non existent
+4712 INFO: Building PKG (CArchive) timestomp.pkg
+6112 INFO: Building PKG (CArchive) timestomp.pkg completed successfully.
+6115 INFO: Bootloader C:\Program Files\Python310\lib\site-packages\PyInstaller\bootloader\Windows-64bit-intel\run.exe
+6115 INFO: checking EXE
+6115 INFO: Building EXE because EXE-00.toc is non existent
+6115 INFO: Building EXE from EXE-00.toc
+6115 INFO: Copying bootloader EXE to C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\TestCase\dist\timestomp.exe
+6119 INFO: Copying icon to EXE
+6126 INFO: Copying 0 resources to EXE
+6126 INFO: Embedding manifest in EXE
+6132 INFO: Appending PKG archive to EXE
+6144 INFO: Fixing EXE headers
+6247 INFO: Building EXE from EXE-00.toc completed successfully.
+6250 INFO: Build complete! The results are available in: C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\TestCase\dist

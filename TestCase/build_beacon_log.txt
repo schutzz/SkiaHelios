@@ -1,0 +1,65 @@
+334 INFO: PyInstaller: 6.17.0, contrib hooks: 2025.10
+335 INFO: Python: 3.10.11
+350 INFO: Platform: Windows-10-10.0.26100-SP0
+352 INFO: Python environment: C:\Program Files\Python310
+353 INFO: wrote C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\TestCase\beacon.spec
+357 INFO: Removing temporary files and cleaning cache in C:\Users\user\AppData\Local\pyinstaller
+359 INFO: Module search paths (PYTHONPATH):
+['C:\\Program Files\\Python310\\Scripts\\pyinstaller.exe',
+ 'C:\\Program Files\\Python310\\python310.zip',
+ 'C:\\Program Files\\Python310\\DLLs',
+ 'C:\\Program Files\\Python310\\lib',
+ 'C:\\Program Files\\Python310',
+ 'C:\\Users\\user\\AppData\\Roaming\\Python\\Python310\\site-packages',
+ 'C:\\Program Files\\Python310\\lib\\site-packages',
+ 'C:\\Program Files\\Python310\\lib\\site-packages\\win32',
+ 'C:\\Program Files\\Python310\\lib\\site-packages\\win32\\lib',
+ 'C:\\Program Files\\Python310\\lib\\site-packages\\Pythonwin',
+ 'C:\\Users\\user\\.gemini\\antigravity\\scratch\\SkiaHelios\\TestCase']
+pygame 2.6.1 (SDL 2.28.4, Python 3.10.11)
+Hello from the pygame community. https://www.pygame.org/contribute.html
+1101 INFO: checking Analysis
+1101 INFO: Building Analysis because Analysis-00.toc is non existent
+1102 INFO: Looking for Python shared library...
+1102 INFO: Using Python shared library: C:\Program Files\Python310\python310.dll
+1102 INFO: Running Analysis Analysis-00.toc
+1102 INFO: Target bytecode optimization level: 0
+1102 INFO: Initializing module dependency graph...
+1103 INFO: Initializing module graph hook caches...
+1130 INFO: Analyzing modules for base_library.zip ...
+1999 INFO: Processing standard module hook 'hook-heapq.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+2089 INFO: Processing standard module hook 'hook-encodings.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+3384 INFO: Processing standard module hook 'hook-pickle.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+4787 INFO: Caching module dependency graph...
+4832 INFO: Analyzing C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\TestCase\beacon.py
+4835 INFO: Processing module hooks (post-graph stage)...
+4842 INFO: Performing binary vs. data reclassification (1 entries)
+4844 INFO: Looking for ctypes DLLs
+4849 INFO: Analyzing run-time hooks ...
+4850 INFO: Including run-time hook 'pyi_rth_inspect.py' from 'C:\\Program Files\\Python310\\lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+4856 INFO: Creating base_library.zip...
+4878 INFO: Looking for dynamic libraries
+5032 INFO: Extra DLL search directories (AddDllDirectory): []
+5032 INFO: Extra DLL search directories (PATH): []
+5328 INFO: Warnings written to C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\TestCase\build\beacon\warn-beacon.txt
+5387 INFO: Graph cross-reference written to C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\TestCase\build\beacon\xref-beacon.html
+5407 INFO: checking PYZ
+5407 INFO: Building PYZ because PYZ-00.toc is non existent
+5407 INFO: Building PYZ (ZlibArchive) C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\TestCase\build\beacon\PYZ-00.pyz
+5505 INFO: Building PYZ (ZlibArchive) C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\TestCase\build\beacon\PYZ-00.pyz completed successfully.
+5511 INFO: checking PKG
+5511 INFO: Building PKG because PKG-00.toc is non existent
+5511 INFO: Building PKG (CArchive) beacon.pkg
+6976 INFO: Building PKG (CArchive) beacon.pkg completed successfully.
+6979 INFO: Bootloader C:\Program Files\Python310\lib\site-packages\PyInstaller\bootloader\Windows-64bit-intel\run.exe
+6979 INFO: checking EXE
+6980 INFO: Building EXE because EXE-00.toc is non existent
+6980 INFO: Building EXE from EXE-00.toc
+6980 INFO: Copying bootloader EXE to C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\TestCase\dist\beacon.exe
+6988 INFO: Copying icon to EXE
+6995 INFO: Copying 0 resources to EXE
+6995 INFO: Embedding manifest in EXE
+7003 INFO: Appending PKG archive to EXE
+7011 INFO: Fixing EXE headers
+7143 INFO: Building EXE from EXE-00.toc completed successfully.
+7147 INFO: Build complete! The results are available in: C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\TestCase\dist

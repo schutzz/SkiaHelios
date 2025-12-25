@@ -20,3 +20,11 @@ C:\Temp\
 # System
 .DS_Store
 Thumbs.db
+
+build/
+
+dist/
+
+*.spec
+
+__pycache__/

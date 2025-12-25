@@ -66,35 +66,56 @@ class PlutosEngine:
             return None
 
         try:
-            lf_lnk = pl.scan_csv(lnk_file, infer_schema_length=0, ignore_errors=True)
-            cols = lf_lnk.collect_schema().names()
+            # [Fix] Lazyではなく一旦 collect() して物理構造を確定させるっス！
+            df_lnk = pl.read_csv(lnk_file, infer_schema_length=0, ignore_errors=True)
+            cols = df_lnk.columns # これで確実にカラム名が取れるっス！
             path_col = next((c for c in cols if c in ['LocalPath', 'Path', 'Target']), 'LocalPath')
             dtype_col = next((c for c in cols if 'DriveType' in c), None)
             
             # Filter Logic: Not C: OR DriveType is Removable/Fixed(External)
             if dtype_col:
-                lf_usb_access = lf_lnk.filter(
+                df_usb_access = df_lnk.filter(
                     pl.col(dtype_col).cast(pl.Utf8).str.contains(r"(?i)Removable|Fixed|^2$") 
                 )
             else:
                 # Fallback: Path does not start with C:
-                lf_usb_access = lf_lnk.filter(
+                df_usb_access = df_lnk.filter(
                     ~pl.col(path_col).str.to_uppercase().str.starts_with("C:") & 
                     pl.col(path_col).str.contains(r"^[A-Z]:")
                 )
 
-            lf_usb_access = lf_usb_access.with_columns(
+            df_usb_access = df_usb_access.with_columns(
                 pl.col(path_col).str.extract(r"\\([^\\]+)$", 1).str.to_lowercase().alias("Target_FileName")
             )
 
-            df_usb = lf_usb_access.collect()
+            # [Fix] Physical Filter for System Noise
+            SYSTEM_NOISE_RE = r"(?i)\\Windows\\|\\Program Files|\\AppData\\Local\\Microsoft\\(OneDrive|Edge)"
+
+            # df_usb_access is already a DataFrame (eager), so we don't need .collect()
+            df_usb = df_usb_access
             
             if self.pandora_df is not None:
                 df_usb = df_usb.join(self.pandora_df, on="Target_FileName", how="left")
+                
+                # 判定ロジックの高度化
                 df_usb = df_usb.with_columns(
                     pl.when(pl.col("Risk_Tag").is_not_null())
-                    .then(pl.lit("CONFIRMED_EXFILTRATION"))
-                    .otherwise(pl.lit("POTENTIAL_EXFILTRATION"))
+                    .then(
+                        # GhostかつLNKありの場合でも、システムパスの実行ファイルならダウングレードっス
+                        pl.when(
+                            (pl.col("Target_FileName").str.ends_with(".exe") | 
+                             pl.col("Target_FileName").str.ends_with(".dll")) &
+                            pl.col(path_col).str.contains(SYSTEM_NOISE_RE)
+                        )
+                        .then(pl.lit("SYSTEM_INTERNAL_ACTIVITY"))
+                        .otherwise(pl.lit("CONFIRMED_EXFILTRATION"))
+                    )
+                    .otherwise(
+                        # PandoraにないがLNKがある場合
+                        pl.when(pl.col(path_col).str.contains(SYSTEM_NOISE_RE))
+                        .then(pl.lit("NORMAL_APP_ACCESS"))
+                        .otherwise(pl.lit("POTENTIAL_EXFILTRATION"))
+                    )
                     .alias("Plutos_Verdict")
                 )
             else:
@@ -110,9 +131,45 @@ class PlutosEngine:
             print(f"[!] USB Analysis Failed: {e}")
             return None
 
+    def _correlate_actor_volume(self, row):
+        app_path = str(row.get("AppId", "") or "").lower()
+        vol_mb = row.get("Total_Sent_MB", 0.0)
+
+        # [Fix] Known System Actors (Services & Updates)
+        KNOWN_SYSTEM = [
+            "tiworker.exe", "svchost.exe", "wuaucltcore.exe", "msmpeng.exe", 
+            "searchindexer.exe", "system", "dosvc", "wuauserv", 
+            "licensemanager", "diagtrack", "null"
+        ]
+
+        if app_path in KNOWN_SYSTEM or app_path == "null" or app_path == "":
+             return "NORMAL_SYSTEM_ACTIVITY"
+
+        # 1. 通信主体のプロファイリング
+        is_system = any(sys_p in app_path for sys_p in ["windows\\system32", "winsxs", "program files"])
+        is_script = any(scr_p in app_path for scr_p in ["powershell.exe", "cmd.exe", "wscript.exe", "sqlservr.exe"])
+        
+        # 2. 物理的な判定のクロスオーバー
+        if is_script:
+            return "CRITICAL_SCRIPT_COMM" # スクリプト通信は量に関係なく即通報っス！
+        
+        if is_system:
+            # システムプロセスの場合 (10GB超えは異常)
+            if vol_mb > 10240:
+                return "ANOMALOUS_SYSTEM_VOL"
+            else:
+                return "NORMAL_SYSTEM_ACTIVITY" # Trigger0で定義した「ゴミ」っス
+        else:
+            # 未知のバイナリ（beacon.exe等）
+            if vol_mb < 5:
+                return "C2_BEACON_DETECTED" # 低流量の「忍びの足音」をキャッチっス！
+            else:
+                return "UNKNOWN_ACTOR_EXFIL"
+
     def analyze_network_traffic(self):
         print("[*] Phase 2: Profiling Network Traffic (SRUM)...")
-        srum_file = self._find_csv("Srum") or self._find_csv("NetworkUsage")
+        # [Fix] NetworkUsage という物理キーワードを最優先にするっス！
+        srum_file = self._find_csv("NetworkUsage") or self._find_csv("SrumECmd") or self._find_csv("Srum")
         
         if not srum_file:
             print("[!] Skipping SRUM Analysis: Missing SrumECmd CSV.")
@@ -121,29 +178,45 @@ class PlutosEngine:
         try:
             lf_srum = pl.scan_csv(srum_file, infer_schema_length=0, ignore_errors=True)
             schema = lf_srum.collect_schema().names()
-            app_col = next((c for c in schema if 'AppId' in c or 'Exe' in c), 'AppId')
             
-            fg_write = next((c for c in schema if 'ForegroundBytesWritten' in c), None)
-            bg_write = next((c for c in schema if 'BackgroundBytesWritten' in c), None)
+            # アプリ識別カラムの絶対座標を特定
+            app_col = next((c for c in schema if c in ['ExeInfo', 'AppId', 'Description']), 'AppId')
             
-            if not fg_write and not bg_write:
+            # [Fix] カラム名に 'BytesSent' が含まれるものを抽出 (NetworkUsage では 'Bytes Sent' の場合もあるため)
+            sent_col = next((c for c in schema if "BytesSent" in c or "Bytes Sent" in c), None)
+            
+            if not sent_col:
+                print("[!] Error: BytesSent column not found in SRUM data.")
                 return None
-            else:
-                exprs = []
-                if fg_write: exprs.append(pl.col(fg_write).fill_null(0).cast(pl.Float64))
-                if bg_write: exprs.append(pl.col(bg_write).fill_null(0).cast(pl.Float64))
-                total_sent_expr = sum(exprs)
 
+            # 物理流量の計算 (Bytes -> MB)
             lf_traffic = lf_srum.group_by(app_col).agg([
-                total_sent_expr.sum().alias("Total_Sent_MB") / (1024*1024),
+                (pl.col(sent_col).cast(pl.Float64).sum() / (1024*1024)).alias("Total_Sent_MB"),
                 pl.col(app_col).count().alias("Connection_Count")
             ])
             
-            lf_heavy = lf_traffic.filter(pl.col("Total_Sent_MB") > 10.0).sort("Total_Sent_MB", descending=True)
-            return lf_heavy.collect()
+            # [Fix] apply correlation logic via map_elements (eager execution safe)
+            df_traffic = lf_traffic.collect()
+            
+            # Rename app_col to 'AppId' for consistency in helper
+            if app_col != "AppId":
+                df_traffic = df_traffic.rename({app_col: "AppId"})
+
+            df_traffic = df_traffic.with_columns(
+                pl.struct(["AppId", "Total_Sent_MB"]).map_elements(
+                    lambda x: self._correlate_actor_volume(x), # ラムダで包んで確実に self を通すっス！
+                    return_dtype=pl.Utf8
+                ).alias("Plutos_Verdict")
+            )
+
+            # Filter out normal system activity to reduce noise
+            df_heavy = df_traffic.filter(pl.col("Plutos_Verdict") != "NORMAL_SYSTEM_ACTIVITY").sort("Total_Sent_MB", descending=True)
+            return df_heavy
 
         except Exception as e:
             print(f"[!] SRUM Analysis Failed: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
 def main(argv=None):
