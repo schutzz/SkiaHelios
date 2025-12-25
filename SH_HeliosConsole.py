@@ -2,36 +2,14 @@ import sys
 import os
 from pathlib import Path
 import time
-
-# --- Monolith Imports ---
-try:
-    from tools.SH_ChaosGrasp.SH_ChaosGrasp import main as chaos_main
-    from tools.SH_PandorasLink.SH_PandorasLink import main as pandora_main
-    from tools.SH_ChronosSift.SH_ChronosSift import main as chronos_main
-    from tools.SH_AIONDetector.SH_AIONDetector import main as aion_main
-    from tools.SH_PlutosGate.SH_PlutosGate import main as plutos_main
-    from tools.SH_HekateWeaver.SH_HekateWeaver import main as hekate_main
-    from tools.SH_SphinxDeciphering.SH_SphinxDeciphering import main as sphinx_main
-except ImportError as e:
-    print(f"[!] Import Error (Monolith): {e}")
-    sys.exit(1)
+import importlib
 
 # ============================================================
-#  SH_HeliosConsole v2.7 [Monolith Core]
+#  SH_HeliosConsole v3.2 [MFT-Aware Core]
 #  Mission: Coordinate all modules within a single executable.
-#  Updates: Replaced subprocess with direct function calls.
+#  Updates: Passes Raw MFT to AION for Deep Scanning.
 #  "The sun must shine on every hidden artifact."
 # ============================================================
-
-MODULE_MAP = {
-    "chaos":   chaos_main,
-    "pandora": pandora_main,
-    "chronos": chronos_main,
-    "aion":    aion_main,
-    "plutos":  plutos_main,
-    "hekate":  hekate_main,
-    "sphinx":  sphinx_main
-}
 
 def print_logo():
     os.system('cls' if os.name == 'nt' else 'clear')
@@ -41,7 +19,7 @@ def print_logo():
     ,      |_______|      ,
    ,        _______        ,
   ,        |_______|        ,  < SKIA HELIOS >
-  ,        _______          ,  v2.7 - Monolith Core
+  ,        _______          ,  v3.2 - MFT-Aware Core
    ,       |_______|       ,
     ,                     ,
       , _ _ _ _ _ _ _ _ ,
@@ -51,17 +29,46 @@ def print_logo():
 
 class HeliosCommander:
     def __init__(self):
-        pass
+        self.modules = {}
+        self._load_modules()
+
+    def _import_dynamic(self, tool_name, script_name):
+        try:
+            module_path = f"tools.{tool_name}.{script_name}"
+            mod = importlib.import_module(module_path)
+            return mod.main
+        except (ImportError, ModuleNotFoundError):
+            pass
+        try:
+            module_path = f"tools.{script_name}"
+            mod = importlib.import_module(module_path)
+            return mod.main
+        except (ImportError, ModuleNotFoundError) as e:
+            print(f"[!] Warning: Could not load {tool_name} ({e})")
+            return None
+
+    def _load_modules(self):
+        tool_map = {
+            "chaos":   ("SH_ChaosGrasp", "SH_ChaosGrasp"),
+            "pandora": ("SH_PandorasLink", "SH_PandorasLink"),
+            "chronos": ("SH_ChronosSift", "SH_ChronosSift"),
+            "aion":    ("SH_AIONDetector", "SH_AIONDetector"),
+            "plutos":  ("SH_PlutosGate", "SH_PlutosGate"),
+            "hekate":  ("SH_HekateWeaver", "SH_HekateWeaver"),
+            "sphinx":  ("SH_SphinxDeciphering", "SH_SphinxDeciphering")
+        }
+        for key, (folder, script) in tool_map.items():
+            func = self._import_dynamic(folder, script)
+            self.modules[key] = func if func else None
 
     def run_module(self, key, args):
-        func = MODULE_MAP.get(key)
+        func = self.modules.get(key)
         if not func:
-            print(f"[!] Module {key} not found.")
+            print(f"[!] Module '{key}' is not available.")
             return False
         
         print(f"\n>>> [EXECUTING] {key.upper()} Stage...")
         try:
-            # Direct call with argument list
             func(args)
             return True
         except Exception as e:
@@ -79,29 +86,31 @@ class HeliosCommander:
         case_dir = Path(out_dir) / f"{case_name}_{timestamp}"
         case_dir.mkdir(parents=True, exist_ok=True)
         
+        # 0. Identify Raw MFT first
+        mft_raw = next(Path(kape_dir).rglob("*$MFT_Output.csv"), None)
+
         # 1. Chaos (MFT Timeline Construction)
         chaos_out = case_dir / "Master_Timeline.csv"
         self.run_module("chaos", ["-d", kape_dir, "-o", str(chaos_out)])
 
         # 2. Chronos (Time Paradox Analysis)
         chronos_out = case_dir / "Time_Anomalies.csv"
-        mft_raw = next(Path(kape_dir).rglob("*$MFT_Output.csv"), None)
         if mft_raw:
             self.run_module("chronos", ["-f", str(mft_raw), "-o", str(chronos_out), "--targets-only"])
 
         # 3. AION (Persistence with MFT Correlation)
         aion_out = case_dir / "Persistence_Report.csv"
+        # [Fix] Pass Raw MFT if available, otherwise Timeline
+        mft_target = str(mft_raw) if mft_raw else str(chaos_out)
+        
         self.run_module("aion", [
             "--dir", kape_dir, 
-            "--mft", str(chaos_out), 
+            "--mft", mft_target, # Passing Raw MFT now!
             "-o", str(aion_out)
         ])
 
-        # 4. Pandora & Plutos (Fix: Added missing --start/--end)
+        # 4. Pandora & Plutos
         pandora_out = case_dir / "Ghost_Report.csv"
-        # [FIX] Default range if not provided?
-        # Since this is full auto, we pick a wide range or need config.
-        # "2000-01-01" to "2030-12-31" is safe.
         self.run_module("pandora", [
             "-d", kape_dir, 
             "--start", "2000-01-01", "--end", "2030-12-31", 
@@ -109,7 +118,14 @@ class HeliosCommander:
         ])
         
         plutos_out = case_dir / "Exfil_Report.csv"
-        self.run_module("plutos", ["--dir", kape_dir, "--pandora", str(pandora_out), "-o", str(plutos_out)])
+        plutos_net_out = case_dir / "Exfil_Report_Network.csv"
+        
+        self.run_module("plutos", [
+            "--dir", kape_dir, 
+            "--pandora", str(pandora_out), 
+            "-o", str(plutos_out),
+            "--net-out", str(plutos_net_out)
+        ])
 
         # 5. Sphinx (Script Decoding)
         sphinx_out = case_dir / "Sphinx_Decoded.csv"
@@ -121,9 +137,14 @@ class HeliosCommander:
         for lang in ["en", "jp"]:
             report_path = case_dir / f"Grimoire_{case_name}_{lang}.md"
             self.run_module("hekate", [
-                "-i", str(chaos_out), "-o", str(report_path), "--lang", lang,
-                "--aion", str(aion_out), "--plutos", str(plutos_out),
-                "--sphinx", str(sphinx_out), "--chronos", str(chronos_out),
+                "-i", str(chaos_out), 
+                "-o", str(report_path), 
+                "--lang", lang,
+                "--aion", str(aion_out), 
+                "--plutos", str(plutos_out),
+                "--plutos-net", str(plutos_net_out),
+                "--sphinx", str(sphinx_out), 
+                "--chronos", str(chronos_out),
                 "--pandora", str(pandora_out)
             ])
 
@@ -131,17 +152,18 @@ class HeliosCommander:
 
 def main():
     commander = HeliosCommander()
-    kape = input("Target Artifact Path: ").strip()
-    case = input("Case Name: ").strip() or "Standard_Investigation"
-    
-    # [FIX] Remove quotes if user dragged & dropped path
-    kape = kape.strip('"').strip("'")
-    
-    if os.path.exists(kape) and os.path.isdir(kape):
-        commander.full_auto_scan(kape, "Helios_Output", case)
-    else:
-        print("[!] Target path invalid.")
-        input("Press Enter to exit...")
+    if len(sys.argv) > 1: pass
+    try:
+        kape = input("Target Artifact Path: ").strip()
+        case = input("Case Name: ").strip() or "Standard_Investigation"
+        kape = kape.strip('"').strip("'")
+        if os.path.exists(kape) and os.path.isdir(kape):
+            commander.full_auto_scan(kape, "Helios_Output", case)
+        else:
+            print("[!] Target path invalid.")
+            input("Press Enter to exit...")
+    except KeyboardInterrupt:
+        print("\n[!] Aborted.")
 
 if __name__ == "__main__":
     main()

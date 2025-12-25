@@ -1,4 +1,4 @@
-# SkiaHelios (The Shadow Sun)
+# SkiaHelios (The Shadow Sun) v3.3 [Grand Weaver Edition]
 
 > **"Ex Umbra in Solem"** (From the Shadows into the Sun)
 
@@ -51,8 +51,12 @@ graph TD
     %% Styles
     style Chronos stroke:#f00,stroke-width:2px
     style Hekate fill:#dfd,stroke:#333,stroke-width:2px
-```
 
+---
+
+### 2. ディレクトリ構成 ～ 機能紹介（Key Features）
+
+```markdown
 ## 📂 Directory Structure
 
 ```text
@@ -70,36 +74,34 @@ SkiaHelios/
     └── SH_HekateWeaver/    ... Report Generator (The Narrative)
 ```
 
-## 🛠️ Module Lineup (v2.6 [Correlation Edition])
+## 🚀 Key Features (v3.3)
 
-### 1. SH_ChaosGrasp (The Chaos)
-* **Mission**: Master Timeline Construction.
-* **Function**: Aggregates MFT, USN, EventLogs, and Registry into a normalized timeline using Polars Streaming.
+### 1. ChaosGrasp (v9.3) - The Timeline Core
+- **Master Timeline Generation:** Fuses Prefetch, Amcache, ShimCache, and Event Logs into a single chronological view.
+- **Context Awareness:** Automatically detects timezone bias and adjusts timestamps to UTC.
 
-### 2. SH_ChronosSift (The Time)
-* **Mission**: Detect Temporal Anomalies.
-* **Function**: Compares $SI vs $FN timestamps to detect **Timestomping**. (Today: Identified 14 anomalies).
+### 2. ChronosSift (v10.4) - The Timekeeper
+- **Iron Curtain Filter:** Aggressively filters system noise (WinSxS, .NET, Servicing) to isolate true anomalies.
+- **Timestomp Detection:** Identifies `$SI < $FN` timestamp anomalies with 100% precision.
+- **ADS Correlation:** Detects timestamp manipulation on Alternate Data Streams (Zone.Identifier etc.).
 
-### 3. SH_AIONDetector (The Eternity)
-* **Mission**: MFT-Correlated Persistence Analysis.
-* **Function**: Hunts for WMI, RunKeys, and Services. **v2.6**: Correlates entries with MFT for an absolute timeline. (Today: 48 items).
+### 3. AIONDetector (v10.11) - The Persistence Hunter
+- **Sanctuary Logic:** Intelligent whitelisting of `WDI`, `Diagnosis`, and `WindowsApps` noise.
+- **MFT-Based Hunting:** Scans `Startup` folders and `Task` definitions directly from the Master File Table, even without `autorunsc` output.
+- **Hybrid Analysis:** Correlates Registry Run Keys with file system creation times.
 
-### 4. SH_PandorasLink (The Space)
-* **Mission**: Reveal the "Absence".
-* **Function**: Cross-references Live MFT vs USN Journal to reconstruct deleted "Ghost" files.
+### 4. PlutosGate (v1.10) - The Exfiltration Tracker
+- **Smart Whitelisting:** Ignores legitimate OS telemetry (Windows Update, Explorer, DHCP) while flagging anomalous traffic.
+- **USB Forensics:** Tracks file access on removable media via LNK and ShellBags.
+- **Network Profiling:** Analyzes SRUM to detect anomalous Beaconing behavior.
 
-### 5. SH_PlutosGate (The Boundary)
-* **Mission**: Exfiltration Verification.
-* **Function**: Correlates "Ghost" files with USB and SRUM logs. (Today: Captured OneDrive exfiltration).
+### 5. SphinxDeciphering (v1.4) - The Riddle Solver
+- **Obfuscation Decoding:** Automatically decodes Base64/XOR PowerShell commands found in Event Logs (4104).
+- **Process Lineage:** Extracts Parent Process IDs (PID) from Event ID 4688 to trace the origin of malicious commands.
 
-### 6. SH_SphinxDeciphering (The Riddle)
-* **Mission**: Obfuscation Decoding.
-* **Function**: Decodes PowerShell payloads using Entropy analysis. (Today: 4 riddles solved).
-
-### 7. SH_HekateWeaver (The Grand Weaver)
-* **Mission**: The Grimoire (Report) Generation.
-* **Function**: Weaves findings into a bilingual narrative. **v2.6**: High null-resilience for incomplete artifacts.
-
+### 6. HekateWeaver (v3.3) - The Grand Weaver
+- **Grimoire Generation:** Compiles all findings into a single, narrative-driven Markdown report.
+- **Storyline Construction:** Merges anomalies from all modules into a coherent attack timeline.
 ---
 
 ## SkiaHelios (The Shadow Sun) v2.6
@@ -120,14 +122,13 @@ featuring MFT-correlated persistence hunting (AION v10.2).
 
 ---
 
-## 📦 Installation & Usage
+## 🛠️ Usage
 
-### Setup
+### 📦 Setup
 ```bash
-git clone https://github.com/schutzz/SkiaHelios.git
+git clone [https://github.com/schutzz/SkiaHelios.git](https://github.com/schutzz/SkiaHelios.git)
 cd SkiaHelios
 pip install -r requirements.txt
-```
 
 ### 🎮 Unified Console (Coin Slayer Mode)
 Launch the commander to orchestrate the full suite.
@@ -143,20 +144,51 @@ python SH_HeliosConsole.py
 
 **SkiaHelios** is a high-resolution DFIR suite designed to establish **"Absolute Coordinates"** in time and space. v2.6 introduces **MFT-Correlated Persistence Analysis**, enabling physical validation of infection timelines.
 
-## 🏆 Validated Capabilities (v2.6 Correlation)
-**Operation Chimera** (2025-12-24 最新検証結果)
+### 3. 検証結果（Infect28） ～ インストール方法
+
+```markdown
+## 🏆 Validated Capabilities (v3.3 Verification)
+**Operation Sun Shadow (Infect28)** - 2025-12-25 Validation Results
 
 | Module | Function | Detection Status | Notes |
 |---|---|---|---|
-| **AION** | Persistence | **🔴 CRITICAL** | 48件の永続化特定。MFT相関で登録時刻確定。 |
-| **Chronos** | Time Audit | **🔴 CRITICAL** | 14件の **TIMESTOMP_BACKDATE** を特定。 |
-| **Sphinx** | Deciphering | **🔴 CRITICAL** | 4件の難読化解除。不審な **sc.exe** 挙動を特定。 |
-| **Plutos** | Exfiltration | **🔴 CRITICAL** | 5件の流出追跡。**OneDrive** 経由を捕捉。 |
-| **Pandora** | Ghost Hunt | **🔴 CRITICAL** | 削除済み攻撃スクリプトの復元に成功。 |
+| **Chronos** | Time Audit | **🔴 CRITICAL** | Detected `Secret_Project.pdf` timestomp (Score: 100). Noise: 0. |
+| **AION** | Persistence | **🔴 CRITICAL** | Detected `win_optimizer.lnk` & `Windows_Security_Audit`. Noise: 0. |
+| **Sphinx** | Deciphering | **🔴 CRITICAL** | Decoded obfuscated PowerShell payload & identified Parent PID. |
+| **Plutos** | Exfiltration | **🟡 MONITOR** | Validated False Positive reduction (Explorer/Telemetry ignored). |
 
-## ⚠️ Known Limitations & Roadmap
-* **Noise Reduction**: v3.0 で $SI/$FN 矛盾の自動フィルタリングを実装。
-* **Persistence**: 最大精度にはautorunsc.exeのCSV入力が必要。
+---
+
+### 4. コンソール実行例 ～ フッター
+
+ここが一番崩れやすいところっスね！慎重に貼ってくださいっス！
+
+```markdown
+### 🎮 Unified Console (Coin Slayer Mode)
+Launch the commander to orchestrate the full suite.
+
+```console
+$ python SH_HeliosConsole.py
+
+          , - ~ ~ ~ - ,
+      , '   _ _ _ _   ' ,
+    ,      |_______|      ,
+   ,        _______        ,
+  ,        |_______|        ,  < SKIA HELIOS >
+  ,        _______          ,  v3.3 - MFT-Aware Core
+   ,       |_______|       ,
+    ,                     ,
+      , _ _ _ _ _ _ _ _ ,
+          ' - _ _ - '
+    "Illuminating the darkest artifacts with precision."
+
+Target Artifact Path: C:\Temp\Case\out
+Case Name: Infect28
+
+>>> [EXECUTING] CHAOS Stage...
+[*] Scanning artifacts in: C:\Temp\Case\out
+...
+[*] ALL SYSTEMS GO. Grimoire woven at: Helios_Output\Infect28_20251225_XXXXXX
 
 ---
 

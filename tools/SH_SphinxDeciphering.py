@@ -8,9 +8,9 @@ import zlib
 import math
 
 # ============================================================
-#  SH_SphinxDeciphering v1.3 [Chronicle Link Edition]
-#  Mission: Decode and PRESERVE Evidence Context (Timestamps)
-#  Fix: Linked TimeCreated to Decoded Riddles for Hekate Storyline
+#  SH_SphinxDeciphering v1.4 [Context Hunter]
+#  Mission: Decode and PRESERVE Evidence Context (Parent/ID)
+#  Fix: Capture ProcessId/ThreadId for Parent Process Hunting
 # ============================================================
 
 def print_logo():
@@ -21,7 +21,7 @@ def print_logo():
        /  O  \    "Answer my riddle,
       /_______\    or be consumed."
 
-       [ 🦁 SH_SphinxDeciphering v1.3 ]
+       [ 🦁 SH_SphinxDeciphering v1.4 ]
     """)
 
 class SphinxEngine:
@@ -31,7 +31,6 @@ class SphinxEngine:
         self.results = []
 
     def _entropy(self, s):
-        # 短すぎる文字列（"PowerShell"など）の高エントロピー誤検知を防ぐっス
         if len(s) < 15: return 0.0
         import math
         p, lns = {}, float(len(s))
@@ -73,71 +72,64 @@ class SphinxEngine:
             df = pl.read_csv(self.target_file, ignore_errors=True, infer_schema_length=0)
             cols = df.columns
             
-            # 1. 証拠能力維持のための重要カラムを特定っス！
             target_col = next((c for c in cols if c in ['PayloadData1', 'ScriptBlockText', 'Message', 'Details']), None)
             time_col = next((c for c in cols if c in ['TimeCreated', 'EventTime', 'Timestamp']), None)
-            eid_col = next((c for c in cols if 'Id' in c), None)
             
+            # [Fix] Identify Context Columns for Parent Hunting
+            pid_col = next((c for c in cols if c in ['ProcessId', 'ExecutionProcessID']), None)
+            tid_col = next((c for c in cols if c in ['ThreadId', 'ExecutionThreadID']), None)
+            pname_col = next((c for c in cols if c in ['ProviderName', 'Channel']), None)
+
             if not target_col:
                 print("[!] Warning: No standard script column found.")
                 return None
 
             print(f"    -> Targeting Column: '{target_col}'")
             if time_col: print(f"    -> Preserving Timeline via: '{time_col}'")
+            if pid_col: print(f"    -> Preserving Execution Context: '{pid_col}'")
             
-            # 2. PowerShell関連イベント(4104等)にフィルタリング
-            # if eid_col:
-            #     df = df.filter(pl.col(eid_col).cast(pl.Utf8).str.contains(r"4104|800|400"))
-
-            # 3. [修正] 時刻カラムを残したままユニーク抽出を行うっス！
-            # 以前のコードでは .select(target_col) で時刻を捨てていたっスね。
-            select_cols = [target_col]
-            if time_col: select_cols.append(time_col)
-            
-            # suspicious_df = df.filter(
-            #     pl.col(target_col).str.len_chars() > 20
-            # ).select(select_cols).unique(subset=[target_col])
-
-            row_count = len(df) # suspicious_df ではなく全体からフィルタする形に変えるっス
+            row_count = len(df)
             print(f"[*] Phase 2: Analyzing {row_count} blocks while maintaining context...")
 
-            # [Patch] Infect6: Variable Scope Fix & Keyword Priority
             NOISE_GUID = "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}"
-            # 'payload' is handled via lowercase conversion below
             ATTACK_SIGS_REGEX = r"(?i)(bypass|hidden|-enc|payload|dwbo)" 
 
             results = []
 
-            # 1. 攻撃シグネチャ（最優先・即時確保）
-            # エントロピー計算やノイズ判定の前に、全文検索で確保するっス！
-            keyword_hits = df.filter(
-                pl.col(target_col).str.contains(ATTACK_SIGS_REGEX)
-            )
+            # Helper to extract context
+            def get_context(row):
+                return {
+                    "TimeCreated": row.get(time_col, "N/A"),
+                    "ProcessId": row.get(pid_col, "N/A"),
+                    "ThreadId": row.get(tid_col, "N/A"),
+                    "Provider": row.get(pname_col, "N/A")
+                }
+
+            # 1. 攻撃シグネチャ（最優先）
+            keyword_hits = df.filter(pl.col(target_col).str.contains(ATTACK_SIGS_REGEX))
             
             for row in keyword_hits.iter_rows(named=True):
-                 results.append({
-                    "TimeCreated": row.get(time_col, "N/A"),
+                 item = get_context(row)
+                 item.update({
                     "Sphinx_Score": 150,
                     "Original_Snippet": row[target_col][:30],
                     "Decoded_Hint": f"[FORCE DECODE] Attack Keyword Found: {row[target_col][:50]}...",
                     "Sphinx_Tags": "ATTACK_SIG_DETECTED"
                 })
+                 results.append(item)
 
             # 2. その他（エントロピー検査）
-            # キーワードヒット以外を対象にするっス
-            remaining_df = df.filter(
-                ~pl.col(target_col).str.contains(ATTACK_SIGS_REGEX)
-            )
-            
+            remaining_df = df.filter(~pl.col(target_col).str.contains(ATTACK_SIGS_REGEX))
             suspicious_df = remaining_df.filter(pl.col(target_col).is_not_null())
+            
+            # 4104 only if mixed logs
+            eid_col = next((c for c in cols if 'Id' in c), None)
             if eid_col:
                  suspicious_df = suspicious_df.filter(pl.col(eid_col).cast(pl.Utf8).str.contains(r"4104|800|400"))
 
             for row in suspicious_df.iter_rows(named=True):
                 original_text = row[target_col]
-                event_time = row.get(time_col, "N/A")
                 if not original_text: continue
-
                 if NOISE_GUID in original_text: continue
 
                 ent = self._entropy(original_text)
@@ -158,15 +150,17 @@ class SphinxEngine:
                             tags = f"DECODED({method})"
                         hint = f"[{method}] {decoded_text[:80]}"
                     
-                    results.append({
-                        "TimeCreated": event_time,
+                    item = get_context(row)
+                    item.update({
                         "Sphinx_Score": score,
                         "Original_Snippet": original_text[:30],
                         "Decoded_Hint": hint,
                         "Sphinx_Tags": tags
                     })
+                    results.append(item)
             
             if not results: return None
+            # [Fix] Sort by score but keep ProcessId visible
             return pl.DataFrame(results).sort("Sphinx_Score", descending=True)
 
         except Exception as e:
