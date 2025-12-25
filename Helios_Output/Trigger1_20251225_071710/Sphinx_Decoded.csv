@@ -1,4 +1,0 @@
-TimeCreated,Sphinx_Score,Original_Snippet,Decoded_Hint,Sphinx_Tags
-2025-12-21 11:26:26.2047109,46,AppID: {1AC14E77-02E7-4E5D-B74,AppID: {1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\magn...,SUSPICIOUS
-2025-12-24 21:47:48.1571932,44,Parent process: C:\Windows\Sys,Parent process: C:\Windows\System32\appidcertstore...,SUSPICIOUS
-2025-12-24 21:46:35.4965214,41,Target: NT AUTHORITY\SYSTEM,Target: NT AUTHORITY\SYSTEM...,SUSPICIOUS
