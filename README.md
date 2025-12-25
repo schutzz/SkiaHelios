@@ -1,4 +1,4 @@
-# SkiaHelios (The Shadow Sun) v3.3 [Grand Weaver Edition]
+# SkiaHelios (The Shadow Sun) v3.5 [Grand Weaver Edition]
 
 > **"Ex Umbra in Solem"** (From the Shadows into the Sun)
 
@@ -70,46 +70,51 @@ SkiaHelios/
     └── SH_HekateWeaver/    ... Report Generator (The Narrative)
 ```
 
-## 🚀 Key Features (v3.3)
+## 🚀 Key Features (v3.5)
+
+### 0. Time Clipper (New in v3.4)
+- **Surgical Filtering:** Allows analysts to specify an incident time window (Start/End).
+- **Noise Elimination:** Instantly cuts out years of irrelevant logs from "dirty" environments, isolating only the incident artifacts.
 
 ### 1. ChaosGrasp (v9.3) - The Timeline Core
 - **Master Timeline Generation:** Fuses Prefetch, Amcache, ShimCache, and Event Logs into a single chronological view.
 - **Context Awareness:** Automatically detects timezone bias and adjusts timestamps to UTC.
 
-### 2. ChronosSift (v10.4) - The Timekeeper
-- **Iron Curtain Filter:** Aggressively filters system noise (WinSxS, .NET, Servicing) to isolate true anomalies.
-- **Timestomp Detection:** Identifies `$SI < $FN` timestamp anomalies with 100% precision.
-- **ADS Correlation:** Detects timestamp manipulation on Alternate Data Streams (Zone.Identifier etc.).
+### 2. ChronosSift (v10.7) - The Timekeeper
+- **Sanctuary Update:** Whitelists known forensic tools (`/Tools/`, `FTK Imager`) to prevent false positives in analysis environments.
+- **Anomaly Bypass:** Force-includes critical timestomp artifacts (Score > 80) even if they fall outside the specified Time Clipper range.
+- **Timestomp Detection:** Identifies `$SI < $FN` timestamp anomalies with precision.
 
-### 3. AIONDetector (v10.11) - The Persistence Hunter
-- **Sanctuary Logic:** Intelligent whitelisting of `WDI`, `Diagnosis`, and `WindowsApps` noise.
-- **MFT-Based Hunting:** Scans `Startup` folders and `Task` definitions directly from the Master File Table, even without `autorunsc` output.
+### 3. AIONDetector (v10.12) - The Persistence Hunter
+- **MFT-Based Hunting:** Scans `Startup` folders and `Task` definitions directly from the Master File Table.
 - **Hybrid Analysis:** Correlates Registry Run Keys with file system creation times.
+- **Time Keeper:** Applies time filtering to persistence artifacts to identify recent implants.
 
-### 4. PlutosGate (v1.10) - The Exfiltration Tracker
-- **Smart Whitelisting:** Ignores legitimate OS telemetry (Windows Update, Explorer, DHCP) while flagging anomalous traffic.
+### 4. PlutosGate (v1.11) - The Exfiltration Tracker
+- **Smart Whitelisting:** Ignores legitimate OS telemetry while flagging anomalous traffic.
 - **USB Forensics:** Tracks file access on removable media via LNK and ShellBags.
-- **Network Profiling:** Analyzes SRUM to detect anomalous Beaconing behavior.
+- **Net Clipper:** Profiles network traffic (SRUM) within the incident window.
 
-### 5. SphinxDeciphering (v1.4) - The Riddle Solver
+### 5. SphinxDeciphering (v1.5) - The Riddle Solver
 - **Obfuscation Decoding:** Automatically decodes Base64/XOR PowerShell commands found in Event Logs (4104).
-- **Process Lineage:** Extracts Parent Process IDs (PID) from Event ID 4688 to trace the origin of malicious commands.
+- **Process Lineage:** Extracts Parent Process IDs (PID) from Event ID 4688.
 
-### 6. HekateWeaver (v3.3) - The Grand Weaver
-- **Grimoire Generation:** Compiles all findings into a single, narrative-driven Markdown report.
-- **Storyline Construction:** Merges anomalies from all modules into a coherent attack timeline.
+### 6. HekateWeaver (v3.5) - The Grand Weaver
+- **Script Hunter:** Aggressively scans command-line arguments for hidden script executions (`.ps1`, `.bat`, `.vbs`).
+- **Grimoire Generation:** Compiles all findings into a single, narrative-driven Markdown report ready for professional review.
 
 ---
 
-## 🏆 Validated Capabilities (v3.3 Verification)
-**Operation Sun Shadow (Infect28)** - 2025-12-25 Validation Results
+## 🏆 Validated Capabilities
+**Operation Apple of Discord (Dirty Environment Test)** - 2025-12-25 Validation Results
 
 | Module | Function | Detection Status | Notes |
 |---|---|---|---|
-| **Chronos** | Time Audit | **🔴 CRITICAL** | Detected `Secret_Project.pdf` timestomp (Score: 100). Noise: 0. |
-| **AION** | Persistence | **🔴 CRITICAL** | Detected `win_optimizer.lnk` & `Windows_Security_Audit`. Noise: 0. |
-| **Sphinx** | Deciphering | **🔴 CRITICAL** | Decoded obfuscated PowerShell payload & identified Parent PID. |
-| **Plutos** | Exfiltration | **🟡 MONITOR** | Validated False Positive reduction (Explorer/Telemetry ignored). |
+| **Time Clipper** | Noise Filtering | **🟢 SUCCESS** | Reduced 10,000+ artifacts to 99 relevant events in a dirty environment. |
+| **Chronos** | Sanctuary | **🟢 SUCCESS** | Successfully ignored legacy forensic tools while flagging critical anomalies. |
+| **Sphinx** | Decoding | **🔴 CRITICAL** | Decoded obfuscated PowerShell dropper (`HostApplication=...`). |
+| **AION** | Persistence | **🔴 CRITICAL** | Detected `Trigger3.lnk` in Startup folder. |
+| **Plutos** | Exfiltration | **🔴 CRITICAL** | Identified `Cleanup.ps1` and data staging folders. |
 
 ---
 
@@ -128,30 +133,19 @@ Launch the commander to orchestrate the full suite.
 ```console
 $ python SH_HeliosConsole.py
 
-          , - ~ ~ ~ - ,
-      , '   _ _ _ _   ' ,
-    ,      |_______|      ,
-   ,        _______        ,
-  ,        |_______|        ,  < SKIA HELIOS >
-  ,        _______          ,  v3.3 - MFT-Aware Core
-   ,       |_______|       ,
-    ,                     ,
-      , _ _ _ _ _ _ _ _ ,
-          ' - _ _ - '
-    "Illuminating the darkest artifacts with precision."
-
 Target Artifact Path: C:\Temp\Case\out
-Case Name: Infect28
+Case Name: AppleOfDiscord
+Start Date [Enter to skip]: 2025-12-25 00:00:00
+End Date   [Enter to skip]: 2025-12-25 23:59:59
 
 >>> [EXECUTING] CHAOS Stage...
-[*] Scanning artifacts in: C:\Temp\Case\out
 ...
-[*] ALL SYSTEMS GO. Grimoire woven at: Helios_Output\Infect28_20251225_XXXXXX
+[*] ALL SYSTEMS GO. Grimoire woven at: Helios_Output\AppleOfDiscord_20251225_XXXXXX
 ```
 
 ### Output
 Results are saved in `Helios_Output\<CaseName>_<Timestamp>\`:
-- `Grimoire_<Case>_en.md`: The final executive report.
+- `Grimoire_<Case>_<Lang>.md`: The final executive report (EN/JP).
 - `Master_Timeline.csv`: The complete event timeline.
 - `Time_Anomalies.csv`: List of timestomped files.
 - `Persistence_Report.csv`: Detected persistence mechanisms.
@@ -162,6 +156,7 @@ Results are saved in `Helios_Output\<CaseName>_<Timestamp>\`:
 ## 📦 Requirements
 - Python 3.10+
 - Polars (`pip install polars`)
+- python-docx (Optional, for report conversion)
 
 ## 🛡️ License
 MIT License. Use responsibly for DFIR investigations and research.

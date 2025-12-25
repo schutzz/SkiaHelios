@@ -6,15 +6,15 @@ import datetime
 import re
 
 # ============================================================
-#  SH_HekateWeaver v3.3 [Lineage Tracer]
+#  SH_HekateWeaver v3.5 [Script Hunter]
 #  Mission: Bind threads of evidence into a single truth.
-#  Fix: Added Parent Process tracking for Execution artifacts.
+#  Fix: Aggressively hunt for Script Executions (.ps1/bat/vbs) in args.
 # ============================================================
 
 def print_logo():
     print(r"""
       | | | | | |
-    -- HEKATE  --   [ The Grand Weaver v3.3 ]
+    -- HEKATE  --   [ The Grand Weaver v3.5 ]
       | | | | | |   "Resilience is the soul of forensics."
     """)
 
@@ -86,9 +86,11 @@ TEXT_RES = {
 }
 
 class HekateWeaver:
-    def __init__(self, timeline_csv, aion_csv=None, pandora_csv=None, plutos_csv=None, plutos_net_csv=None, sphinx_csv=None, chronos_csv=None, lang="en"):
+    def __init__(self, timeline_csv, aion_csv=None, pandora_csv=None, plutos_csv=None, plutos_net_csv=None, sphinx_csv=None, chronos_csv=None, lang="en", start_time=None, end_time=None):
         self.lang = lang if lang in TEXT_RES else "en"
         self.txt = TEXT_RES[self.lang]
+        self.start_time = start_time
+        self.end_time = end_time
         self.df_timeline = self._safe_load(timeline_csv, "Timeline")
         self.df_aion     = self._safe_load(aion_csv, "AION")
         self.df_pandora  = self._safe_load(pandora_csv, "Pandora")
@@ -101,64 +103,76 @@ class HekateWeaver:
         if path and Path(path).exists():
             try:
                 df = pl.read_csv(path, ignore_errors=True, infer_schema_length=0)
+                if self.start_time or self.end_time:
+                    if "Timestamp_UTC" in df.columns:
+                        if self.start_time: df = df.filter(pl.col("Timestamp_UTC") >= self.start_time)
+                        if self.end_time:   df = df.filter(pl.col("Timestamp_UTC") <= self.end_time)
                 return df
             except: return None
         return None
 
     def hunt_execution_anomalies(self, timeline_df):
+        # 1. High Risk Binaries
         WANTED_PROCESSES = [
             r"(?i)timestomp\.exe", r"(?i)beacon\.exe",
             r"(?i)mimikatz", r"(?i)cobaltstrike",
             r"(?i)metasploit", r"(?i)powershell_ise\.exe",
+            r"(?i)powershell\.exe", r"(?i)pwsh\.exe",
             r"(?i)cmd\.exe", r"(?i)psexec", r"(?i)vssadmin",
             r"(?i)Trigger"
         ]
         
+        # 2. Script Extensions (Arguments hunting)
+        SCRIPT_EXTENSIONS = r"(?i)\.(ps1|bat|vbs|cmd|js|hta)$"
+
         if "Artifact_Type" not in timeline_df.columns: return []
         
-        # 1. Standard Artifacts (Prefetch, etc.)
-        static_mask = pl.col("Artifact_Type").str.contains("(?i)(Prefetch|Amcache|UserAssist|ShimCache)")
-        
-        # 2. Event Logs (Process Creation 4688) for Parent Info
-        # Assuming Chaos puts 'Process Creation' in Artifact_Type or Action, and '4688' in Tag or similar
-        # Since Chaos structure varies, we check typical columns. 
-        # Typically EvtxECmd maps 4688 to payload data.
-        
-        # We search specifically for our targets
+        # Filter 1: Target Process Name
         target_mask = pl.col("Target_Path").str.contains("|".join(WANTED_PROCESSES))
         
-        # Combined filter
-        hits = timeline_df.filter(target_mask)
+        # Filter 2: Script in Arguments (Action column often holds args in Chaos)
+        # Check if 'Action' or 'Target_Path' contains script extension
+        script_mask = (
+            pl.col("Target_Path").str.contains(SCRIPT_EXTENSIONS) |
+            pl.col("Action").str.contains(SCRIPT_EXTENSIONS)
+        )
+
+        hits = timeline_df.filter(target_mask | script_mask)
         
         detected_executions = []
         
         if not hits.is_empty():
             for row in hits.iter_rows(named=True):
                 target = str(row.get('Target_Path') or "")
+                action = str(row.get('Action') or "")
                 atype = str(row.get('Artifact_Type') or "")
                 
+                # Noise filtering
                 if "sbservicetrigger" in target.lower(): continue
+                if "onedrive" in target.lower(): continue
 
-                # Try to extract Parent Process if available (often in Payload/Extra for EventLogs)
                 parent_info = ""
-                
-                # Heuristic: Check if 'Payload' or 'Extra' column exists and contains "Parent"
-                # (Adapting to whatever columns Chaos provides)
                 raw_data = str(row).lower()
                 
-                # Check for "Parent Process Name: xxx" pattern common in Event Logs
                 if "parent process name" in raw_data or "creator process name" in raw_data:
-                    # Simple regex to grab the executable name after "Parent..."
                     m = re.search(r"(?:parent|creator)\s+process\s+(?:name|path).*?\\([^\\]+\.exe)", raw_data, re.IGNORECASE)
-                    if m:
-                        parent_info = f" [Parent: {m.group(1)}]"
+                    if m: parent_info = f" [Parent: {m.group(1)}]"
                 
-                # If it's Prefetch, we can't get parent, but we report it.
+                # Highlight Script Execution
+                tag = "MALICIOUS_EXECUTION"
+                if re.search(SCRIPT_EXTENSIONS, target) or re.search(SCRIPT_EXTENSIONS, action):
+                    tag = "SCRIPT_EXECUTION"
+                    # Try to extract script name from Action if target is generic (like powershell)
+                    if "powershell" in target.lower() or "cmd" in target.lower():
+                        m_scr = re.search(r"([\w\-\_]+\.(ps1|bat|vbs|cmd))", action, re.IGNORECASE)
+                        if m_scr:
+                             target = f"{target} -> {m_scr.group(1)}"
+
                 detected_executions.append({
                     "Time": row['Timestamp_UTC'],
                     "Module": "**Execution**",
                     "Risk_Level": "CRITICAL",
-                    "Desc": f"MALICIOUS_EXECUTION: {target} ({atype}){parent_info}"
+                    "Desc": f"{tag}: {target} ({atype}) {action[:50]}...{parent_info}"
                 })
                     
         return detected_executions
@@ -228,7 +242,7 @@ class HekateWeaver:
                         pl.format("DECODED_CMD: {}...", pl.col("Decoded_Hint").str.slice(0, 100)).alias("Desc")
                     ]))
 
-        # Execution Hunter (Now with Parent Tracking)
+        # Execution Hunter (Improved v3.5)
         if self.df_timeline is not None:
              execution_alerts = self.hunt_execution_anomalies(self.df_timeline)
              if execution_alerts:
@@ -251,6 +265,8 @@ class HekateWeaver:
 
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(f"# {t['title']}\n\n- **Generated:** {datetime.datetime.now()}\n- {t['intro']}\n\n")
+            if self.start_time or self.end_time:
+                f.write(f"- **Focus Time Range:** {self.start_time or '...'} to {self.end_time or '...'}\n\n")
             
             # 0. Methodology
             f.write(f"## {t['h1_legend']}\n{t['legend_desc']}\n\n")
@@ -271,7 +287,6 @@ class HekateWeaver:
                 f.write(f"| Plutos (File) | {t['status_crit']} | {plutos_warn} |\n")
 
             if has_net:
-                # [Fix] Filter Normal Traffic from Summary Count
                 net_warn = self.df_plutos_net.filter(
                     ~pl.col("Plutos_Verdict").is_in(["NORMAL_SYSTEM_ACTIVITY"])
                 ).height
@@ -325,12 +340,15 @@ def main(argv=None):
     parser.add_argument("--plutos"); parser.add_argument("--plutos-net");
     parser.add_argument("--sphinx"); parser.add_argument("--chronos")
     parser.add_argument("--lang", default="en")
+    parser.add_argument("--start", help="Filter Start Date")
+    parser.add_argument("--end", help="Filter End Date")
     args = parser.parse_args(argv)
     
     weaver = HekateWeaver(
         args.input, args.aion, args.pandora, 
         args.plutos, args.plutos_net,
-        args.sphinx, args.chronos, args.lang
+        args.sphinx, args.chronos, args.lang,
+        args.start, args.end
     )
     weaver.generate_grimoire(args.out)
 

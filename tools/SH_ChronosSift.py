@@ -6,9 +6,9 @@ import re
 from pathlib import Path
 
 # ============================================================
-#  SH_ChronosSift v10.4 [Iron Curtain]
-#  Mission: Detect Time Anomalies while ignoring System Noise.
-#  Fix: Global exclusion for WinSxS/NET unless specifically wanted.
+#  SH_ChronosSift v10.7 [Sanctuary Update]
+#  Mission: Detect Time Anomalies.
+#  Fix: Added Whitelist for Forensic Tools/Known Paths.
 # ============================================================
 
 def print_logo():
@@ -18,62 +18,61 @@ def print_logo():
   / /   / __ \/ ___/ __ \/ __ \/ __ \/ ___/    \__ \ / // /_/ __/
  / /___/ / / / /  / /_/ / / / / /_/ (__  )    ___/ // // __/ /_  
  \____/_/ /_/_/   \____/_/ /_/\____/____/    /____/_/_/_/  \__/  
-    "Time is the only true unit of measure." v10.4
+    "Time is the only true unit of measure." v10.7
     """)
 
 class ChronosEngine:
     def __init__(self, tolerance=10.0):
         self.tolerance = tolerance
-        # Noise extensions
         self.noise_exts = [
             ".admx", ".adml", ".mum", ".cat", ".png", ".svg", ".js", ".json", 
             ".xml", ".etl", ".log", ".tmp", ".db", ".dat", ".mui", ".inf",
             ".ico", ".css", ".html", ".pf", ".ini", ".lnk", ".manifest", ".resx"
         ]
+        # [New] Whitelist for Forensic Workstation Tools
+        self.path_whitelist = [
+            r"(?i)\\Tools\\", r"(?i)\\ghidra", r"(?i)\\sleuthkit", 
+            r"(?i)\\FTK Imager", r"(?i)\\exiftool", r"(?i)\\Autoruns",
+            r"(?i)\\LogFileParser", r"(?i)\\YaraRules", r"(?i)\\Strings",
+            r"(?i)\\Program Files\\Splunk"
+        ]
 
     def filter_noise(self, df):
-        # 1. 指名手配ロジック (これに該当すれば、場所問わず確保)
-        WANTED_FILES = ["Secret_Project.pdf", "Windows_Security_Audit", "win_optimizer.lnk", "SunShadow", "Trigger"]
-        wanted_mask = pl.col("FileName").str.contains(r"(?i)(" + "|".join(WANTED_FILES) + ")")
-        
-        # 2. 聖域ロジック (ユーザー領域などは監視対象)
         sanctuary_mask = (
             pl.col("ParentPath").str.to_lowercase().str.contains("users") |
             pl.col("ParentPath").str.to_lowercase().str.contains(r"tasks\\[^m]") | 
             pl.col("ParentPath").str.to_lowercase().str.contains("startup")
         )
+        WANTED_FILES = ["Secret_Project.pdf", "Windows_Security_Audit", "win_optimizer.lnk", "SunShadow", "Trigger"]
+        wanted_mask = pl.col("FileName").str.contains(r"(?i)(" + "|".join(WANTED_FILES) + ")")
+
+        kept_df = df.filter(sanctuary_mask | wanted_mask)
+        others_df = df.filter(~(sanctuary_mask | wanted_mask))
         
-        # 3. 鉄のカーテン (絶対除外領域)
-        # WinSxS, .NET, Servicing, System Volume Infoなどは、指名手配でない限りノイズとみなす
-        IRON_CURTAIN = [
-            r"\\Windows\\WinSxS", r"\\Windows\\servicing", r"\\Windows\\assembly", 
-            r"\\Windows\\Microsoft.NET", r"\\$Extend", r"\\System Volume Information",
-            r"\\ProgramData\\Microsoft\\Windows Defender"
+        NOISE_PATTERNS = [
+            r"(?i)PathUnknown", r"(?i)\\Windows\\", r"(?i)\\Program Files", 
+            r"(?i)\\ProgramData", r"(?i)\\$Extend",
+            r"(?i)\\Microsoft\.NET", r"(?i)\\WinSxS", r"(?i)\\assembly"
         ]
+        for pattern in NOISE_PATTERNS:
+            others_df = others_df.filter(~pl.col("ParentPath").str.contains(pattern))
         
-        # 除外条件: (鉄のカーテンに含まれる) AND (指名手配ではない)
-        curtain_pattern = "|".join(IRON_CURTAIN)
-        noise_mask = (
-            pl.col("ParentPath").str.contains(r"(?i)" + curtain_pattern) & 
-            ~wanted_mask
-        )
-
-        # フィルタ適用: (聖域 OR 指名手配) かつ (ノイズではない)
-        # ただし、聖域内でもノイズ(Defenderスキャンログ等)は消したいので、noise_maskを優先
-        filtered_df = df.filter((sanctuary_mask | wanted_mask) & ~noise_mask)
-
-        # Blacklist for specific FP filenames (Trigger variants vs System files)
+        final_df = pl.concat([kept_df, others_df]).unique()
+        
         FP_BLACKLIST = ["sbservicetrigger", "servicetrigger", "wkstriggers", "jobtrigger"]
         fp_mask = pl.col("FileName").str.to_lowercase().str.contains("|".join(FP_BLACKLIST))
         sys_mask = pl.col("ParentPath").str.to_lowercase().str.contains("windows")
-        
-        return filtered_df.filter(~(fp_mask & sys_mask)).unique()
+        return final_df.filter(~(fp_mask & sys_mask))
 
     def analyze(self, args):
-        print(f"[*] Chronos v10.4 awakening... Targeting: {Path(args.file).name}")
+        print(f"[*] Chronos v10.7 awakening... Targeting: {Path(args.file).name}")
         try:
             lf = pl.scan_csv(args.file, ignore_errors=True)
             
+            # [New] Apply Path Whitelist Early
+            for pattern in self.path_whitelist:
+                lf = lf.filter(~pl.col("ParentPath").str.contains(pattern))
+
             if not args.all:
                 lf = self.filter_noise(lf)
                 ext_pattern = f"(?i)({'|'.join([re.escape(e) for e in self.noise_exts])})$"
@@ -100,6 +99,7 @@ class ChronosEngine:
                 pl.col(si_mod).str.to_datetime(format="%Y-%m-%d %H:%M:%S%.f", strict=False).alias("si_mod_dt")
             ]).drop_nulls(["si_dt", "fn_dt"])
 
+            # 1. Calculate Anomalies FIRST
             lf = lf.with_columns((pl.col("si_dt") - pl.col("fn_dt")).dt.total_seconds().alias("diff_sec"))
 
             crit_exts = [".exe", ".dll", ".ps1", ".bat", ".sys", ".cmd", ".vbs", ".scr", ".pdf"]
@@ -133,9 +133,20 @@ class ChronosEngine:
                     100 if x["Anomaly_Time"] == "CRITICAL_ARTIFACT" else
                     100 if x["Anomaly_Time"] == "FALSIFIED_FUTURE" else
                     80 if x["Anomaly_Time"] == "TIMESTOMP_BACKDATE" else
-                    50 if x["Anomaly_Zero"] == "ZERO_PRECISION" else 20
+                    50 if x["Anomaly_Zero"] == "ZERO_PRECISION" else 0
                 ), return_dtype=pl.Int64).alias("Chronos_Score")
             )
+
+            # 2. Apply Time Filter (Bypass if Anomaly > 80)
+            time_mask = pl.lit(True)
+            if args.start:
+                print(f"    -> Filter Start: {args.start} (Bypass enabled for Score > 80)")
+                time_mask = time_mask & (pl.col("si_mod_dt") >= pl.lit(args.start).str.to_datetime())
+            if args.end:
+                print(f"    -> Filter End:   {args.end}   (Bypass enabled for Score > 80)")
+                time_mask = time_mask & (pl.col("si_mod_dt") <= pl.lit(args.end).str.to_datetime())
+            
+            lf = lf.filter(time_mask | (pl.col("Chronos_Score") > 80))
 
             df = lf.filter((pl.col("Anomaly_Time") != "") | (pl.col("Anomaly_Zero") != "")).collect()
             if df.height > 0:
@@ -155,6 +166,8 @@ def main(argv=None):
     parser.add_argument("-t", "--tolerance", type=float, default=10.0)
     parser.add_argument("--targets-only", action="store_true")
     parser.add_argument("--all", action="store_true")
+    parser.add_argument("--start", help="Filter Start Date")
+    parser.add_argument("--end", help="Filter End Date")
     args = parser.parse_args(argv)
     engine = ChronosEngine(args.tolerance)
     engine.analyze(args)
