@@ -6,12 +6,11 @@ from pathlib import Path
 from datetime import datetime
 
 # ==========================================
-#  SH_PandorasLink v3.6 [Risk Assessment]
-#  Mission: Reveal the "Absence", "Intent" & "Risk"
+#  SH_PandorasLink v3.8 [The Missing Link]
+#  Mission: Detect "Deletion", "Concealment" & "LNK Destruction"
 # ==========================================
 
 def print_logo():
-    # [Fix] Removed emojis to prevent UnicodeEncodeError on Windows Console
     logo = r"""
       .        +    .    * .      .
     .    _    .    ______    .    _    .
@@ -22,8 +21,8 @@ def print_logo():
     * \_/    \__\______/__/    \_/   *
       .     * /______\     .     .
     
-      [ SH_PandorasLink v3.6 ]
-     "What is hidden shall be revealed."
+      [ SH_PandorasLink v3.8 ]
+     "Shadows are lifted. The Link is found."
     """
     print(logo)
 
@@ -64,7 +63,6 @@ class PandoraEngine:
             cols = lf_schema.collect_schema().names()
             exprs = []
             
-            # [Fix] Explicit Int64 Casting
             e_num = self._get_col_expr(cols, ["EntryNumber", "MftRecordNumber"])
             if e_num is not None: exprs.append(e_num.cast(pl.Int64))
             
@@ -125,9 +123,62 @@ class PandoraEngine:
             print(f"[!] Error loading USN {path}: {e}")
             raise RuntimeError(f"Failed to load USN: {path}")
 
+    def _apply_noise_reduction(self, lf_ghosts):
+        """
+        [v3.8 Update] Intelligent Noise Reduction
+        Splunk, Browser Cache, Windows Update等を安全に除外
+        """
+        print("    -> Applying Intelligent Noise Reduction (Level 2)...")
+        
+        # 1. Splunk Noise (tsidx, lock, etc.)
+        splunk_path_sig = r"splunk[\\/]var[\\/]lib[\\/]splunk"
+        splunk_ext_sig = r"\.(tsidx|manifest|lock|dat|rawsize|interim|xml|bucket)$"
+        
+        is_splunk = (
+            pl.col("ParentPath").str.to_lowercase().str.contains(splunk_path_sig) &
+            (
+                pl.col("Ghost_FileName").str.to_lowercase().str.contains(splunk_ext_sig) |
+                pl.col("Ghost_FileName").str.ends_with(".lock")
+            )
+        )
+
+        # 2. Browser Cache (Chrome/Edge/Firefox)
+        # キャッシュ内のリソースファイルのみを除外。実行可能ファイルは除外しない。
+        browser_cache_sig = r"(google[\\/]chrome|microsoft[\\/]edge|mozilla[\\/]firefox).*(cache|code cache|service worker)"
+        safe_ext_sig = r"\.(js|css|png|jpg|jpeg|gif|ico|woff|woff2|svg|html|htm|txt|json|tmp)$"
+        
+        is_browser_garbage = (
+            pl.col("ParentPath").str.to_lowercase().str.contains(browser_cache_sig) &
+            pl.col("Ghost_FileName").str.to_lowercase().str.contains(safe_ext_sig)
+        )
+
+        # 3. Windows System Noise (Update, CBS, Defender)
+        # ログや一時ファイルのみを除外。
+        sys_noise_sig = r"windows[\\/](logs[\\/]cbs|softwaredistribution|servicing|temp)"
+        sys_ext_sig = r"\.(log|cab|etl|tlb|xml|dat)$"
+
+        is_sys_noise = (
+            pl.col("ParentPath").str.to_lowercase().str.contains(sys_noise_sig) &
+            pl.col("Ghost_FileName").str.to_lowercase().str.contains(sys_ext_sig)
+        )
+
+        # 4. Temp Folder Handling
+        # Tempフォルダ内の .tmp/.log は除外するが、.exe/.ps1/.bat 等は残す。
+        temp_path_sig = r"appdata[\\/]local[\\/]temp"
+        safe_temp_ext = r"(\.tmp|\.log)$"
+
+        is_safe_temp = (
+            pl.col("ParentPath").str.to_lowercase().str.contains(temp_path_sig) &
+            pl.col("Ghost_FileName").str.to_lowercase().str.contains(safe_temp_ext)
+        )
+
+        # フィルタ適用: いずれのノイズ条件にも合致しないものを残す
+        return lf_ghosts.filter(
+            ~(is_splunk | is_browser_garbage | is_sys_noise | is_safe_temp)
+        )
+
     def run_gap_analysis(self, start_date, end_date):
         print("[*] Phase 1: Running Physical Gap Analysis...")
-        # print(f"[DEBUG] Start Date: {start_date}, End Date: {end_date}")
         try:
             start_dt = datetime.fromisoformat(start_date)
             end_dt = datetime.fromisoformat(end_date)
@@ -214,7 +265,11 @@ class PandoraEngine:
         ghosts_list.append(ghost_usn)
 
         if not ghosts_list: return None
-        return pl.concat(ghosts_list).unique(subset=["EntryNumber", "Ghost_FileName"])
+        
+        combined_ghosts = pl.concat(ghosts_list).unique(subset=["EntryNumber", "Ghost_FileName"])
+        
+        # Apply Filter here
+        return self._apply_noise_reduction(combined_ghosts)
 
     def run_anti_forensics(self, limit=50):
         print(f"[*] Phase 2: Analyzing Anti-Forensics Anomalies (Top {limit})...")
@@ -240,7 +295,6 @@ class PandoraEngine:
             pl.col("Ghost_FileName").str.to_lowercase().alias("join_key")
         )
 
-        # [Fix] Initialize fallback columns
         lf_enriched = lf_enriched.with_columns([
             pl.lit(None).cast(pl.Utf8).alias("Last_Executed_Time"),
             pl.lit(None).cast(pl.Utf8).alias("Chaos_FileName")
@@ -301,7 +355,7 @@ def auto_detect_ntfs(target_dir):
 
 def main(argv=None):
     print_logo()
-    parser = argparse.ArgumentParser(description="SH_PandorasLink v3.6")
+    parser = argparse.ArgumentParser(description="SH_PandorasLink v3.8")
     
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("-d", "--dir", help="Auto-detect CSVs from KAPE Output Folder")
@@ -318,7 +372,7 @@ def main(argv=None):
     parser.add_argument("--pf", help="Prefetch CSV (Legacy)")
     parser.add_argument("--shim", help="ShimCache CSV (Legacy)")
     
-    parser.add_argument("--out", default="pandora_result.csv")
+    parser.add_argument("--out", default="pandora_result_v3.8.csv")
     args = parser.parse_args(argv)
 
     mft_path = args.mft
@@ -339,7 +393,7 @@ def main(argv=None):
     try:
         engine = PandoraEngine(str(mft_path), str(usn_path), args.vss)
 
-        # 1. Gap Analysis
+        # 1. Gap Analysis (with Noise Reduction)
         lf_ghosts = engine.run_gap_analysis(args.start, args.end)
         
         if lf_ghosts is not None:
@@ -349,17 +403,15 @@ def main(argv=None):
             # 3. Necromancer
             lf_final = engine.run_necromancer(lf_ghosts, args.pf, args.shim, args.chaos)
             
-            # --- 4. Risk Tagging (Enhanced) ---
+            # --- 4. Risk Tagging (Refined for LNK/USB) ---
             print("[*] Phase 4: Calculating Risk Assessment Tags...")
             
-            # Anomaly Dirとの結合
             lf_final = lf_final.join(
                 lf_af.select(["ParentPath", "Dir_Mean_Seq"]), 
                 on="ParentPath", 
                 how="left"
             )
             
-            # Risk_Tag生成ロジック
             lf_final = lf_final.with_columns(
                 pl.when(pl.col("Last_Executed_Time").is_not_null())
                 .then(pl.lit("EXEC"))
@@ -371,18 +423,25 @@ def main(argv=None):
                 .otherwise(pl.lit(""))
                 .alias("Tag_Af"),
 
-                # [New] Extension Check
-                pl.when(pl.col("Ghost_FileName").str.to_lowercase().str.contains(r"\.(exe|dll|ps1|bat|vbs|sh|js)$"))
+                pl.when(pl.col("Ghost_FileName").str.to_lowercase().str.contains(r"\.(exe|dll|ps1|bat|vbs|sh|js|iso|vmdk)$"))
                 .then(pl.lit("RISK_EXT"))
                 .otherwise(pl.lit(""))
-                .alias("Tag_Ext")
+                .alias("Tag_Ext"),
+                
+                # [NEW] LNK Deletion Check (Indicates Evidence Destruction)
+                # 場所を問わず、ショートカット（LNK）の削除は証拠隠滅の可能性が高い
+                pl.when(
+                    (pl.col("Ghost_FileName").str.to_lowercase().str.ends_with(".lnk"))
+                )
+                .then(pl.lit("LNK_DEL"))
+                .otherwise(pl.lit(""))
+                .alias("Tag_Lnk")
             ).with_columns(
-                pl.concat_str([pl.col("Tag_Exec"), pl.col("Tag_Af"), pl.col("Tag_Ext")], separator="_")
+                pl.concat_str([pl.col("Tag_Exec"), pl.col("Tag_Af"), pl.col("Tag_Ext"), pl.col("Tag_Lnk")], separator="_")
                 .str.strip_chars("_")
                 .alias("Risk_Tag")
             )
             
-            # 並び替え: Risk_Tagを先頭の方へ
             cols = lf_final.collect_schema().names()
             priority_cols = ["Risk_Tag", "Ghost_FileName", "ParentPath", "Source", "Last_Executed_Time"]
             remaining_cols = [c for c in cols if c not in priority_cols and not c.startswith("Tag_") and c != "join_key"]
@@ -397,14 +456,14 @@ def main(argv=None):
                     df_result.write_csv(args.out)
                     print(f"\n[+] GHOSTS REVEALED: {df_result.height} records saved to {args.out}")
                     
-                    # Show High Risks
                     high_risks = df_result.filter(pl.col("Risk_Tag") != "")
                     if high_risks.height > 0:
                         print(f"\n[!] {high_risks.height} High Risk Ghosts Detected!")
-                        # 見やすく表示
-                        print(high_risks.select(["Risk_Tag", "Ghost_FileName", "ParentPath", "Source"]).head(5))
+                        print(high_risks.select(["Risk_Tag", "Ghost_FileName", "ParentPath"]).head(10))
+                    else:
+                        print(f"[-] No high-risk anomalies found (Splunk/Browser noise filtered).")
                 else:
-                    print("[-] No ghosts found.")
+                    print("[-] No ghosts found (All noise filtered).")
             except Exception as e:
                 print(f"[!] Execution failed: {e}")
                 import traceback

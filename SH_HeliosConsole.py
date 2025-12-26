@@ -5,20 +5,20 @@ import time
 import importlib
 
 # ============================================================
-#  SH_HeliosConsole v3.7 [Dual Path Fix]
-#  Mission: Coordinate Raw Artifacts & Parsed CSVs.
-#  Updated: Explicitly handles 'Raw' (for History) and 'CSV' (for Timeline) paths.
-#  "Two eyes see depth better than one."
+#  SH_HeliosConsole v3.8 [Cerberus Orchestrator]
+#  Mission: Coordinate all modules & enable Sniper Intel flow.
+#  Logic: Pandora (Intel) -> Hercules (Sniper) -> Hekate (Report)
 # ============================================================
 
 def print_logo():
+    # 画面をクリアしてロゴを表示（Windows/Linux両対応）
     os.system('cls' if os.name == 'nt' else 'clear')
     print(r"""
           , - ~ ~ ~ - ,
       , '   _ _ _ _   ' ,
     ,      |_______|      ,
    ,        _______        ,  < SKIA HELIOS >
-  ,        |_______|        ,  v3.7 - Dual Path System
+  ,        |_______|        ,  v3.8 - Sniper Orchestrator
   ,        _______          ,
    ,       |_______|       ,
     ,                     ,
@@ -32,63 +32,56 @@ class HeliosCommander:
         self.modules = {}
         self._load_modules()
 
-    def _import_dynamic(self, tool_name, script_name):
-        try:
-            module_path = f"tools.{tool_name}.{script_name}"
-            mod = importlib.import_module(module_path)
-            return mod.main
-        except (ImportError, ModuleNotFoundError):
-            pass
-        try:
-            module_path = f"tools.{script_name}"
-            mod = importlib.import_module(module_path)
-            return mod.main
-        except (ImportError, ModuleNotFoundError) as e:
-            return None
+    def _import_dynamic(self, script_name):
+        """
+        カレントディレクトリまたは tools フォルダから動的に main 関数をロードするっス
+        """
+        search_paths = [script_name, f"tools.{script_name}"]
+        for path in search_paths:
+            try:
+                mod = importlib.import_module(path)
+                if hasattr(mod, 'main'):
+                    return mod.main
+            except (ImportError, ModuleNotFoundError):
+                continue
+        return None
 
     def _load_modules(self):
+        # 内部キー名とスクリプト名のマッピング
         tool_map = {
-            "clio":     ("SH_ClioGet", "SH_ClioGet"),
-            "chaos":    ("SH_ChaosGrasp", "SH_ChaosGrasp"),
-            "hercules": ("SH_HerculesReferee", "SH_HerculesReferee"),
-            "pandora":  ("SH_PandorasLink", "SH_PandorasLink"),
-            "chronos":  ("SH_ChronosSift", "SH_ChronosSift"),
-            "aion":     ("SH_AIONDetector", "SH_AIONDetector"),
-            "plutos":   ("SH_PlutosGate", "SH_PlutosGate"),
-            "hekate":   ("SH_HekateWeaver", "SH_HekateWeaver"),
-            "sphinx":   ("SH_SphinxDeciphering", "SH_SphinxDeciphering")
+            "clio": "SH_ClioGet",
+            "chaos": "SH_ChaosGrasp",
+            "hercules": "SH_HerculesReferee",
+            "pandora": "SH_PandorasLink",
+            "chronos": "SH_ChronosSift",
+            "aion": "SH_AIONDetector",
+            "plutos": "SH_PlutosGate",
+            "hekate": "SH_HekateWeaver",
+            "sphinx": "SH_SphinxDeciphering"
         }
-        for key, (folder, script) in tool_map.items():
-            func = self._import_dynamic(folder, script)
-            self.modules[key] = func if func else None
+        for key, script in tool_map.items():
+            self.modules[key] = self._import_dynamic(script)
 
     def run_module(self, key, args):
         func = self.modules.get(key)
         if not func:
-            if key in ["hercules", "clio"]:
-                 print(f"[!] Module '{key}' is missing. Skipping...")
+            print(f"[!] Module '{key}' not found. Skipping Stage...")
             return False
         
         print(f"\n>>> [EXECUTING] {key.upper()} Stage...")
         try:
+            # 各スクリプトの main(args) を呼び出す
             func(args)
             return True
         except Exception as e:
-            print(f"[!] {key.upper()} Error: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"[!] {key.upper()} Stage Failed: {e}")
             return False
 
     def full_auto_scan(self, csv_dir, raw_dir, out_dir, case_name, start_date=None, end_date=None):
         print_logo()
-        print(f"[*] --- INITIATING FULL AUTO SCAN: {case_name} ---")
-        print(f"[*] Raw Artifacts (Source): {raw_dir}")
-        print(f"[*] Parsed CSVs (Source)  : {csv_dir}")
+        print(f"[*] --- INITIATING CERBERUS PIPELINE: {case_name} ---")
         
-        if start_date or end_date:
-            print(f"[*] Time Clipping Active: {start_date or '...'} to {end_date or '...'}")
-        time.sleep(1.5)
-
+        # セッションディレクトリの作成
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         case_dir = Path(out_dir) / f"{case_name}_{timestamp}"
         case_dir.mkdir(parents=True, exist_ok=True)
@@ -97,57 +90,55 @@ class HeliosCommander:
         if start_date: time_args.extend(["--start", start_date])
         if end_date:   time_args.extend(["--end", end_date])
 
-        # 0. ClioGet (Browser History Hunting)
-        # RawフォルダからHistoryを探し、CSVフォルダ内のサブフォルダに出力する
-        # これにより、後続のChaosGraspが再帰探索で拾えるようになる
+        # 1. ClioGet (Browser History)
         browser_out = Path(csv_dir) / "Browser_Artifacts"
         browser_out.mkdir(exist_ok=True)
-        print(f"[*] Invoking ClioGet: Raw -> {browser_out}")
         self.run_module("clio", ["-d", raw_dir, "-o", str(browser_out)])
 
-        # 1. Chaos (Master Timeline Construction)
-        # CSVフォルダ (Browser_Artifacts含む) をスキャン
+        # 2. ChaosGrasp (Timeline Construction)
         chaos_out = case_dir / "Master_Timeline.csv"
         self.run_module("chaos", ["-d", csv_dir, "-o", str(chaos_out)])
 
-        # 2. Hercules (Authority & Identity Judgment)
-        judged_out = case_dir / "Hercules_Judged_Timeline.csv"
-        # HerculesもCatalog作成のためにCSVフォルダをスキャンする
-        hercules_success = self.run_module("hercules", ["-i", str(chaos_out), "-d", csv_dir, "-o", str(judged_out)])
-
-        # 3. Pipeline Switch
-        timeline_target = str(judged_out) if hercules_success and judged_out.exists() else str(chaos_out)
-        print(f"[*] Pipeline Target Set: {Path(timeline_target).name}")
-
-        # 4. Chronos (Time Paradox Analysis)
-        mft_raw = next(Path(csv_dir).rglob("*$MFT_Output.csv"), None)
-        chronos_out = case_dir / "Time_Anomalies.csv"
-        if mft_raw:
-            self.run_module("chronos", ["-f", str(mft_raw), "-o", str(chronos_out), "--targets-only"] + time_args)
-
-        # 5. AION (Persistence)
-        aion_out = case_dir / "Persistence_Report.csv"
-        mft_for_aion = str(mft_raw) if mft_raw else timeline_target
-        self.run_module("aion", ["--dir", csv_dir, "--mft", mft_for_aion, "-o", str(aion_out)] + time_args)
-
-        # 6. Pandora & Plutos (Exfiltration)
+        # 3. Pandora (Target Intel Generation)
+        # [VITAL] 先にGhost(削除ファイル)を見つけないとHerculesが狙撃できないっス！
         pandora_out = case_dir / "Ghost_Report.csv"
         p_start = start_date if start_date else "2000-01-01"
         p_end = end_date if end_date else "2099-12-31"
         self.run_module("pandora", ["-d", csv_dir, "--start", p_start, "--end", p_end, "--out", str(pandora_out)])
+
+        # 4. Hercules (Sniper Execution)
+        judged_out = case_dir / "Hercules_Judged_Timeline.csv"
+        # --pandora 引数で Ghost_Report を渡すことで Sniper Mode が火を噴くっス！
+        hercules_success = self.run_module("hercules", [
+            "-i", str(chaos_out), 
+            "-d", csv_dir, 
+            "-o", str(judged_out), 
+            "--pandora", str(pandora_out)
+        ])
+
+        timeline_target = str(judged_out) if (hercules_success and judged_out.exists()) else str(chaos_out)
+
+        # 5. Deep Forensics (Chronos, AION, Plutos, Sphinx)
+        mft_raw = next(Path(csv_dir).rglob("*$MFT_Output.csv"), None)
+        chronos_out = case_dir / "Time_Anomalies.csv"
+        if mft_raw:
+            self.run_module("chronos", ["-f", str(mft_raw), "-o", str(chronos_out), "--targets-only"] + time_args)
         
+        aion_out = case_dir / "Persistence_Report.csv"
+        self.run_module("aion", ["--dir", csv_dir, "--mft", str(mft_raw if mft_raw else timeline_target), "-o", str(aion_out)] + time_args)
+
         plutos_out = case_dir / "Exfil_Report.csv"
         plutos_net_out = case_dir / "Exfil_Report_Network.csv"
         self.run_module("plutos", ["--dir", csv_dir, "--pandora", str(pandora_out), "-o", str(plutos_out), "--net-out", str(plutos_net_out)] + time_args)
 
-        # 7. Sphinx (Script Decoding)
         sphinx_out = case_dir / "Sphinx_Decoded.csv"
         evtx_raw = next(Path(csv_dir).rglob("*EvtxECmd_Output.csv"), None)
         if evtx_raw:
             self.run_module("sphinx", ["-f", str(evtx_raw), "-o", str(sphinx_out)] + time_args)
 
-        # 8. Hekate (Final Grimoire Weaving)
-        for lang in ["en", "jp"]:
+        # 6. Hekate (The Final Weaver)
+        # 最後に全てのCSVをまとめてレポート化するっス
+        for lang in ["jp", "en"]:
             report_path = case_dir / f"Grimoire_{case_name}_{lang}.md"
             self.run_module("hekate", [
                 "-i", timeline_target, 
@@ -161,29 +152,27 @@ class HeliosCommander:
                 "--pandora", str(pandora_out)
             ] + time_args)
 
-        print(f"\n[*] ALL SYSTEMS GO. Grimoire woven at: {case_dir}")
+        print(f"\n[*] SUCCESS: Pipeline finished. Case dir: {case_dir}")
 
 def main():
     commander = HeliosCommander()
     try:
-        # [Fix] 2つのパスを聞くように変更
-        print("Please provide the paths for analysis:")
-        csv_dir = input("1. Parsed CSV Directory (KAPE 'Module' Output): ").strip().strip('"').strip("'")
-        raw_dir = input("2. Raw Artifact Directory (KAPE 'Target' Output): ").strip().strip('"').strip("'")
+        print("Please provide the paths for SkiaHelios analysis:")
+        csv_dir = input("1. Parsed CSV Directory (KAPE Modules): ").strip().strip('"').strip("'")
+        raw_dir = input("2. Raw Artifact Directory (KAPE Targets): ").strip().strip('"').strip("'")
+        case = input("Case Name [Default: Investigation]: ").strip() or "Investigation"
         
-        case = input("Case Name: ").strip() or "Standard_Investigation"
+        print("\n[Optional] Specify Time Range (YYYY-MM-DD)")
+        start_date = input("Start Date: ").strip()
+        end_date   = input("End Date  : ").strip()
         
-        print("\n[Optional] Specify Time Range for Incident (YYYY-MM-DD HH:MM:SS)")
-        start_date = input("Start Date [Enter to skip]: ").strip()
-        end_date   = input("End Date   [Enter to skip]: ").strip()
-        
-        if os.path.exists(csv_dir) and os.path.isdir(csv_dir) and os.path.exists(raw_dir) and os.path.isdir(raw_dir):
+        if os.path.exists(csv_dir) and os.path.exists(raw_dir):
             commander.full_auto_scan(csv_dir, raw_dir, "Helios_Output", case, start_date, end_date)
         else:
-            print("[!] One or both paths are invalid.")
+            print("[!] Error: One or both paths do not exist. Check your input.")
             input("Press Enter to exit...")
     except KeyboardInterrupt:
-        print("\n[!] Aborted.")
+        print("\n[!] Aborted by user.")
 
 if __name__ == "__main__":
     main()
