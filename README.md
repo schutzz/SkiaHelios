@@ -15,10 +15,10 @@ SkiaHelios is a modular Digital Forensics & Incident Response (DFIR) framework d
 ```mermaid
 graph TD
     %% Input Layer
-    Input[("KAPE Artifacts (CSV)")] -->|Registry Hives| Hercules
-    Input -->|SRUM / Lnk| Plutos
-    Input -->|Event Logs (Evtx)| Clio
-    Input -->|MFT / USN| Engines
+    Input[("KAPE Artifacts (CSV)")] -->|"Registry Hives"| Hercules
+    Input -->|"SRUM / Lnk"| Plutos
+    Input -->|"Event Logs (Evtx)"| Clio
+    Input -->|"MFT / USN"| Engines
 
     %% Processing Layer (The Pantheon)
     subgraph SkiaHelios Core
@@ -35,14 +35,14 @@ graph TD
     end
 
     %% Logic Flow
-    Hercules -.->|Identity Context<br/>(User <-> SID)| Hekate
-    Plutos -.->|C2 & USB Context| Hekate
-    Clio -.->|Lateral Movement<br/>& RDP Trace| Hekate
-    Engines -.->|Deep Forensics| Hekate
+    Hercules -.->|"Identity Context<br/>(User <-> SID)"| Hekate
+    Plutos -.->|"C2 & USB Context"| Hekate
+    Clio -.->|"Lateral Movement<br/>& RDP Trace"| Hekate
+    Engines -.->|"Deep Forensics"| Hekate
 
     %% Output Layer
     Hekate{"🕸️ Hekate v6.3<br/>(The Grand Weaver)"}
-    Hekate ==>|Weave Storyline| Report[/"📜 Grimoire.md<br/>(Final Report)"/]
+    Hekate ==>|"Weave Storyline"| Report[/"📜 Grimoire.md<br/>(Final Report)"/]
 
     %% Styling
     style Hercules fill:#f9f,stroke:#333,stroke-width:2px
@@ -86,7 +86,7 @@ SkiaHelios/
 ├── README.md                 # This file
 ├── tools/
 │   ├── SH_HerculesReferee.py # Identity & Privilege Audit Logic
-│   ├── SH_ClioHistorian.py   # Event Log Analyzer (Security/System)
+│   ├── SH_Clioget.py         # Event Log Analyzer (Security/System)
 │   ├── SH_PlutosGate.py      # Network & USB Exfiltration Analyzer
 │   ├── SH_HekateWeaver.py    # Report Generator
 │   ├── SH_Chronos.py         # Timestamp Anomaly Detector
