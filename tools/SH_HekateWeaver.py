@@ -6,350 +6,328 @@ import datetime
 import re
 
 # ============================================================
-#  SH_HekateWeaver v3.5 [Script Hunter]
-#  Mission: Bind threads of evidence into a single truth.
-#  Fix: Aggressively hunt for Script Executions (.ps1/bat/vbs) in args.
+#  SH_HekateWeaver v6.3 [Final Fix]
+#  Mission: Bind threads of evidence and identify actors.
+#  Updated: Fixed dictionary lookup logic once and for all.
 # ============================================================
 
 def print_logo():
     print(r"""
       | | | | | |
-    -- HEKATE  --   [ The Grand Weaver v3.5 ]
-      | | | | | |   "Resilience is the soul of forensics."
+    -- HEKATE  --   [ The Grand Weaver v6.3 ]
+      | | | | | |   "Truth is a multi-layered tapestry."
     """)
 
 TEXT_RES = {
     "en": {
         "title": "SkiaHelios Forensic Analysis Report",
         "intro": "Custom DFIR framework for high-resolution artifact correlation.",
+        "scope": "Analysis Scope",
+        "h1_users": "1. User Identity Summary (Hercules)",
+        "col_user": "Resolved User", "col_sid": "Subject SID", "col_status": "Account Status",
+        "h1_summary": "2. Executive Summary",
+        "h1_cols": ["Module", "Status", "Anomaly Count"],
+        "status_crit": "CRITICAL", "status_warn": "WARNING", "status_safe": "CLEAN",
+        "h2_breakdown": "3. Critical Artifact Breakdown (Top Hits)",
+        "desc_breakdown": "Key findings per module, sorted by risk/score.",
+        "h2_story": "4. Anomalous Storyline (Timeline View)",
+        "desc_story": "Chronological fusion of events (Top 100 Most Recent).",
+        "col_time": "Timestamp", "col_mod": "Module", "col_desc": "Description / Evidence",
+        "h2_ghosts": "5. Hidden & Deleted Artifacts (Pandora)",
+        "desc_ghosts": "Top 10 artifacts identified via USN/MFT gap analysis (Ghosts).",
+        "col_risk": "Risk Tag", "col_file": "File Name", "col_path": "Original Path", "col_src": "Detection Source",
         "h1_legend": "0. Methodology & Artifact Legend",
         "legend_desc": "SkiaHelios correlates disparate artifacts to reconstruct attacker intent.",
         "tool_list": [
-            ("Chaos", "Master Timeline construction."),
+            ("Chaos", "Master Timeline construction (Events, Web, ShellBags)."),
+            ("Hercules", "Authority & Identity Judgment (SID Mapping)."),
             ("Chronos", "MFT Time Paradox (Timestomp/ADS) detection."),
             ("AION", "Persistence hunting correlated with MFT."),
+            ("Pandora", "Recovery of deleted/hidden 'Ghost' artifacts."),
             ("Plutos", "Exfiltration tracking via USB & Network Beaconing."),
             ("Sphinx", "Decoding obfuscated scripts with Process Context.")
-        ],
-        "tag_legend": [
-            ("TIMESTOMP_BACKDATE", "$SI < $FN Creation Time discrepancy."),
-            ("CRITICAL_ADS_TIMESTOMP", "Timestomp detected on Alternate Data Stream (High Confidence)."),
-            ("C2_BEACON_DETECTED", "Periodic or low-volume traffic to unknown endpoints.")
-        ],
-        "h1_summary": "1. Executive Summary",
-        "h1_cols": ["Module", "Status", "Anomaly Count"],
-        "status_crit": "CRITICAL",
-        "h2_story": "2. Anomalous Storyline (Event Sequence)",
-        "desc_story": "Chronological fusion of all high-priority anomalies.",
-        "h2_threats": "3. High-Priority Detection Details",
-        "h3_exfil": "Exfiltration & Access (Plutos - File)",
-        "h3_net": "C2 & Beaconing Activity (Plutos - Network)",
-        "h3_persist": "Persistence Mechanism (AION)",
-        "h3_time": "Timeline Anomaly (Chronos)",
-        "h3_sphinx": "Obfuscation Decoded (Sphinx)",
-        "col_time": "Timestamp",
-        "col_mod": "Module",
-        "col_desc": "Anomaly Description"
+        ]
     },
     "jp": {
         "title": "SkiaHelios フォレンジック解析報告書",
         "intro": "アーティファクト間の相関分析に特化した自動生成報告書。",
+        "scope": "解析対象期間",
+        "h1_users": "1. ユーザー・アイデンティティ・サマリー (Hercules)",
+        "col_user": "解決済みユーザー名", "col_sid": "Subject SID", "col_status": "アカウント状態",
+        "h1_summary": "2. エグゼクティブ・サマリー (指定期間内)",
+        "h1_cols": ["モジュール", "リスクレベル", "検知件数"],
+        "status_crit": "【警告】要調査", "status_warn": "注意", "status_safe": "異常なし",
+        "h2_breakdown": "3. 重要アーティファクト詳細 (モジュール別 Top Hits)",
+        "desc_breakdown": "各モジュールが検出した特に危険なアーティファクト（最大5件）を抜粋。",
+        "h2_story": "4. 統合ストーリーライン (時系列ビュー)",
+        "desc_story": "各イベントを時系列で統合し、攻撃の流れを再現します（最新100件のみ表示）。",
+        "col_time": "発生時刻", "col_mod": "モジュール", "col_desc": "検出内容 / 証拠",
+        "h2_ghosts": "5. 隠蔽・削除アーティファクト (Pandora)",
+        "desc_ghosts": "USNジャーナルやMFTのギャップ解析により特定された『ゴースト』ファイル（Top 10）。",
+        "col_risk": "リスクタグ", "col_file": "ファイル名", "col_path": "復元パス", "col_src": "検知ソース",
         "h1_legend": "0. 調査手法および凡例",
         "legend_desc": "SkiaHeliosは、分散した証拠を紐付け、攻撃者の意図を再構成します。",
         "tool_list": [
-            ("Chaos", "マスタータイムラインの構築"),
+            ("Chaos", "マスタータイムラインの構築 (Web/ShellBags統合)"),
+            ("Hercules", "権限およびアイデンティティの審判 (SID紐付け)"),
             ("Chronos", "MFTタイムスタンプ矛盾およびADS隠蔽の検知"),
             ("AION", "MFT相関型永続化メカニズムの探索"),
+            ("Pandora", "削除・隠蔽された『ゴースト』アーティファクトの復元"),
             ("Plutos", "情報持ち出し(USB) および C2通信の追跡"),
             ("Sphinx", "難読化スクリプトの解読とプロセス特定")
-        ],
-        "tag_legend": [
-            ("TIMESTOMP_BACKDATE", "$SI時刻が$FN時刻より古い矛盾"),
-            ("CRITICAL_ADS_TIMESTOMP", "ADS(隠しストリーム)に対する時刻偽装痕跡"),
-            ("C2_BEACON_DETECTED", "未知の宛先への定期通信または低流量ビーコン")
-        ],
-        "h1_summary": "1. エグゼクティブ・サマリー",
-        "h1_cols": ["モジュール", "リスクレベル", "検知件数"],
-        "status_crit": "【警告】要調査",
-        "h2_story": "2. 異常イベント・ストーリーライン",
-        "desc_story": "各モジュールが検知した不審なイベントを時系列で構成しています。",
-        "h2_threats": "3. 高優先度検知詳細",
-        "h3_exfil": "情報持ち出し痕跡 (Plutos - File)",
-        "h3_net": "不正通信・ビーコン検知 (Plutos - Network)",
-        "h3_persist": "永続化メカニズム (AION)",
-        "h3_time": "タイムスタンプ異常 (Chronos)",
-        "h3_sphinx": "難読化解除結果 (Sphinx)",
-        "col_time": "発生時刻",
-        "col_mod": "検知モジュール",
-        "col_desc": "イベント内容"
+        ]
     }
 }
 
 class HekateWeaver:
     def __init__(self, timeline_csv, aion_csv=None, pandora_csv=None, plutos_csv=None, plutos_net_csv=None, sphinx_csv=None, chronos_csv=None, lang="en", start_time=None, end_time=None):
         self.lang = lang if lang in TEXT_RES else "en"
-        self.txt = TEXT_RES[self.lang]
+        self.txt = TEXT_RES[self.lang] # [OK] Dictionary is selected here
         self.start_time = start_time
         self.end_time = end_time
-        self.df_timeline = self._safe_load(timeline_csv, "Timeline")
-        self.df_aion     = self._safe_load(aion_csv, "AION")
-        self.df_pandora  = self._safe_load(pandora_csv, "Pandora")
-        self.df_plutos   = self._safe_load(plutos_csv, "Plutos(File)")
-        self.df_plutos_net = self._safe_load(plutos_net_csv, "Plutos(Net)")
-        self.df_sphinx   = self._safe_load(sphinx_csv, "Sphinx")
-        self.df_chronos  = self._safe_load(chronos_csv, "Chronos")
+        
+        self.df_timeline = self._safe_load(timeline_csv, "Hercules", time_col="Timestamp_UTC")
+        self.df_aion     = self._safe_load(aion_csv, "AION", time_col="Last_Executed_Time")
+        self.df_pandora  = self._safe_load(pandora_csv, "Pandora", time_col=None) 
+        self.df_plutos   = self._safe_load(plutos_csv, "Plutos", time_col="SourceModified")
+        self.df_plutos_net = self._safe_load(plutos_net_csv, "Plutos(Net)", time_col=None)
+        self.df_sphinx   = self._safe_load(sphinx_csv, "Sphinx", time_col="TimeCreated")
+        self.df_chronos  = self._safe_load(chronos_csv, "Chronos", time_col="Anomaly_Time")
 
-    def _safe_load(self, path, name):
+    def _safe_load(self, path, module_name, time_col=None):
         if path and Path(path).exists():
             try:
                 df = pl.read_csv(path, ignore_errors=True, infer_schema_length=0)
-                if self.start_time or self.end_time:
-                    if "Timestamp_UTC" in df.columns:
-                        if self.start_time: df = df.filter(pl.col("Timestamp_UTC") >= self.start_time)
-                        if self.end_time:   df = df.filter(pl.col("Timestamp_UTC") <= self.end_time)
+                if time_col and (self.start_time or self.end_time) and time_col in df.columns:
+                    try:
+                        df_dt = df.with_columns(pl.col(time_col).str.to_datetime(strict=False).alias("_dt_temp"))
+                        if df_dt.select(pl.col("_dt_temp").null_count()).item() == len(df_dt) and len(df_dt) > 0:
+                            raise ValueError("All dates parsed as null")
+                        if self.start_time:
+                            s_dt = datetime.datetime.strptime(self.start_time, "%Y-%m-%d %H:%M:%S")
+                            df_dt = df_dt.filter(pl.col("_dt_temp") >= s_dt)
+                        if self.end_time:
+                            e_dt = datetime.datetime.strptime(self.end_time, "%Y-%m-%d %H:%M:%S")
+                            df_dt = df_dt.filter(pl.col("_dt_temp") <= e_dt)
+                        df = df_dt.drop("_dt_temp")
+                    except:
+                        try:
+                            if self.start_time: df = df.filter(pl.col(time_col) >= self.start_time)
+                            if self.end_time:   df = df.filter(pl.col(time_col) <= self.end_time)
+                        except: pass
                 return df
             except: return None
         return None
 
-    def hunt_execution_anomalies(self, timeline_df):
-        # 1. High Risk Binaries
-        WANTED_PROCESSES = [
-            r"(?i)timestomp\.exe", r"(?i)beacon\.exe",
-            r"(?i)mimikatz", r"(?i)cobaltstrike",
-            r"(?i)metasploit", r"(?i)powershell_ise\.exe",
-            r"(?i)powershell\.exe", r"(?i)pwsh\.exe",
-            r"(?i)cmd\.exe", r"(?i)psexec", r"(?i)vssadmin",
-            r"(?i)Trigger"
-        ]
-        
-        # 2. Script Extensions (Arguments hunting)
-        SCRIPT_EXTENSIONS = r"(?i)\.(ps1|bat|vbs|cmd|js|hta)$"
+    def _is_system_noise(self, user_val, sid_val):
+        system_users = ["SYSTEM", "Local Service", "Network Service", "DWM", "UMFD", "Window Manager"]
+        system_sids  = ["S-1-5-18", "S-1-5-19", "S-1-5-20", "S-1-5-96-"]
+        if user_val and any(s.lower() == str(user_val).lower() for s in system_users): return True
+        if sid_val and any(s in str(sid_val) for s in system_sids): return True
+        return False
 
-        if "Artifact_Type" not in timeline_df.columns: return []
-        
-        # Filter 1: Target Process Name
-        target_mask = pl.col("Target_Path").str.contains("|".join(WANTED_PROCESSES))
-        
-        # Filter 2: Script in Arguments (Action column often holds args in Chaos)
-        # Check if 'Action' or 'Target_Path' contains script extension
-        script_mask = (
-            pl.col("Target_Path").str.contains(SCRIPT_EXTENSIONS) |
-            pl.col("Action").str.contains(SCRIPT_EXTENSIONS)
-        )
+    def _get_hercules_stats(self):
+        if self.df_timeline is None: return 0
+        count = 0
+        if "Tag" in self.df_timeline.columns:
+            for row in self.df_timeline.iter_rows(named=True):
+                tag = str(row.get("Tag", ""))
+                if "CRITICAL" in tag or "[!]" in tag or "DELETED_USER" in tag:
+                    user = str(row.get("Resolved_User", ""))
+                    sid = str(row.get("Subject_SID", ""))
+                    if "DELETED_USER" in tag: count += 1
+                    elif not self._is_system_noise(user, sid): count += 1
+        return count
 
-        hits = timeline_df.filter(target_mask | script_mask)
-        
-        detected_executions = []
-        
-        if not hits.is_empty():
-            for row in hits.iter_rows(named=True):
-                target = str(row.get('Target_Path') or "")
-                action = str(row.get('Action') or "")
-                atype = str(row.get('Artifact_Type') or "")
-                
-                # Noise filtering
-                if "sbservicetrigger" in target.lower(): continue
-                if "onedrive" in target.lower(): continue
-
-                parent_info = ""
-                raw_data = str(row).lower()
-                
-                if "parent process name" in raw_data or "creator process name" in raw_data:
-                    m = re.search(r"(?:parent|creator)\s+process\s+(?:name|path).*?\\([^\\]+\.exe)", raw_data, re.IGNORECASE)
-                    if m: parent_info = f" [Parent: {m.group(1)}]"
-                
-                # Highlight Script Execution
-                tag = "MALICIOUS_EXECUTION"
-                if re.search(SCRIPT_EXTENSIONS, target) or re.search(SCRIPT_EXTENSIONS, action):
-                    tag = "SCRIPT_EXECUTION"
-                    # Try to extract script name from Action if target is generic (like powershell)
-                    if "powershell" in target.lower() or "cmd" in target.lower():
-                        m_scr = re.search(r"([\w\-\_]+\.(ps1|bat|vbs|cmd))", action, re.IGNORECASE)
-                        if m_scr:
-                             target = f"{target} -> {m_scr.group(1)}"
-
-                detected_executions.append({
-                    "Time": row['Timestamp_UTC'],
-                    "Module": "**Execution**",
-                    "Risk_Level": "CRITICAL",
-                    "Desc": f"{tag}: {target} ({atype}) {action[:50]}...{parent_info}"
-                })
-                    
-        return detected_executions
+    def _compress_storyline(self, df):
+        if df is None or df.is_empty(): return df
+        rows = df.sort("Time").to_dicts()
+        compressed = []
+        if not rows: return None
+        prev_row = rows[0]
+        dup_count = 0
+        for i in range(1, len(rows)):
+            curr_row = rows[i]
+            if (curr_row["Module"] == prev_row["Module"]) and (curr_row["Desc"] == prev_row["Desc"]):
+                dup_count += 1
+            else:
+                if dup_count > 0: prev_row["Desc"] += f" (Repeated {dup_count}x)"
+                compressed.append(prev_row)
+                prev_row = curr_row
+                dup_count = 0
+        if dup_count > 0: prev_row["Desc"] += f" (Repeated {dup_count}x)"
+        compressed.append(prev_row)
+        return pl.DataFrame(compressed)
 
     def weave_storyline(self):
-        print("[*] Weaving the Anomalous Storyline with MFT-Correlated evidence...")
+        print("[*] Weaving the Storyline with Identity Context...")
         parts = []
-
         # Chronos
-        if self.df_chronos is not None and len(self.df_chronos) > 0:
-            ts_col = next((c for c in ["Created0x10", "si_dt", "Timestamp_UTC"] if c in self.df_chronos.columns), None)
-            if ts_col:
-                parts.append(self.df_chronos.select([
-                    pl.col(ts_col).alias("Time"), pl.lit("Chronos").alias("Module"),
-                    pl.format("{} (Score: {}) in {}", "Anomaly_Time", "Chronos_Score", "FileName").alias("Desc")
-                ]))
-
+        if self.df_chronos is not None and not self.df_chronos.is_empty() and "Anomaly_Time" in self.df_chronos.columns:
+            parts.append(self.df_chronos.select([
+                pl.col("Anomaly_Time").alias("Time"), pl.lit("Chronos").alias("Module"),
+                pl.format("{} (Score: {}) in {}", "Anomaly_Time", "Chronos_Score", "FileName").alias("Desc")]))
         # AION
-        if self.df_aion is not None and len(self.df_aion) > 0:
-            time_col = next((c for c in ["Last_Executed_Time", "Timestamp_UTC"] if c in self.df_aion.columns), None)
-            if time_col:
-                df_timed = self.df_aion.filter(pl.col(time_col).is_not_null())
-                if not df_timed.is_empty():
-                    parts.append(df_timed.select([
-                        pl.col(time_col).alias("Time"),
-                        pl.lit("AION").alias("Module"),
-                        pl.format("PERSISTENCE: {} [{}]", 
-                                  "Target_FileName", "AION_Tags").alias("Desc")
-                    ]))
-
-        # Plutos (File)
-        if self.df_plutos is not None and len(self.df_plutos) > 0:
-            plutos_clean = self.df_plutos.filter(
-                ~pl.col("Plutos_Verdict").is_in(["NORMAL_APP_ACCESS", "SYSTEM_INTERNAL_ACTIVITY"])
-            )
-            ts_col = next((c for c in ["SourceModified", "Timestamp", "Timestamp_UTC"] if c in plutos_clean.columns), None)
-            if ts_col and not plutos_clean.is_empty():
-                parts.append(plutos_clean.select([
-                    pl.col(ts_col).alias("Time"), pl.lit("Plutos (File)").alias("Module"),
-                    pl.format("Exfil/Access: {} ({})", "Target_FileName", "Plutos_Verdict").alias("Desc")
-                ]))
-
+        if self.df_aion is not None and not self.df_aion.is_empty() and "Last_Executed_Time" in self.df_aion.columns:
+            parts.append(self.df_aion.select([
+                pl.col("Last_Executed_Time").alias("Time"), pl.lit("AION").alias("Module"),
+                pl.format("PERSISTENCE: {} [{}]", "Target_FileName", "AION_Tags").alias("Desc")]))
+        # Plutos
+        if self.df_plutos is not None and not self.df_plutos.is_empty() and "SourceModified" in self.df_plutos.columns:
+            plutos_clean = self.df_plutos.filter(~pl.col("Plutos_Verdict").is_in(["NORMAL_APP_ACCESS", "SYSTEM_INTERNAL_ACTIVITY"]))
+            parts.append(plutos_clean.select([
+                pl.col("SourceModified").alias("Time"), pl.lit("Plutos").alias("Module"),
+                pl.format("Exfil: {} ({})", "Target_FileName", "Plutos_Verdict").alias("Desc")]))
         # Sphinx
-        if self.df_sphinx is not None and len(self.df_sphinx) > 0:
-            df_sphinx_safe = self.df_sphinx.with_columns(
-                pl.col("Sphinx_Score").cast(pl.Int64, strict=False).fill_null(0)
-            )
-
-            critical_sphinx = df_sphinx_safe.filter(
-                pl.col("Sphinx_Tags").str.contains("ATTACK_SIG_DETECTED") |
-                (pl.col("Sphinx_Score") > 50)
-            )
+        if self.df_sphinx is not None and not self.df_sphinx.is_empty():
+            schema = self.df_sphinx.collect_schema().names()
+            time_col = next((c for c in ["Timestamp_UTC", "TimeCreated"] if c in schema), None)
+            tag_col = "Sphinx_Tags" if "Sphinx_Tags" in schema else "Action"
+            desc_col = "Decoded_Hint" if "Decoded_Hint" in schema else "Original_Snippet"
+            if time_col and desc_col in schema:
+                 parts.append(self.df_sphinx.select([
+                    pl.col(time_col).alias("Time"), pl.lit("Sphinx").alias("Module"),
+                    pl.format("DECODED: [{}] {}", pl.col(tag_col).fill_null("UNK"), pl.col(desc_col).fill_null("").str.slice(0, 100)).alias("Desc")]))
+        
+        # Hercules (Timeline) - Extended for Context (ShellBags/Web)
+        if self.df_timeline is not None and not self.df_timeline.is_empty():
+            # Filter Logic: Keep if (Critical OR Context) AND Not System Noise
+            target_tags = ["[EXPLORER]", "[WEB]"] 
             
-            ts_col = next((c for c in ["TimeCreated", "Timestamp", "Timestamp_UTC"] if c in df_sphinx_safe.columns), None)
-            
-            if ts_col and not critical_sphinx.is_empty():
-                if "ProcessId" in critical_sphinx.columns:
-                     parts.append(critical_sphinx.select([
-                        pl.col(ts_col).alias("Time"), 
-                        pl.lit("**Sphinx**").alias("Module"),
-                        pl.format("DECODED_CMD: (PID:{}) {}...", pl.col("ProcessId").cast(pl.Utf8), pl.col("Decoded_Hint").str.slice(0, 100)).alias("Desc")
-                    ]))
-                else:
-                    parts.append(critical_sphinx.select([
-                        pl.col(ts_col).alias("Time"), 
-                        pl.lit("**Sphinx**").alias("Module"),
-                        pl.format("DECODED_CMD: {}...", pl.col("Decoded_Hint").str.slice(0, 100)).alias("Desc")
-                    ]))
-
-        # Execution Hunter (Improved v3.5)
-        if self.df_timeline is not None:
-             execution_alerts = self.hunt_execution_anomalies(self.df_timeline)
-             if execution_alerts:
-                 parts.append(pl.DataFrame(execution_alerts).select(["Time", "Module", "Desc"]))
+            filtered_rows = []
+            for row in self.df_timeline.iter_rows(named=True):
+                tag = str(row.get("Tag", ""))
+                user = str(row.get("Resolved_User", ""))
+                sid = str(row.get("Subject_SID", ""))
+                
+                is_critical = "CRITICAL" in tag or "[!]" in tag or "DELETED_USER" in tag
+                is_context = any(t in tag for t in target_tags)
+                
+                if (is_critical or is_context) and not self._is_system_noise(user, sid):
+                    filtered_rows.append(row)
+                    
+            if filtered_rows:
+                parts.append(pl.DataFrame(filtered_rows, schema=self.df_timeline.schema).select([
+                    pl.col("Timestamp_UTC").alias("Time"), pl.lit("Hercules").alias("Module"),
+                    pl.format("{} (User: {})", "Tag", "Resolved_User").alias("Desc")]))
 
         if parts:
-            str_parts = [p.with_columns(pl.col("Time").cast(pl.Utf8)) for p in parts]
-            story_df = pl.concat(str_parts).sort("Time")
-            print(f" [+] Storyline: Successfully woven {story_df.height} events.")
-            return story_df
+            df_concat = pl.concat([p.with_columns(pl.col("Time").cast(pl.Utf8)) for p in parts])
+            story = self._compress_storyline(df_concat)
+            if story is not None and len(story) > 100:
+                # Top 100 most recent (Descending Sort)
+                return story.sort("Time", descending=True).head(100)
+            return story
         return None
 
     def generate_grimoire(self, output_path):
-        t = self.txt
-        has_chronos = self.df_chronos is not None and len(self.df_chronos) > 0
-        has_aion    = self.df_aion is not None and len(self.df_aion) > 0
-        has_exfil   = self.df_plutos is not None and len(self.df_plutos) > 0
-        has_net     = self.df_plutos_net is not None and len(self.df_plutos_net) > 0
-        has_sphinx  = self.df_sphinx is not None and len(self.df_sphinx) > 0
+        t = self.txt  # [FIXED] Correctly use the already selected dictionary
+        hercules_count = self._get_hercules_stats()
+        def get_count(df): return len(df) if df is not None else 0
 
         with open(output_path, "w", encoding="utf-8") as f:
-            f.write(f"# {t['title']}\n\n- **Generated:** {datetime.datetime.now()}\n- {t['intro']}\n\n")
-            if self.start_time or self.end_time:
-                f.write(f"- **Focus Time Range:** {self.start_time or '...'} to {self.end_time or '...'}\n\n")
-            
-            # 0. Methodology
-            f.write(f"## {t['h1_legend']}\n{t['legend_desc']}\n\n")
-            f.write("### Modules:\n")
-            for m, desc in t['tool_list']: f.write(f"- **{m}**: {desc}\n")
-            f.write("\n### Tag Legend:\n")
-            for tag, desc in t['tag_legend']: f.write(f"- `{tag}`: {desc}\n")
+            scope_str = "All Time"
+            if self.start_time or self.end_time: scope_str = f"{self.start_time or '...'} ~ {self.end_time or '...'}"
+            f.write(f"# {t['title']}\n\n- **Generated:** {datetime.datetime.now()}\n- **{t['scope']}:** {scope_str}\n\n")
 
-            # 1. Summary
-            f.write(f"\n## {t['h1_summary']}\n\n| {t['h1_cols'][0]} | {t['h1_cols'][1]} | {t['h1_cols'][2]} |\n|---|---|---|\n")
-            if has_chronos: f.write(f"| Chronos | {t['status_crit']} | {len(self.df_chronos)} |\n")
-            if has_aion:    f.write(f"| AION | {t['status_crit']} | {len(self.df_aion)} |\n")
-            
-            if has_exfil:
-                plutos_warn = self.df_plutos.filter(
-                    ~pl.col("Plutos_Verdict").is_in(["NORMAL_APP_ACCESS", "SYSTEM_INTERNAL_ACTIVITY"])
-                ).height
-                f.write(f"| Plutos (File) | {t['status_crit']} | {plutos_warn} |\n")
+            # 1. Identity
+            if self.df_timeline is not None and "Resolved_User" in self.df_timeline.columns:
+                f.write(f"## {t['h1_users']}\n\n| {t['col_user']} | {t['col_sid']} | {t['col_status']} |\n|---|---|---|\n")
+                summary = self.df_timeline.select(["Resolved_User", "Subject_SID", "Account_Status"]).unique().sort("Account_Status")
+                for r in summary.iter_rows(named=True):
+                    # Nice display for None SID
+                    sid_disp = r['Subject_SID'] if r['Subject_SID'] and str(r['Subject_SID']) != "None" else "N/A"
+                    f.write(f"| {r['Resolved_User']} | `{sid_disp}` | {r['Account_Status']} |\n")
+                f.write("\n")
 
-            if has_net:
-                net_warn = self.df_plutos_net.filter(
-                    ~pl.col("Plutos_Verdict").is_in(["NORMAL_SYSTEM_ACTIVITY"])
-                ).height
-                f.write(f"| Plutos (Net) | {t['status_crit']} | {net_warn} |\n")
-            
-            if has_sphinx:  f.write(f"| Sphinx | {t['status_crit']} | {len(self.df_sphinx)} |\n\n")
+            # 2. Executive Summary
+            f.write(f"## {t['h1_summary']}\n\n| {t['h1_cols'][0]} | {t['h1_cols'][1]} | {t['h1_cols'][2]} |\n|---|---|---|\n")
+            f.write(f"| Hercules | {t['status_crit'] if hercules_count > 0 else t['status_safe']} | {hercules_count} |\n")
+            f.write(f"| Chronos | {t['status_crit'] if get_count(self.df_chronos)>0 else t['status_safe']} | {get_count(self.df_chronos)} |\n")
+            f.write(f"| AION | {t['status_crit'] if get_count(self.df_aion)>0 else t['status_safe']} | {get_count(self.df_aion)} |\n")
+            f.write(f"| Sphinx | {t['status_crit'] if get_count(self.df_sphinx)>0 else t['status_safe']} | {get_count(self.df_sphinx)} |\n")
+            f.write(f"| Pandora | {t['status_warn'] if get_count(self.df_pandora)>0 else t['status_safe']} | {get_count(self.df_pandora)} (All Time) |\n")
+            f.write(f"| Plutos | {t['status_crit'] if get_count(self.df_plutos)>0 else t['status_safe']} | {get_count(self.df_plutos)} |\n\n")
 
-            # 2. Storyline
+            # 3. Critical Breakdown
+            f.write(f"## {t['h2_breakdown']}\n> {t['desc_breakdown']}\n\n")
+            
+            # Hercules Breakdown
+            if hercules_count > 0:
+                f.write(f"### 🔥 Hercules: Privilege & Authority\n| {t['col_time']} | Tag | {t['col_user']} |\n|---|---|---|\n")
+                crit_events = self.df_timeline.filter(pl.col("Tag").str.contains(r"\[!\]|CRITICAL|DELETED_USER"))
+                count = 0
+                for r in crit_events.iter_rows(named=True):
+                    if "DELETED_USER" in r["Tag"] or not self._is_system_noise(r["Resolved_User"], r["Subject_SID"]):
+                         f.write(f"| {r['Timestamp_UTC']} | **{r['Tag']}** | {r['Resolved_User']} |\n")
+                         count += 1
+                         if count >= 5: break
+                f.write("\n")
+
+            # Chronos Breakdown
+            if get_count(self.df_chronos) > 0 and "Chronos_Score" in self.df_chronos.columns:
+                f.write(f"### ⏳ Chronos: Time Anomalies (Top 5)\n| {t['col_time']} | Score | {t['col_file']} |\n|---|---|---|\n")
+                for r in self.df_chronos.sort("Chronos_Score", descending=True).head(5).iter_rows(named=True):
+                    f.write(f"| {r.get('Anomaly_Time','')} | {r.get('Chronos_Score','')} | `{r.get('FileName','')}` |\n")
+                f.write("\n")
+            
+            # AION Breakdown
+            if get_count(self.df_aion) > 0:
+                f.write(f"### 👁️ AION: Persistence (Top 5)\n| {t['col_time']} | Tags | Target |\n|---|---|---|\n")
+                for r in self.df_aion.head(5).iter_rows(named=True):
+                     f.write(f"| {r.get('Last_Executed_Time','')} | {r.get('AION_Tags','')} | `{r.get('Target_FileName','')}` |\n")
+                f.write("\n")
+
+            # Sphinx Breakdown
+            if get_count(self.df_sphinx) > 0:
+                f.write(f"### 🦁 Sphinx: Decoded Scripts (Top 5)\n| {t['col_time']} | Rule | Hint |\n|---|---|---|\n")
+                sc = self.df_sphinx.collect_schema().names()
+                tc = next((c for c in ["TimeCreated", "Timestamp_UTC"] if c in sc), "Time")
+                rc = "Sphinx_Tags" if "Sphinx_Tags" in sc else "Action"
+                hc = "Decoded_Hint" if "Decoded_Hint" in sc else "Original_Snippet"
+                for r in self.df_sphinx.head(5).iter_rows(named=True):
+                     hint = str(r.get(hc, ""))[:50].replace("\n", " ")
+                     f.write(f"| {r.get(tc,'')} | {r.get(rc,'')} | `{hint}...` |\n")
+                f.write("\n")
+
+            # Plutos Breakdown
+            if get_count(self.df_plutos) > 0:
+                f.write(f"### 💸 Plutos: Data Exfiltration (Top 5)\n| {t['col_time']} | Verdict | {t['col_file']} |\n|---|---|---|\n")
+                plutos_clean = self.df_plutos.filter(~pl.col("Plutos_Verdict").is_in(["NORMAL_APP_ACCESS", "SYSTEM_INTERNAL_ACTIVITY"]))
+                for r in plutos_clean.head(5).iter_rows(named=True):
+                    f.write(f"| {r.get('SourceModified','')} | {r.get('Plutos_Verdict','')} | `{r.get('Target_FileName','')}` |\n")
+                f.write("\n")
+
+            # 4. Storyline
             df_story = self.weave_storyline()
             if df_story is not None:
                 f.write(f"## {t['h2_story']}\n> {t['desc_story']}\n\n| {t['col_time']} | {t['col_mod']} | {t['col_desc']} |\n|---|---|---|\n")
                 for row in df_story.iter_rows(named=True):
                     f.write(f"| {row['Time']} | **{row['Module']}** | {row['Desc']} |\n")
-
-            # 3. Details
-            f.write(f"\n## {t['h2_threats']}\n\n")
-            if has_aion:
-                f.write(f"### {t['h3_persist']}\n| Score | Target | Location | Path |\n|---|---|---|---|\n")
-                for r in self.df_aion.sort("AION_Score", descending=True).head(15).iter_rows(named=True):
-                    f.write(f"| **{r['AION_Score']}** | {r['Target_FileName']} | {r['Entry_Location']} | `{r['Full_Path']}` |\n")
-
-            if has_net:
-                f.write(f"\n### {t['h3_net']}\n| Verdict | AppId | MB Sent |\n|---|---|---|\n")
-                df_net_safe = self.df_plutos_net.with_columns(
-                    pl.col("Total_Sent_MB").cast(pl.Float64, strict=False).fill_null(0.0)
-                )
-                suspicious_net = df_net_safe.filter(
-                    ~pl.col("Plutos_Verdict").is_in(["NORMAL_SYSTEM_ACTIVITY"])
-                ).sort("Total_Sent_MB", descending=True)
-                
-                for r in suspicious_net.head(15).iter_rows(named=True):
-                    app_clean = str(r['AppId']).replace("|", "/")
-                    f.write(f"| **{r['Plutos_Verdict']}** | `{app_clean}` | {r['Total_Sent_MB']:.2f} |\n")
-
-            if has_sphinx:
-                f.write(f"\n### {t['h3_sphinx']}\n| Score | Tags | Hint |\n|---|---|---|\n")
-                df_sphinx_safe = self.df_sphinx.with_columns(
-                    pl.col("Sphinx_Score").cast(pl.Int64, strict=False).fill_null(0)
-                )
-                for r in df_sphinx_safe.sort("Sphinx_Score", descending=True).head(10).iter_rows(named=True):
-                    f.write(f"| **{r['Sphinx_Score']}** | {r['Sphinx_Tags']} | {r['Decoded_Hint']} |\n")
+            
+            # 5. Pandora
+            if get_count(self.df_pandora) > 0:
+                f.write(f"\n## {t['h2_ghosts']}\n> {t['desc_ghosts']}\n\n")
+                f.write(f"| {t['col_risk']} | {t['col_file']} | {t['col_path']} | {t['col_src']} |\n|---|---|---|---|\n")
+                for row in self.df_pandora.head(10).iter_rows(named=True):
+                    f.write(f"| {row.get('Risk_Tag','')} | `{row.get('Ghost_FileName','')}` | `{row.get('ParentPath','')}` | {row.get('Source','')} |\n")
+                if len(self.df_pandora) > 10: f.write(f"\n*(...and {len(self.df_pandora)-10} more)*\n")
 
             f.write(f"\n---\n*End of SkiaHelios Report.*")
 
 def main(argv=None):
     print_logo()
     parser = argparse.ArgumentParser()
-    parser.add_argument("-i", "--input", required=True, help="Master Timeline CSV (Chaos)")
+    parser.add_argument("-i", "--input", required=True)
     parser.add_argument("-o", "--out", default="Final_Grimoire.md")
     parser.add_argument("--aion"); parser.add_argument("--pandora"); 
-    parser.add_argument("--plutos"); parser.add_argument("--plutos-net");
-    parser.add_argument("--sphinx"); parser.add_argument("--chronos")
+    parser.add_argument("--plutos"); parser.add_argument("--plutos-net"); 
+    parser.add_argument("--sphinx"); parser.add_argument("--chronos"); 
     parser.add_argument("--lang", default="en")
-    parser.add_argument("--start", help="Filter Start Date")
-    parser.add_argument("--end", help="Filter End Date")
+    parser.add_argument("--start"); parser.add_argument("--end")
     args = parser.parse_args(argv)
     
-    weaver = HekateWeaver(
-        args.input, args.aion, args.pandora, 
-        args.plutos, args.plutos_net,
-        args.sphinx, args.chronos, args.lang,
-        args.start, args.end
-    )
+    weaver = HekateWeaver(args.input, args.aion, args.pandora, args.plutos, args.plutos_net, args.sphinx, args.chronos, args.lang, args.start, args.end)
     weaver.generate_grimoire(args.out)
 
 if __name__ == "__main__":
