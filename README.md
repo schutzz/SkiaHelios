@@ -1,162 +1,137 @@
-# SkiaHelios (The Shadow Sun) v3.5 [Grand Weaver Edition]
+# SkiaHelios: Advanced DFIR Artifact Correlation Engine
 
-> **"Ex Umbra in Solem"** (From the Shadows into the Sun)
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
+![Platform](https://img.shields.io/badge/Platform-Windows-win)
+![License](https://img.shields.io/badge/License-MIT-green)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/)
-[![Polars](https://img.shields.io/badge/Powered%20by-Polars-orange)](https://www.pola.rs/)
-[![Status](https://img.shields.io/badge/Status-Battle%20Tested-red)](https://github.com/schutzz/SkiaHelios)
+**"Truth is a multi-layered tapestry."**
 
-## 👁️ Philosophy & Mission
-
-**"Extracting the sun of binary-level truth (Helios) from the shadows of chaotic evidence (Skia)."**
-
-**SkiaHelios** is a definitive digital forensics suite designed for high-resolution analysis. It allows analysts to establish **"Absolute Coordinates"** in time and space, dominating the entire workflow from initial triage to final testimony.
-
-Unlike traditional tools that rely strictly on OS APIs, SkiaHelios parses raw binary structures to reveal what is hidden, ensuring **"Order out of Chaos."**
+SkiaHelios is a modular Digital Forensics & Incident Response (DFIR) framework designed to correlate disparate artifacts (Timeline, Registry, Network, USN Journal) into a single, cohesive narrative. Unlike traditional parsers that output isolated CSVs, SkiaHelios reconstructs the *context* of user activity.
 
 ---
 
-## 🏗️ Architecture: The "SH" Ecosystem
-
-SkiaHelios operates as a unified monorepo, orchestrating 7 specialized modules through a centralized command console. It leverages **Polars LazyFrame** and **Streaming API** to process gigabytes of MFT/USN/Log data in seconds.
+## 🧩 Architecture
 
 ```mermaid
 graph TD
-    User[Analyst] -->|Control| Helios(SH_HeliosConsole)
-    
-    style Helios fill:#f9f,stroke:#333,stroke-width:4px,color:black
+    %% Input Layer
+    Input[("KAPE Artifacts (CSV)")] -->|Registry Hives| Hercules
+    Input -->|SRUM / Lnk| Plutos
+    Input -->|Event Logs (Evtx)| Clio
+    Input -->|MFT / USN| Engines
 
-    %% Phase 1: Foundation
-    Helios -->|1. Build Timeline| Chaos[SH_ChaosGrasp]
-    
-    %% Phase 1.5: Verification
-    Chaos -->|Input for Audit| Chronos[SH_ChronosSift]
-    
-    %% Phase 2: Deep Analysis
-    Helios -->|2. Detect Persistence| AION[SH_AIONDetector]
-    Helios -->|3. Find Ghosts| Pandora[SH_PandorasLink]
+    %% Processing Layer (The Pantheon)
+    subgraph SkiaHelios Core
+        direction TB
+        Hercules("🏛️ Hercules v3.7<br/>[Identity & Authority]")
+        Plutos("💸 Plutos v1.11<br/>[Network & Exfil]")
+        Clio("📜 Clio v2.1<br/>[Event History]")
+        
+        subgraph Engines [Time & Persistence Engines]
+            Chronos(Chronos<br/>Time Anomalies)
+            Pandora(Pandora<br/>Deleted Recovery)
+            AION(AION<br/>Persistence)
+        end
+    end
 
-    %% Phase 3: Exfiltration & Decoding
-    Pandora -->|Ghosts & Risks| Plutos[SH_PlutosGate]
-    Helios -->|4.5 Decode Riddle| Sphinx[SH_SphinxDeciphering]
+    %% Logic Flow
+    Hercules -.->|Identity Context<br/>(User <-> SID)| Hekate
+    Plutos -.->|C2 & USB Context| Hekate
+    Clio -.->|Lateral Movement<br/>& RDP Trace| Hekate
+    Engines -.->|Deep Forensics| Hekate
 
-    %% Phase 4: Final Narrative
-    Chaos --> Hekate[SH_HekateWeaver]
-    Plutos --> Hekate
-    AION --> Hekate
-    Sphinx --> Hekate
-    Chronos -->|Critical Time Anomalies| Hekate
-    
-    %% Styles
-    style Chronos stroke:#f00,stroke-width:2px
-    style Hekate fill:#dfd,stroke:#333,stroke-width:2px
+    %% Output Layer
+    Hekate{"🕸️ Hekate v6.3<br/>(The Grand Weaver)"}
+    Hekate ==>|Weave Storyline| Report[/"📜 Grimoire.md<br/>(Final Report)"/]
+
+    %% Styling
+    style Hercules fill:#f9f,stroke:#333,stroke-width:2px
+    style Plutos fill:#bbf,stroke:#333,stroke-width:2px
+    style Clio fill:#ffd700,stroke:#333,stroke-width:2px
+    style Hekate fill:#bfb,stroke:#333,stroke-width:4px
 ```
+
+---
+
+## 🚀 Key Features & Updates
+
+### 🏛️ Hercules: The Judge (v3.7 [Omnivore])
+* **Oracle Mk.II Logic**: Automatically resolves the "Missing Link" between Username (`user`) and SID (`S-1-5-21...`) using heuristic inference, even when explicit mapping artifacts are fragmented.
+* **Omnivore Capability**: No longer reliant on specific filenames. Hercules now scans *all* KAPE registry outputs to find identity mappings (`ProfileImagePath`), ensuring successful integration regardless of KAPE module naming.
+* **Authority Audit**: Instantly detects Privilege Escalation and high-risk group modifications.
+
+### 📜 Clio: The Historian (v2.1 [Event Walker])
+* **Lateral Movement Tracking**: Correlates Security Event Logs (`4624`, `4648`) to visualize RDP and network logins.
+* **Execution Trace**: Parses Process Creation events (`4688`) to identify tools executed by the attacker.
+* **Log Gap Detection**: Identifies potential "Log Clearing" events (`1102`) or suspicious gaps in the timeline.
+
+### 💸 Plutos: Network & Exfiltration Hunter (v1.11 [Net Clipper])
+* **"Ex Umbra in Solem"**: Illuminates hidden data paths.
+* **Dual-Core Analysis**: Correlates USB insertion events (`Lnk`/`LECmd`) with Network Traffic statistics (`SRUM`).
+* **Time Clipper**: Implements strict time-window filtering to eliminate historical noise and focus on the incident timeframe.
+* **Heuristic C2 Detection**: Calculates variance in traffic volume to identify potential C2 beacons and heavy data exfiltration.
+
+### 🕸️ Hekate: The Grand Weaver (v6.3 [Final Fix])
+* **Grimoire Generation**: Weaves all findings into a single, high-level Markdown report (`Grimoire.md`).
+* **Storyline Fusion**: Merges Timeline, Web History, ShellBags, and Persistence artifacts into a chronological narrative.
+* **Multilingual Support**: Fully supports Japanese and English reporting.
+
+---
 
 ## 📂 Directory Structure
 
 ```text
 SkiaHelios/
-├── README.md               ... Documentation & Philosophy
-├── requirements.txt        ... Python Dependencies (Polars, etc.)
-├── SH_HeliosConsole.py     ... The Throne (Unified Interactive Console)
-└── tools/                  ... Specialized Modules
-    ├── SH_ChaosGrasp/      ... Master Timeline Generator (The Chaos)
-    ├── SH_PandorasLink/    ... Ghost Hunting Engine (The Space)
-    ├── SH_ChronosSift/     ... Timestamp Verification (The Time)
-    ├── SH_AIONDetector/    ... Persistence Scoring (The Eternity)
-    ├── SH_PlutosGate/      ... Exfiltration Tracking (The Boundary)
-    ├── SH_SphinxDeciphering/ ... Obfuscation Decoder (The Riddle)
-    └── SH_HekateWeaver/    ... Report Generator (The Narrative)
+├── SH_HeliosConsole.py       # [ENTRY POINT] Main Command Console
+├── README.md                 # This file
+├── tools/
+│   ├── SH_HerculesReferee.py # Identity & Privilege Audit Logic
+│   ├── SH_ClioHistorian.py   # Event Log Analyzer (Security/System)
+│   ├── SH_PlutosGate.py      # Network & USB Exfiltration Analyzer
+│   ├── SH_HekateWeaver.py    # Report Generator
+│   ├── SH_Chronos.py         # Timestamp Anomaly Detector
+│   ├── SH_Pandora.py         # Deleted File Recovery (USN/MFT)
+│   ├── SH_AION_Detector.py   # Persistence Mechanism Hunter
+│   └── ...
+└── Helios_Output/            # Generated Reports & CSVs
 ```
-
-## 🚀 Key Features (v3.5)
-
-### 0. Time Clipper (New in v3.4)
-- **Surgical Filtering:** Allows analysts to specify an incident time window (Start/End).
-- **Noise Elimination:** Instantly cuts out years of irrelevant logs from "dirty" environments, isolating only the incident artifacts.
-
-### 1. ChaosGrasp (v9.3) - The Timeline Core
-- **Master Timeline Generation:** Fuses Prefetch, Amcache, ShimCache, and Event Logs into a single chronological view.
-- **Context Awareness:** Automatically detects timezone bias and adjusts timestamps to UTC.
-
-### 2. ChronosSift (v10.7) - The Timekeeper
-- **Sanctuary Update:** Whitelists known forensic tools (`/Tools/`, `FTK Imager`) to prevent false positives in analysis environments.
-- **Anomaly Bypass:** Force-includes critical timestomp artifacts (Score > 80) even if they fall outside the specified Time Clipper range.
-- **Timestomp Detection:** Identifies `$SI < $FN` timestamp anomalies with precision.
-
-### 3. AIONDetector (v10.12) - The Persistence Hunter
-- **MFT-Based Hunting:** Scans `Startup` folders and `Task` definitions directly from the Master File Table.
-- **Hybrid Analysis:** Correlates Registry Run Keys with file system creation times.
-- **Time Keeper:** Applies time filtering to persistence artifacts to identify recent implants.
-
-### 4. PlutosGate (v1.11) - The Exfiltration Tracker
-- **Smart Whitelisting:** Ignores legitimate OS telemetry while flagging anomalous traffic.
-- **USB Forensics:** Tracks file access on removable media via LNK and ShellBags.
-- **Net Clipper:** Profiles network traffic (SRUM) within the incident window.
-
-### 5. SphinxDeciphering (v1.5) - The Riddle Solver
-- **Obfuscation Decoding:** Automatically decodes Base64/XOR PowerShell commands found in Event Logs (4104).
-- **Process Lineage:** Extracts Parent Process IDs (PID) from Event ID 4688.
-
-### 6. HekateWeaver (v3.5) - The Grand Weaver
-- **Script Hunter:** Aggressively scans command-line arguments for hidden script executions (`.ps1`, `.bat`, `.vbs`).
-- **Grimoire Generation:** Compiles all findings into a single, narrative-driven Markdown report ready for professional review.
 
 ---
 
-## 🏆 Validated Capabilities
-**Operation Apple of Discord (Dirty Environment Test)** - 2025-12-25 Validation Results
+## ⚡ Usage
 
-| Module | Function | Detection Status | Notes |
-|---|---|---|---|
-| **Time Clipper** | Noise Filtering | **🟢 SUCCESS** | Reduced 10,000+ artifacts to 99 relevant events in a dirty environment. |
-| **Chronos** | Sanctuary | **🟢 SUCCESS** | Successfully ignored legacy forensic tools while flagging critical anomalies. |
-| **Sphinx** | Decoding | **🔴 CRITICAL** | Decoded obfuscated PowerShell dropper (`HostApplication=...`). |
-| **AION** | Persistence | **🔴 CRITICAL** | Detected `Trigger3.lnk` in Startup folder. |
-| **Plutos** | Exfiltration | **🔴 CRITICAL** | Identified `Cleanup.ps1` and data staging folders. |
+### 1. Pre-processing (KAPE)
+SkiaHelios requires CSV artifacts generated by **KAPE**. Ensure your KAPE targets include:
+* **Registry**: `BasicSystemInfo`, `Software_ProfileList` (or `RECmd` equivalent).
+* **FileSystem**: `MFT`, `J` ($UsnJrnl), `Lnk`.
+* **Network**: `SRUM` (SrumECmd).
+* **EventLogs**: `EvtxECmd` (Security, System, RDP).
+
+**Recommended KAPE Module Command:**
+```powershell
+kape.exe --tsource C: --tdest C:\Temp\kape --target RegistryHives,FileSystem,EventLogs --module RECmd_BasicSystemInfo,RECmd_UserActivity,SrumECmd,EvtxECmd --mdest C:\Temp\out --vss
+```
+
+### 2. Execution (Helios Console)
+Run the main console to trigger the full analysis pipeline.
+
+```powershell
+# Basic Run (Auto-detects artifacts in folder)
+python SH_HeliosConsole.py
+
+# Arguments will be prompted interactively:
+# [?] KAPE Output Directory: C:\Temp\out
+# [?] Start Time (Optional): 2025-12-01
+```
+
+### 3. Output
+The tool generates a **`Grimoire_YYYYMMDD_jp.md`** report in the output directory.
+* **Identity Summary**: Merged User/SID table.
+* **Executive Summary**: Critical anomaly counts.
+* **Storyline**: Time-sorted sequence of events.
 
 ---
 
-## 🛠️ Usage
-
-### 📦 Setup
-```bash
-git clone [https://github.com/schutzz/SkiaHelios.git](https://github.com/schutzz/SkiaHelios.git)
-cd SkiaHelios
-pip install -r requirements.txt
-```
-
-### 🎮 Unified Console (Coin Slayer Mode)
-Launch the commander to orchestrate the full suite.
-
-```console
-$ python SH_HeliosConsole.py
-
-Target Artifact Path: C:\Temp\Case\out
-Case Name: AppleOfDiscord
-Start Date [Enter to skip]: 2025-12-25 00:00:00
-End Date   [Enter to skip]: 2025-12-25 23:59:59
-
->>> [EXECUTING] CHAOS Stage...
-...
-[*] ALL SYSTEMS GO. Grimoire woven at: Helios_Output\AppleOfDiscord_20251225_XXXXXX
-```
-
-### Output
-Results are saved in `Helios_Output\<CaseName>_<Timestamp>\`:
-- `Grimoire_<Case>_<Lang>.md`: The final executive report (EN/JP).
-- `Master_Timeline.csv`: The complete event timeline.
-- `Time_Anomalies.csv`: List of timestomped files.
-- `Persistence_Report.csv`: Detected persistence mechanisms.
-- `Exfil_Report_Network.csv`: Suspicious network traffic.
-
----
-
-## 📦 Requirements
-- Python 3.10+
-- Polars (`pip install polars`)
-- python-docx (Optional, for report conversion)
-
-## 🛡️ License
-MIT License. Use responsibly for DFIR investigations and research.
+## 📜 License
+This project is for educational and DFIR training purposes.
+Use responsibly during authorized investigations and CTFs.
