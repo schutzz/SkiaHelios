@@ -5,9 +5,11 @@ import time
 import importlib
 
 # ============================================================
-#  SH_HeliosConsole v3.8 [Cerberus Orchestrator]
+#  SH_HeliosConsole v3.9 [Cerberus Orchestrator]
 #  Mission: Coordinate all modules & enable Sniper Intel flow.
-#  Logic: Pandora (Intel) -> Hercules (Sniper) -> Hekate (Report)
+#  Updates:
+#    - Added Mount Point input for AION Hashing.
+#    - Updated Hercules arguments to match v3.1 API.
 # ============================================================
 
 def print_logo():
@@ -18,7 +20,7 @@ def print_logo():
       , '   _ _ _ _   ' ,
     ,      |_______|      ,
    ,        _______        ,  < SKIA HELIOS >
-  ,        |_______|        ,  v3.8 - Sniper Orchestrator
+  ,        |_______|        ,  v3.9 - Sniper Orchestrator
   ,        _______          ,
    ,       |_______|       ,
     ,                     ,
@@ -77,7 +79,7 @@ class HeliosCommander:
             print(f"[!] {key.upper()} Stage Failed: {e}")
             return False
 
-    def full_auto_scan(self, csv_dir, raw_dir, out_dir, case_name, start_date=None, end_date=None):
+    def full_auto_scan(self, csv_dir, raw_dir, out_dir, case_name, start_date=None, end_date=None, mount_point=None):
         print_logo()
         print(f"[*] --- INITIATING CERBERUS PIPELINE: {case_name} ---")
         
@@ -107,13 +109,13 @@ class HeliosCommander:
         self.run_module("pandora", ["-d", csv_dir, "--start", p_start, "--end", p_end, "--out", str(pandora_out)])
 
         # 4. Hercules (Sniper Execution)
+        # [UPDATE] v3.1 API: -i -> --timeline, -d -> --kape, --pandora -> --ghosts
         judged_out = case_dir / "Hercules_Judged_Timeline.csv"
-        # --pandora 引数で Ghost_Report を渡すことで Sniper Mode が火を噴くっス！
         hercules_success = self.run_module("hercules", [
-            "-i", str(chaos_out), 
-            "-d", csv_dir, 
-            "-o", str(judged_out), 
-            "--pandora", str(pandora_out)
+            "--timeline", str(chaos_out), 
+            "--kape", csv_dir, 
+            "--out", str(judged_out), 
+            "--ghosts", str(pandora_out)
         ])
 
         timeline_target = str(judged_out) if (hercules_success and judged_out.exists()) else str(chaos_out)
@@ -125,7 +127,10 @@ class HeliosCommander:
             self.run_module("chronos", ["-f", str(mft_raw), "-o", str(chronos_out), "--targets-only"] + time_args)
         
         aion_out = case_dir / "Persistence_Report.csv"
-        self.run_module("aion", ["--dir", csv_dir, "--mft", str(mft_raw if mft_raw else timeline_target), "-o", str(aion_out)] + time_args)
+        aion_args = ["--dir", csv_dir, "--mft", str(mft_raw if mft_raw else timeline_target), "-o", str(aion_out)] + time_args
+        if mount_point:
+            aion_args.extend(["--mount", mount_point])
+        self.run_module("aion", aion_args)
 
         plutos_out = case_dir / "Exfil_Report.csv"
         plutos_net_out = case_dir / "Exfil_Report_Network.csv"
@@ -160,6 +165,8 @@ def main():
         print("Please provide the paths for SkiaHelios analysis:")
         csv_dir = input("1. Parsed CSV Directory (KAPE Modules): ").strip().strip('"').strip("'")
         raw_dir = input("2. Raw Artifact Directory (KAPE Targets): ").strip().strip('"').strip("'")
+        mount_point = input("3. Mount Point (Optional, for Hashing) [e.g. E:\]: ").strip().strip('"').strip("'")
+        
         case = input("Case Name [Default: Investigation]: ").strip() or "Investigation"
         
         print("\n[Optional] Specify Time Range (YYYY-MM-DD)")
@@ -167,7 +174,7 @@ def main():
         end_date   = input("End Date  : ").strip()
         
         if os.path.exists(csv_dir) and os.path.exists(raw_dir):
-            commander.full_auto_scan(csv_dir, raw_dir, "Helios_Output", case, start_date, end_date)
+            commander.full_auto_scan(csv_dir, raw_dir, "Helios_Output", case, start_date, end_date, mount_point)
         else:
             print("[!] Error: One or both paths do not exist. Check your input.")
             input("Press Enter to exit...")

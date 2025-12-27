@@ -87,7 +87,8 @@ class PlutosEngine:
             # 1. USB Detection
             if dtype_col:
                 df_usb = df_lnk.filter(
-                    pl.col(dtype_col).cast(pl.Utf8).str.contains(r"(?i)Removable|Fixed|^2$") 
+                    (pl.col(dtype_col).cast(pl.Utf8).str.contains(r"(?i)Removable|^2$")) | 
+                    ((pl.col(dtype_col).cast(pl.Utf8).str.contains(r"(?i)Fixed")) & (~pl.col(path_col).str.to_uppercase().str.starts_with("C:")))
                 )
             else:
                 df_usb = df_lnk.filter(

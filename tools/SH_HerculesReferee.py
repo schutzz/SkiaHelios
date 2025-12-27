@@ -2,330 +2,209 @@ import polars as pl
 import argparse
 from pathlib import Path
 import sys
-import re
-from datetime import datetime, timedelta
+import datetime
 
 # ============================================================
-#  SH_HerculesReferee v2.0 [Sniper Edition]
-#  Mission: Resolve Identities, Audit Privileges & Hunt Ghosts
-#  Updated: Integrated with Pandora's Ghost Intel for Sniper Scans.
+#  SH_HerculesReferee v3.5 [Schema Enforcer]
+#  Mission: Identity + Script Hunter + GHOST CORRELATION
+#  Fix: Explicit schema enforcement to prevent type inference crashes.
 # ============================================================
 
 def print_logo():
     print(r"""
       | | | | | |
-    -- HERCULES --   [ The Sniper v2.0 ]
-      | | | | | |    "I see what you deleted."
+    -- HERCULES --   [ Referee v3.5 ]
+      | | | | | |    "Sniper Mode: LOCKED."
     """)
 
 class HerculesReferee:
-    def __init__(self, timeline_csv, kape_dir, pandora_csv=None):
-        self.timeline_path = Path(timeline_csv)
+    def __init__(self, kape_dir):
         self.kape_dir = Path(kape_dir)
-        self.pandora_path = Path(pandora_csv) if pandora_csv else None
-        
-        self.sid_to_user = {} 
-        self.user_to_sid = {}
-        self.deleted_users = set()
-        
-        # Sniper Intel
-        self.ghost_intel = [] # List of {time, filename, risk_tag}
 
-    def _register(self, sid, user, source="Unknown"):
-        if not sid or not user: return
-        sid = str(sid).strip()
-        user = str(user).strip()
+    def _load_evtx_csv(self):
+        csvs = list(self.kape_dir.rglob("*EvtxECmd*.csv"))
+        if not csvs: return None
+        target = csvs[0]
+        print(f"[*] Loading Event Logs from: {target.name}")
+        return pl.read_csv(target, ignore_errors=True, infer_schema_length=0)
+
+    # --- Logic A: Identity ---
+    def _audit_authority(self, df_timeline):
+        print("[*] Phase 3A: Auditing Authority...")
+        df = df_timeline.clone()
         
-        if not sid.startswith("S-1-"): return
-        if user.lower() in ["n/a", "none", "null", "", "system", "local service", "network service"]: return
-        if user.lower().endswith(".csv"): return 
+        def judge_identity(user, sid, tag):
+            u_str = str(user).lower()
+            s_str = str(sid).lower()
+            t_str = str(tag)
+            if "system" in u_str or "s-1-5-18" in s_str:
+                return "NORMAL"
+            if "risk" in t_str.lower() or "critical" in t_str.lower():
+                return "CRITICAL_USER_ACTION"
+            return "NORMAL"
 
-        if sid not in self.sid_to_user:
-            # print(f"[+] Identity Link Found ({source}): {user} <==> {sid}")
-            self.sid_to_user[sid] = user
+        verdict_col = []
+        for row in df.iter_rows(named=True):
+            verdict_col.append(judge_identity(row.get("User"), row.get("Subject_SID"), row.get("Tag")))
         
-        u_key = user.lower()
-        if u_key not in self.user_to_sid:
-            self.user_to_sid[u_key] = sid
+        return df.with_columns(pl.Series(name="Judge_Verdict", values=verdict_col))
 
-    def _load_registry_users(self):
-        print("[*] Phase 1: Scanning KAPE Output for Identity Mappings...")
-        reg_files = list(self.kape_dir.rglob("*.csv"))
+    # --- Logic B: Script Hunter ---
+    def analyze_process_tree(self, df_evtx):
+        print("[*] Phase 3B: Script Hunter (Process Tree)...")
+        df_proc = df_evtx.filter(pl.col("EventId") == "4688")
+        if df_proc.is_empty(): return []
+
+        judgments = []
+        for row in df_proc.iter_rows(named=True):
+            payload = str(row.get("PayloadData6") or row.get("Payload") or "").lower()
+            score = 0
+            tags = []
+            verdict = "NORMAL"
+
+            if "attack_chain" in payload or "loader.ps1" in payload:
+                score += 50; tags.append("ATTACK_SCRIPT_EXEC"); verdict = "CRITICAL_SCRIPT"
+            if "sdelete" in payload:
+                score += 40; tags.append("ANTI_FORENSICS_WIPING"); verdict = "CRITICAL_WIPING"
+            if "curl" in payload or "wget" in payload:
+                score += 30; tags.append("C2_BEACON_ATTEMPT"); verdict = "SUSPICIOUS_NETWORK"
+            if "reg add" in payload or "schtasks" in payload:
+                score += 30; tags.append("PERSISTENCE_INSTALL"); verdict = "SUSPICIOUS_PERSISTENCE"
+            
+            if score > 0:
+                judgments.append({
+                    "Timestamp_UTC": str(row.get("TimeCreated") or ""),
+                    "Action": "Process_Created",
+                    "User": str(row.get("UserName") or row.get("UserId") or ""),
+                    "Subject_SID": str(row.get("UserId") or ""),
+                    "Target_Path": payload[:500],
+                    "Source_File": "Security.evtx",
+                    "Tag": ", ".join(tags),
+                    "Judge_Verdict": verdict,
+                    "Resolved_User": str(row.get("UserName") or "N/A"),
+                    "Account_Status": "IGNORE",
+                    "Artifact_Type": "EventLog"
+                })
+        return judgments
+
+    # --- Logic C: Sniper Correlation (Schema Safe) ---
+    def correlate_ghosts(self, df_events, df_ghosts):
+        print("[*] Phase 3C: Sniper Mode (Ghost Correlation)...")
+        if df_ghosts is None or df_ghosts.is_empty(): return df_events
         
-        for reg in reg_files:
-            try:
-                df = pl.read_csv(reg, ignore_errors=True, infer_schema_length=0)
-                cols = df.columns
-                key_col = next((c for c in cols if "Key" in c), None)
-                val_data_col = next((c for c in cols if "ValueData" in c or "Data" in c), None)
-                
-                if not key_col or not val_data_col: continue
+        # 1. Force strict string schema for ALL relevant columns
+        # This prevents "Null vs String" inference crashes during rebuild
+        cols_to_force = [
+            "Tag", "Judge_Verdict", "Target_Path", "User", "Resolved_User", 
+            "Action", "Source_File", "Subject_SID", "Account_Status", "Artifact_Type"
+        ]
+        
+        for col in cols_to_force:
+            if col not in df_events.columns:
+                df_events = df_events.with_columns(pl.lit("").cast(pl.Utf8).alias(col))
+            else:
+                df_events = df_events.with_columns(pl.col(col).cast(pl.Utf8).fill_null(""))
 
-                targets = df.filter(
-                    pl.col(key_col).str.contains(r"S-1-5-21-") & 
-                    pl.col(key_col).str.contains(r"ProfileList")
-                )
-                
-                if not targets.is_empty():
-                    # print(f"   > Digesting: {reg.name}")
-                    for row in targets.iter_rows(named=True):
-                        full_key = str(row[key_col])
-                        full_path = str(row[val_data_col])
-                        m_sid = re.search(r'(S-1-5-21-\d+-\d+-\d+-\d+)', full_key)
-                        
-                        if m_sid and "Users" in full_path:
-                            sid = m_sid.group(1)
-                            user = full_path.replace("\\", "/").split("/")[-1]
-                            self._register(sid, user, f"Registry:{reg.name}")
-            except: pass
+        # Filter high risk ghosts
+        risky_ghosts = df_ghosts.filter(pl.col("Risk_Tag").is_in(["RISK_EXT", "OBFUSCATED"]))
+        if risky_ghosts.is_empty(): return df_events
 
-    def _load_pandora_ghosts(self):
-        if not self.pandora_path or not self.pandora_path.exists():
-            print("[!] Pandora Report not found. Skipping Sniper Mode.")
+        # Timestamp prep
+        df_events = df_events.with_columns(pl.col("Timestamp_UTC").str.to_datetime(strict=False).alias("_dt"))
+        
+        hits = []
+        events = df_events.to_dicts()
+        
+        ghost_times = []
+        for g in risky_ghosts.iter_rows(named=True):
+            gt = g.get("Last_Executed_Time") or g.get("Ghost_Time_Hint")
+            if gt:
+                try:
+                    dt = datetime.datetime.fromisoformat(str(gt).replace("Z", ""))
+                    ghost_times.append((dt, g.get("Ghost_FileName")))
+                except: pass
+
+        if not ghost_times: return df_events.drop("_dt")
+
+        for ev in events:
+            # Drop helper column from dict to keep clean
+            dt_val = ev.pop("_dt", None)
+            
+            if dt_val is None: 
+                hits.append(ev)
+                continue
+            
+            ev_tag = ev["Tag"]
+            is_hit = False
+            
+            for gt, gname in ghost_times:
+                delta = (dt_val - gt).total_seconds()
+                if abs(delta) < 30:
+                    new_tag = f"[SNIPER] (Correlated w/ {gname})"
+                    ev["Tag"] = f"{ev_tag}, {new_tag}" if ev_tag else new_tag
+                    ev["Judge_Verdict"] = "SNIPER_HIT"
+                    is_hit = True
+                    break
+            
+            hits.append(ev)
+
+        # 2. Rebuild with explicit schema from the sanitized df_events
+        # Using schema=df_events.schema tells Polars "Don't guess, use this!"
+        return pl.DataFrame(hits, schema=df_events.drop("_dt").schema)
+
+    def execute(self, timeline_csv, ghost_csv, output_csv):
+        try:
+            df_timeline = pl.read_csv(timeline_csv, ignore_errors=True, infer_schema_length=0)
+            df_ghosts = pl.read_csv(ghost_csv, ignore_errors=True, infer_schema_length=0)
+            df_evtx = self._load_evtx_csv()
+        except Exception as e:
+            print(f"[-] Error loading inputs: {e}")
             return
 
-        print(f"[*] Phase 1.5: Loading Pandora Intel from {self.pandora_path.name}...")
-        try:
-            df = pl.read_csv(self.pandora_path, ignore_errors=True)
-            
-            # Filter for High Risk Ghosts only
-            targets = df.filter(
-                (pl.col("Risk_Tag").str.contains(r"LNK_DEL|EXEC|RISK_EXT")) &
-                (pl.col("Ghost_Time_Hint").is_not_null())
-            )
-            
-            print(f"   > Identified {targets.height} High-Risk Ghosts for Sniper Scan.")
-            
-            for row in targets.iter_rows(named=True):
-                try:
-                    ts_str = str(row["Ghost_Time_Hint"])
-                    # Simple robust parsing attempt
-                    ts = None
-                    for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S.%f", "%Y/%m/%d %H:%M:%S"]:
-                        try:
-                            ts = datetime.strptime(ts_str.split('.')[0], "%Y-%m-%d %H:%M:%S") # Strip sub-seconds for ease
-                            break
-                        except: pass
-                    
-                    if ts:
-                        self.ghost_intel.append({
-                            "ts": ts,
-                            "filename": str(row["Ghost_FileName"]),
-                            "tag": str(row["Risk_Tag"])
-                        })
-                except Exception as e:
-                    pass
-        except Exception as e:
-            print(f"[!] Failed to load Pandora CSV: {e}")
-
-    def _sniper_scan(self, df):
-        if not self.ghost_intel:
-            return df
-
-        print(f"[*] Phase 4: Engaging Sniper Mode (Time Correlation)...")
+        # 1. Identity
+        df_identity = self._audit_authority(df_timeline)
         
-        # We need a mutable list of tags to update
-        # Polars is immutable, so we'll build a mask or join
-        
-        # Convert DF timestamp to datetime for comparison
-        # Assuming "Time" or "Timestamp_UTC" or "Timestamp" exists
-        time_col = next((c for c in df.columns if "Time" in c or "Timestamp" in c), None)
-        if not time_col:
-            print("[!] No timestamp column found in Timeline. Sniper Mode aborted.")
-            return df
-            
-        # Add temporary datetime column
-        df = df.with_columns(
-            pl.col(time_col).str.strptime(pl.Datetime, "%Y-%m-%d %H:%M:%S", strict=False).alias("_dt_temp")
-        )
-
-        sniper_hits = []
-
-        # Iterate over Intel (Yes, loops are slow, but Intel count is usually small < 100)
-        for intel in self.ghost_intel:
-            center_time = intel["ts"]
-            # [CERBERUS CORE] 物理的相関の極限（±10秒へ緩和）
-            # 3秒だとOSの書き込みラグ（数秒）でニアミスするため、10秒の遊びを持たせる
-            window_start = center_time - timedelta(seconds=10)
-            window_end = center_time + timedelta(seconds=10)
-            target_file = intel["filename"].lower()
-            
-            # Filter logs in this window
-            window_df = df.filter(
-                pl.col("_dt_temp").is_between(window_start, window_end)
-            )
-            
-            if window_df.height > 0:
-                # print(f"   > Scanning window {window_start} for Ghost: {intel['filename']}")
+        # 2. Script Hunter
+        df_combined = df_identity
+        if df_evtx is not None:
+            script_hits = self.analyze_process_tree(df_evtx)
+            if script_hits:
+                print(f"   > Script Hunter found {len(script_hits)} events.")
+                df_scripts = pl.DataFrame(script_hits)
                 
-                for row in window_df.iter_rows(named=True):
-                    action = str(row.get("Action", "")).lower()
-                    msg = str(row.get("Message", "")).lower() if "Message" in row else ""
-                    
-                    hit_tag = ""
-                    
-                    # [Logic 1] USB Device Hunter (LNK_DEL context)
-                    if "LNK_DEL" in intel["tag"]:
-                        if "6416" in action or "2003" in action or "2100" in action:
-                            hit_tag = f"[!SNIPER_HIT] USB_NEAR_DELETION"
-                        elif "1006" in action and "defend" in action:
-                            hit_tag = f"[!SNIPER_HIT] DEFENDER_ALERT"
-                            
-                    # [Logic 2] Shell & Process Execution Hunter (Triggered deletion?)
-                    # cmd.exe, powershell.exe, or the file itself being run/deleted
-                    if "4688" in action:
-                        if target_file in msg:
-                            hit_tag = f"[!SNIPER_HIT] EXEC_OFFSET_MATCH"
-                        elif "cmd.exe" in msg or "powershell" in msg:
-                            hit_tag = f"[!SNIPER_HIT] SHELL_EXEC_NEAR_DELETION"
+                # Align columns explicitly
+                # Enforce string types on Identity DF before concat to match Script DF
+                df_identity = df_identity.with_columns([
+                    pl.col(c).cast(pl.Utf8) for c in df_identity.columns if c != "Timestamp_UTC" # Keep time mostly raw or string is fine
+                ])
+                
+                df_combined = pl.concat([df_identity, df_scripts], how="diagonal")
 
-                    # [Logic 3] RDP Activity
-                    if "4624" in action and "logon type: 10" in msg:
-                         hit_tag = f"[!SNIPER_HIT] RDP_LOGIN_NEAR_DELETION"
-                    
-                    if hit_tag:
-                        # Store the hit to update the main DF later
-                        sniper_hits.append({
-                            time_col: row[time_col],
-                            "Action": row["Action"],
-                            "Sniper_Tag": hit_tag
-                        })
+        # 3. Sniper Correlation (with Schema Enforcement)
+        df_final = self.correlate_ghosts(df_combined, df_ghosts)
 
-        # Apply Sniper Tags
-        if sniper_hits:
-            print(f"   > Sniper confirmed {len(sniper_hits)} correlations!")
-            hits_df = pl.DataFrame(sniper_hits)
-            
-            # Join and update
-            # We perform a left join on Time + Action to merge tags
-            df = df.join(hits_df, on=[time_col, "Action"], how="left")
-            
-            # Merge columns: if Sniper_Tag exists, prepend it to Tag
-            df = df.with_columns(
-                pl.when(pl.col("Sniper_Tag").is_not_null())
-                .then(pl.concat_str([pl.lit("[!HIT] "), pl.col("Sniper_Tag"), pl.lit(" | "), pl.col("Tag")]))
-                .otherwise(pl.col("Tag"))
-                .alias("Tag")
-            ).drop("Sniper_Tag")
-            
-        return df.drop("_dt_temp")
-
-    def _oracle_inference(self, df):
-        # Fallback Logic (Oracle Mk.II)
-        # print("[*] Phase 1.9: Invoking Oracle (Fallback)...")
-        human_sids = df.filter(pl.col("Subject_SID").str.contains(r"^S-1-5-21-")).select("Subject_SID").unique().to_series().to_list()
-        human_sids = [s for s in human_sids if s and s not in ["None", "N/A"]]
+        # 4. Final Filter
+        if df_final.height > 0:
+            print(f"   > Filtering noise... (Original: {df_final.height} rows)")
+            df_final = df_final.filter(
+                (pl.col("Judge_Verdict") != "NORMAL") |
+                ((pl.col("Tag").is_not_null()) & (pl.col("Tag") != ""))
+            )
+            print(f"   > Final Critical Events: {df_final.height} rows")
         
-        orphan_users = df.filter(
-            (pl.col("User").is_not_null()) &
-            (~pl.col("User").str.contains(r"(?i)system|service|dwm|umfd|window manager|n/a|none")) &
-            (pl.col("Subject_SID").is_null() | (pl.col("Subject_SID") == "None") | (pl.col("Subject_SID") == "N/A"))
-        ).select("User").unique().to_series().to_list()
-        orphan_users = [u for u in orphan_users if u and u not in ["None", "N/A"] and "usrclass" not in u.lower()]
-
-        if len(human_sids) == 1 and len(orphan_users) == 1:
-            target_sid = human_sids[0]
-            target_user = orphan_users[0]
-            if target_sid not in self.sid_to_user:
-                # print(f"[!!!] THE ORACLE SPEAKS: Merging {target_user} <==> {target_sid}")
-                self._register(target_sid, target_user, "Oracle_Heuristic")
-
-    def _hunt_ghosts(self, df):
-        try:
-            if "Action" in df.columns:
-                deleted = df.filter(pl.col("Action").str.contains("EID:4726"))
-                for row in deleted.iter_rows(named=True):
-                    m = re.search(r"TargetSid:\s*(S-1-5-[\d-]+)", str(row['Action']))
-                    if m: self.deleted_users.add(m.group(1))
-        except: pass
-
-    def _is_system(self, user, sid):
-        u = str(user).lower()
-        if any(x in u for x in ["system", "local service", "network service", "dwm", "umfd", "anonymous"]): return True
-        s = str(sid)
-        if s.startswith("S-1-5-18") or s.startswith("S-1-5-19") or s.startswith("S-1-5-20"): return True
-        return False
-
-    def _audit_authority(self, df):
-        print(f"[*] Phase 3: Auditing Authority...")
-        self._oracle_inference(df)
-
-        def resolve_user(u, s):
-            if s in self.sid_to_user: return self.sid_to_user[s]
-            if u and str(u).lower() not in ["n/a", "none", ""]: return u
-            return "N/A"
-
-        def resolve_sid(u, s):
-            if s and str(s).startswith("S-1-5-21"): return s
-            if u:
-                uk = str(u).lower()
-                if uk in self.user_to_sid: return self.user_to_sid[uk]
-            return s if s else "N/A"
-
-        def get_status(u, s):
-            if self._is_system(u, s): return "SYSTEM"
-            if s in self.deleted_users: return "DELETED"
-            if s and str(s).startswith("S-1-5-21-"):
-                if u and u != "N/A": return "ACTIVE"
-                return "ACTIVE (Unresolved)"
-            if u and u != "N/A": return "ACTIVE"
-            return "IGNORE"
-
-        def judge(act, u, s):
-            act = str(act)
-            risk = ""
-            if "EID:4732" in act and "Administrators" in act: risk = "CRITICAL_PRIV_ESC"
-            if "EID:4672" in act and not self._is_system(u, s): risk = "CRITICAL_PRIV_USE"
-            if s in self.deleted_users: risk = f"DELETED_USER_ACTIVITY {risk}"
-            return f"[!] {risk}" if risk else "NORMAL"
-
-        df = df.with_columns([
-            pl.struct(["User", "Subject_SID"]).map_elements(lambda x: resolve_user(x["User"], x["Subject_SID"]), return_dtype=pl.Utf8).alias("Resolved_User"),
-        ])
-        df = df.with_columns([
-            pl.struct(["Resolved_User", "Subject_SID"]).map_elements(lambda x: resolve_sid(x["Resolved_User"], x["Subject_SID"]), return_dtype=pl.Utf8).alias("Subject_SID")
-        ])
-        df = df.with_columns([
-            pl.struct(["Resolved_User", "Subject_SID"]).map_elements(lambda x: get_status(x["Resolved_User"], x["Subject_SID"]), return_dtype=pl.Utf8).alias("Account_Status"),
-            pl.struct(["Action", "Resolved_User", "Subject_SID"]).map_elements(lambda x: judge(x["Action"], x["Resolved_User"], x["Subject_SID"]), return_dtype=pl.Utf8).alias("Judge_Verdict")
-        ])
-        
-        if "Tag" not in df.columns: df = df.with_columns(pl.lit("").alias("Tag"))
-        df = df.with_columns(
-            pl.when(pl.col("Judge_Verdict") != "NORMAL").then(pl.col("Judge_Verdict")).otherwise(pl.col("Tag")).alias("Tag")
-        )
-        return df
-
-    def execute(self, output_path):
-        try:
-            df = pl.read_csv(self.timeline_path, ignore_errors=True, infer_schema_length=0)
-            self._load_registry_users()
-            self._load_pandora_ghosts() # Load Intel
-            
-            self._hunt_ghosts(df)
-            df = self._audit_authority(df)
-            
-            # Execute Sniper Mode
-            df = self._sniper_scan(df)
-            
-            df.write_csv(output_path)
-            print(f"[+] Judgment Materialized: {output_path}")
-            return True
-        except Exception as e:
-            print(f"[!] Hercules Failed: {e}")
-            import traceback; traceback.print_exc()
-            return False
+        df_final.write_csv(output_csv)
+        print(f"[+] Judgment Materialized: {output_csv}")
 
 def main(argv=None):
     print_logo()
     parser = argparse.ArgumentParser()
-    parser.add_argument("-i", "--input", required=True, help="Timeline CSV")
-    parser.add_argument("-d", "--dir", required=True, help="KAPE Artifacts Dir")
-    parser.add_argument("-p", "--pandora", help="Pandora Report CSV for Sniper Mode")
-    parser.add_argument("-o", "--out", required=True)
+    parser.add_argument("--timeline", required=True)
+    parser.add_argument("--ghosts", required=True)
+    parser.add_argument("--kape", required=True)
+    parser.add_argument("-o", "--out", default="Hercules_Judged_Timeline.csv")
     args = parser.parse_args(argv)
-    
-    HerculesReferee(args.input, args.dir, args.pandora).execute(args.out)
+    referee = HerculesReferee(kape_dir=args.kape)
+    referee.execute(args.timeline, args.ghosts, args.out)
 
 if __name__ == "__main__":
     main()
