@@ -3,240 +3,258 @@ import argparse
 from pathlib import Path
 import sys
 import io
+import re
+import hashlib
 
 # ============================================================
-#  SH_AIONDetector v10.12 [Time Keeper]
-#  Fix: Apply Time Range filter to persistence artifacts.
+#  SH_AIONDetector v13.1 [Hybrid Hash Hunter]
+#  Mission: Detect Persistence & Calculate Evidence Hash (Optional).
+#  Fix: Handle "Artifact Only" scenarios gracefully.
 # ============================================================
 
 def print_logo():
     print(r"""
         / \
-       / _ \     (The Eye of Truth)
-      / | | \    "Timestamps are the ultimate evidence."
+       / _ \     (The Eye of Truth v13.1)
+      / | | \    "Context aware verification."
      /_/   \_\
 
-      [ SH_AIONDetector v10.12 ]
+      [ SH_AIONDetector ]
     """)
 
 class AIONEngine:
-    def __init__(self, target_dir=None, file_path=None, mft_csv=None, start_time=None, end_time=None):
-        self.target_dir = target_dir
-        self.file_path = file_path
+    def __init__(self, target_dir=None, mft_csv=None, mount_point=None):
+        self.target_dir = Path(target_dir) if target_dir else None
         self.mft_csv = mft_csv
-        self.start_time = start_time
-        self.end_time = end_time
-        self.signatures = {
-            "High_Risk": {"keywords": ["powershell", "cmd.exe", "wscript", "mshta", "rundll32", "certutil"], "score": 10},
-            "User_Persistence": {"keywords": ["hkey_current_user", "hkcu", "software\\microsoft\\windows\\currentversion\\run"], "score": 9},
-            "Suspicious_Path": {"keywords": ["temp", "appdata\\local", "users\\public", "perflogs", "downloads"], "score": 15}, 
-            "WMI_Persistence": {"keywords": ["wmi", "eventfilter", "eventconsumer", "binding"], "score": 12},
-            "Atomic_Red_Team": {"keywords": ["atomic", "art-", "redteam", "t10"], "score": 15}
-        }
+        # If mount_point is provided, we try to hash. If not, we skip.
+        self.mount_point = Path(mount_point) if mount_point else None
+        
+        self.reg_targets = [
+            r"Microsoft\\Windows\\CurrentVersion\\Run",
+            r"Microsoft\\Windows\\CurrentVersion\\RunOnce",
+            r"Services",
+            r"ScheduledTasks"
+        ]
 
-    def load_mft(self):
-        if self.mft_csv and Path(self.mft_csv).exists():
-            df = pl.read_csv(self.mft_csv, ignore_errors=True, infer_schema_length=0)
-            cols = df.columns
-            if "ParentPath" in cols and "FileName" in cols:
-                df = df.with_columns(
-                    (pl.col("ParentPath") + "\\" + pl.col("FileName")).alias("Target_Path")
-                )
-                if "Created0x10" in cols:
-                    df = df.with_columns(pl.col("Created0x10").alias("Timestamp_UTC"))
-            elif "Target_Path" in cols:
-                df = df.with_columns([
-                    pl.col("Target_Path").str.extract(r"^(.*)\\([^\\]+)$", 1).alias("ParentPath"),
-                    pl.col("Target_Path").str.extract(r"^(.*)\\([^\\]+)$", 2).alias("FileName")
-                ])
-            return df
-        return None
+        self.safe_paths = [
+            r"\\Windows\\WinSxS",
+            r"\\Windows\\Servicing",
+            r"\\Windows\\SoftwareDistribution",
+            r"\\Windows\\CbsTemp",
+            r"\\Windows\\Assembly",
+            r"\\Windows\\Microsoft.NET\\Framework",
+            r"\\Windows\\System32\\DriverStore"
+        ]
 
-    def _is_in_time_range(self, time_str):
-        if not time_str: return False
-        if not self.start_time and not self.end_time: return True
+    def _calculate_file_hash(self, relative_path):
+        """Calculates SHA256 if image is mounted. Returns status string otherwise."""
+        if not self.mount_point:
+            return "ARTIFACT_ONLY (No Image)"
+        
+        if not relative_path:
+            return "N/A"
+        
+        # Normalize path
+        clean_path = str(relative_path).lstrip(".\\").lstrip("\\")
+        if ":" in clean_path:
+            try:
+                clean_path = clean_path.split(":", 1)[1].lstrip("\\")
+            except: pass
+            
+        full_path = self.mount_point / clean_path
+        
+        if not full_path.exists():
+            return "FILE_NOT_FOUND_ON_MOUNT"
+        
         try:
-            # Simple string comparison for ISO8601 usually works
-            if self.start_time and str(time_str) < self.start_time: return False
-            if self.end_time and str(time_str) > self.end_time: return False
-            return True
-        except: return True # Default to keep if parse fails
+            sha256_hash = hashlib.sha256()
+            with open(full_path, "rb") as f:
+                for byte_block in iter(lambda: f.read(4096), b""):
+                    sha256_hash.update(byte_block)
+            return sha256_hash.hexdigest()
+        except Exception as e:
+            return f"Error: {str(e)[:15]}"
 
-    def hunt_persistence(self, mft_df, suspects_list):
+    def _is_safe_path(self, path_str):
+        if not path_str: return False
+        path_norm = str(path_str).replace("/", "\\")
+        for safe in self.safe_paths:
+            if re.search(safe, path_norm, re.IGNORECASE):
+                return True
+        return False
+
+    def _load_registry_csvs(self):
+        if not self.target_dir: return []
+        return list(self.target_dir.rglob("*Registry*.csv")) + list(self.target_dir.rglob("*RECmd*.csv"))
+
+    def hunt_registry_persistence(self):
+        print("[*] Phase 1: Scanning Registry Hives (Dead Disk)...")
+        detected = []
+        reg_files = self._load_registry_csvs()
+        
+        if not reg_files: return []
+
+        for reg in reg_files:
+            try:
+                df = pl.read_csv(reg, ignore_errors=True, infer_schema_length=0)
+                cols = df.columns
+                
+                key_col = next((c for c in cols if "Key" in c and "Path" in c), None)
+                val_col = next((c for c in cols if "Value" in c and "Name" in c), None)
+                data_col = next((c for c in cols if "Value" in c and "Data" in c), None)
+                time_col = next((c for c in cols if "Time" in c), None)
+                
+                if not key_col or not data_col: continue
+                
+                regex_pattern = "|".join([re.escape(k) for k in self.reg_targets])
+                hits = df.filter(pl.col(key_col).str.contains(r"(?i)" + regex_pattern))
+
+                if hits.is_empty(): continue
+
+                for row in hits.iter_rows(named=True):
+                    k_path = str(row.get(key_col, ""))
+                    v_name = str(row.get(val_col, ""))
+                    v_data = str(row.get(data_col, ""))
+                    ts = str(row.get(time_col, ""))
+
+                    if not v_data or len(v_data) < 3: continue
+                    if self._is_safe_path(v_data): continue
+                    if "ctfmon.exe" in v_data.lower() and "windows" in v_data.lower(): continue
+                    if "onedrive.exe" in v_data.lower() and "program files" in v_data.lower(): continue
+
+                    score = 0
+                    tags = []
+                    
+                    if "Run" in k_path: 
+                        score += 10
+                        tags.append("REG_RUN_KEY")
+                    
+                    suspicious_paths = ["appdata", "temp", "public", "users", "powershell", "cmd", "wscript"]
+                    if any(s in v_data.lower() for s in suspicious_paths):
+                        score += 5
+                        tags.append("SUSPICIOUS_PATH")
+
+                    if re.search(r"(?i)\.(exe|bat|ps1|vbs|hta|dll)", v_data):
+                        score += 5
+                    
+                    if "updateservice" in v_data.lower() or "onedriveupdate" in v_name.lower():
+                        score += 20
+                        tags.append("TARGET_MATCH")
+
+                    if score >= 10:
+                        fname_match = re.search(r"([^\\]+\.(exe|bat|ps1|dll|vbs))", v_data, re.IGNORECASE)
+                        fname = fname_match.group(1) if fname_match else "Unknown"
+                        
+                        # Hash Check (Conditional)
+                        f_hash = self._calculate_file_hash(v_data)
+
+                        detected.append({
+                            "Last_Executed_Time": ts,
+                            "AION_Score": score,
+                            "AION_Tags": ", ".join(tags),
+                            "Target_FileName": fname,
+                            "Entry_Location": f"Reg: {k_path}",
+                            "Full_Path": v_data,
+                            "File_Hash": f_hash
+                        })
+
+            except Exception as e:
+                pass
+        
+        return detected
+
+    def hunt_mft_persistence(self, mft_df):
+        print("[*] Phase 2: Scanning MFT for Hotspots...")
         PERSISTENCE_HOTSPOTS = [r"(?i)Tasks", r"(?i)Startup"]
         RISKY_EXTENSIONS = r"(?i)\.(exe|lnk|bat|ps1|vbs|xml|dll|jar|hta)$"
 
-        if "ParentPath" not in mft_df.columns: return []
-
-        hotspot_filter = pl.col("ParentPath").str.contains("|".join(PERSISTENCE_HOTSPOTS))
-        hotspot_files = mft_df.filter(hotspot_filter)
-        suspect_files = hotspot_files.filter(pl.col("FileName").str.contains(RISKY_EXTENSIONS))
-        
         detected = []
 
-        SAFE_ZONES = [
-            "winsxs", "catroot", "windowsapps", "inf", "assembly", 
-            "servicing", "microsoft.net", "wbem",
-            "system32\\wdi", "microsoft\\diagnosis"
-        ]
+        if "ParentPath" in mft_df.columns:
+            # 1. Hotspot Scan
+            hotspot_files = mft_df.filter(
+                pl.col("ParentPath").str.contains("|".join(PERSISTENCE_HOTSPOTS)) &
+                pl.col("FileName").str.contains(RISKY_EXTENSIONS)
+            )
+            
+            for row in hotspot_files.iter_rows(named=True):
+                path = str(row.get('ParentPath') or "")
+                if self._is_safe_path(path): continue
+                if "onedrive" in str(row.get('FileName',"")).lower() and "program files" in path.lower(): continue
 
-        if not suspect_files.is_empty():
-             for row in suspect_files.iter_rows(named=True):
-                path_lower = str(row.get('ParentPath') or "").lower()
-                fname_lower = str(row.get('FileName') or "").lower()
-                ts = row.get("Timestamp_UTC") or row.get("Created0x10")
-                
-                # [Fix] Time Filter
-                if not self._is_in_time_range(ts): continue
-
-                if any(z in path_lower for z in SAFE_ZONES): continue
-                if "onedrive" in fname_lower: continue
+                full_path_str = f"{path}\\{row.get('FileName')}"
+                f_hash = self._calculate_file_hash(full_path_str)
 
                 detected.append({
-                    "Last_Executed_Time": ts,
+                    "Last_Executed_Time": row.get("Timestamp_UTC") or row.get("Created0x10"),
                     "AION_Score": 15, 
                     "AION_Tags": "FILE_PERSISTENCE (HOTSPOT)",
                     "Target_FileName": row.get("FileName"),
                     "Entry_Location": row.get("ParentPath"),
-                    "Full_Path": row.get("Target_Path") or f"{row.get('ParentPath')}\\{row.get('FileName')}"
+                    "Full_Path": full_path_str,
+                    "File_Hash": f_hash
                 })
 
-        WANTED_FILES = ["Windows_Security_Audit", "win_optimizer.lnk", "SunShadow", "Trigger"]
-        TRIGGER_BLACKLIST = [
-            "msmq-triggers", "vpnconnectiontrigger", "jobtrigger", 
-            "sbservicetrigger", "servicetrigger", "trigger.js", 
-            "trigger.dat", "etw", "wdi", "box",
-            "triggertrees"
-        ]
-        
-        for wanted in WANTED_FILES:
-            hits = mft_df.filter(pl.col("FileName").str.contains(f"(?i){wanted}"))
-            if not hits.is_empty():
+            # 2. Wanted List Scan
+            WANTED = ["UpdateService", "OneDriveUpdateHelper", "Confidential", "Project_Chaos"]
+            for w in WANTED:
+                hits = mft_df.filter(pl.col("FileName").str.contains(f"(?i){w}"))
                 for row in hits.iter_rows(named=True):
-                    fname = str(row.get('FileName') or "")
                     path = str(row.get('ParentPath') or "")
-                    fname_lower = fname.lower()
-                    path_lower = path.lower()
-                    ts = row.get("Timestamp_UTC") or row.get("Created0x10")
+                    if self._is_safe_path(path): continue
 
-                    # [Fix] Time Filter
-                    if not self._is_in_time_range(ts): continue
-
-                    if wanted == "Trigger":
-                        if any(b in fname_lower for b in TRIGGER_BLACKLIST): continue
-                        if any(z in path_lower for z in SAFE_ZONES): continue
-                        if "adaptive-expressions" in path_lower: continue
-                        if fname_lower.endswith(".dat") or fname_lower.endswith(".xml"): continue
+                    full_path_str = f"{path}\\{row.get('FileName')}"
+                    f_hash = self._calculate_file_hash(full_path_str)
 
                     detected.append({
-                        "Last_Executed_Time": ts,
+                        "Last_Executed_Time": row.get("Timestamp_UTC") or row.get("Created0x10"),
                         "AION_Score": 20, 
                         "AION_Tags": "NAMED_PERSISTENCE (WANTED)",
-                        "Target_FileName": fname,
+                        "Target_FileName": row.get("FileName"),
                         "Entry_Location": path,
-                        "Full_Path": row.get("Target_Path") or f"{path}\\{fname}"
+                        "Full_Path": full_path_str,
+                        "File_Hash": f_hash
                     })
+
         return detected
 
     def analyze(self):
-        targets = self._find_autoruns_csv()
-        df_mft = self.load_mft()
-        final_list = []
-        suspects_list = set()
-
-        for t in targets:
-            df_auto = self.load_csv_robust(str(t))
-            if df_auto is None or df_auto.is_empty(): continue
-            cols = df_auto.columns
-            signer_col = next((c for c in cols if "Signer" in c), None)
-            df_str = df_auto.select(pl.all().cast(pl.Utf8))
-            
-            for row in df_str.iter_rows(named=True):
-                row_score = 0
-                row_tags = []
-                full_text = " ".join([str(v).lower() for v in row.values() if v is not None])
-                img_path = str(row.get('Image Path') or "").strip()
-                
-                is_winsxs = "winsxs" in img_path.lower()
-                signer = str(row.get(signer_col) or "") if signer_col else ""
-                is_verified = "microsoft" in signer.lower() or "windows" in signer.lower()
-                if is_winsxs and is_verified: continue 
-
-                for tag, rule in self.signatures.items():
-                    for k in rule['keywords']:
-                        if k in full_text:
-                            row_score += rule['score']
-                            if tag not in row_tags: row_tags.append(tag)
-                
-                if any(bp in img_path.lower() for bp in ["\\temp\\", "\\downloads\\", "\\public\\"]):
-                    row_score += 20 
-                    if "Suspicious_Path" not in row_tags: row_tags.append("Suspicious_Path")
-
-                if row_score > 0:
-                    fname = str(row.get('Entry') or "").strip()
-                    if fname: suspects_list.add(fname)
-                    mft_time = None
-                    if df_mft is not None and img_path:
-                        match = df_mft.filter(pl.col("Target_Path").str.to_lowercase().str.contains(img_path.lower(), literal=True))
-                        if not match.is_empty():
-                            mft_time = match.get_column("Timestamp_UTC")[0]
-                    
-                    # [Fix] Time Filter for Autoruns (if MFT correlated)
-                    if mft_time and not self._is_in_time_range(mft_time): continue
-
-                    final_list.append({
-                        "Last_Executed_Time": mft_time,
-                        "AION_Score": row_score,
-                        "AION_Tags": ", ".join(row_tags),
-                        "Target_FileName": fname or "Unknown",
-                        "Entry_Location": str(row.get('Entry Location') or ""),
-                        "Full_Path": img_path,
-                    })
+        reg_hits = self.hunt_registry_persistence()
         
-        if df_mft is not None:
-             hotspot_hits = self.hunt_persistence(df_mft, list(suspects_list))
-             if hotspot_hits:
-                 print(f"[*] AION Deep Scan: Found {len(hotspot_hits)} artifacts in hotspots/wanted lists.")
-                 final_list.extend(hotspot_hits)
+        mft_hits = []
+        if self.mft_csv and Path(self.mft_csv).exists():
+             try:
+                 df_mft = pl.read_csv(self.mft_csv, ignore_errors=True, infer_schema_length=0)
+                 if "Target_Path" in df_mft.columns:
+                     df_mft = df_mft.with_columns([
+                        pl.col("Target_Path").str.extract(r"^(.*)\\([^\\]+)$", 1).alias("ParentPath"),
+                        pl.col("Target_Path").str.extract(r"^(.*)\\([^\\]+)$", 2).alias("FileName")
+                     ])
+                 mft_hits = self.hunt_mft_persistence(df_mft)
+             except: pass
 
+        final_list = reg_hits + mft_hits
+        
         if not final_list: return None
-        return pl.DataFrame(final_list).sort("AION_Score", descending=True).unique(subset=["Full_Path", "AION_Tags"])
-
-    def _find_autoruns_csv(self):
-        if self.file_path and Path(self.file_path).exists(): return [Path(self.file_path)]
-        if not self.target_dir: return []
-        return list(Path(self.target_dir).rglob("*autoruns*.csv"))
-
-    def load_csv_robust(self, path):
-        try:
-            with open(path, "rb") as f: raw = f.read()
-            enc = "utf-16" if raw.startswith(b'\xff\xfe') else "utf-8"
-            content = raw.decode(enc, errors="ignore")
-            lines = content.splitlines()
-            start = next((i for i, l in enumerate(lines[:30]) if "Entry Location" in l or "Image Path" in l), 0)
-            return pl.read_csv(io.StringIO("\n".join(lines[start:])), ignore_errors=True)
-        except Exception as e:
-            print(f" [!] Load failed {path}: {e}")
-            return None
+        return pl.DataFrame(final_list).sort("AION_Score", descending=True).unique(subset=["Full_Path", "Entry_Location"])
 
 def main(argv=None):
     print_logo()
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dir", help="Artifacts Directory (containing autoruns CSVs)")
-    parser.add_argument("--mft", help="Master_Timeline.csv (from Chaos/Chronos)")
+    parser.add_argument("--dir", required=True, help="KAPE Artifacts Dir (CSV)")
+    parser.add_argument("--mft", help="Master_Timeline.csv")
+    parser.add_argument("--mount", help="OPTIONAL: Path to Mounted Disk Image (e.g. E:\) for Hashing")
     parser.add_argument("-o", "--out", default="Persistence_Report.csv")
-    parser.add_argument("--start", help="Filter Start Date")
-    parser.add_argument("--end", help="Filter End Date")
     args = parser.parse_args(argv)
 
-    engine = AIONEngine(target_dir=args.dir, mft_csv=args.mft, start_time=args.start, end_time=args.end)
+    engine = AIONEngine(target_dir=args.dir, mft_csv=args.mft, mount_point=args.mount)
     df = engine.analyze()
 
     if df is not None:
-        print(f"\n[+] PERSISTENCE CORRELATED: {len(df)} entries mapped to MFT timeline.")
+        print(f"\n[+] PERSISTENCE DETECTED: {len(df)} artifacts.")
         df.write_csv(args.out)
     else:
-        print("[-] No persistence identified.")
+        print("[-] No persistence identified (Clean).")
 
 if __name__ == "__main__":
     main()

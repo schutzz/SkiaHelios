@@ -6,19 +6,17 @@ import re
 from pathlib import Path
 
 # ============================================================
-#  SH_ChronosSift v10.7 [Sanctuary Update]
+#  SH_ChronosSift v11.1 [Sanctuary Restore + Fix]
 #  Mission: Detect Time Anomalies.
-#  Fix: Added Whitelist for Forensic Tools/Known Paths.
+#  Base: User's v10.7 (Sanctuary) + Zero-Result Fix
 # ============================================================
 
 def print_logo():
     print(r"""
-    _______                         _____  _  ______
-   / ____/ /_  _________  ____  ____  _____    / ___/ (_)/ __/ /_
-  / /   / __ \/ ___/ __ \/ __ \/ __ \/ ___/    \__ \ / // /_/ __/
- / /___/ / / / /  / /_/ / / / / /_/ (__  )    ___/ // // __/ /_  
- \____/_/ /_/_/   \____/_/ /_/\____/____/    /____/_/_/_/  \__/  
-    "Time is the only true unit of measure." v10.7
+     _______                          _____  _  ______
+    / ____/hronos   [ Time Lord v11.1 ]   / /
+   / /              "Restored & Ready."  / /
+   \____/                                \/
     """)
 
 class ChronosEngine:
@@ -29,7 +27,6 @@ class ChronosEngine:
             ".xml", ".etl", ".log", ".tmp", ".db", ".dat", ".mui", ".inf",
             ".ico", ".css", ".html", ".pf", ".ini", ".lnk", ".manifest", ".resx"
         ]
-        # [New] Whitelist for Forensic Workstation Tools
         self.path_whitelist = [
             r"(?i)\\Tools\\", r"(?i)\\ghidra", r"(?i)\\sleuthkit", 
             r"(?i)\\FTK Imager", r"(?i)\\exiftool", r"(?i)\\Autoruns",
@@ -43,7 +40,7 @@ class ChronosEngine:
             pl.col("ParentPath").str.to_lowercase().str.contains(r"tasks\\[^m]") | 
             pl.col("ParentPath").str.to_lowercase().str.contains("startup")
         )
-        WANTED_FILES = ["Secret_Project.pdf", "Windows_Security_Audit", "win_optimizer.lnk", "SunShadow", "Trigger"]
+        WANTED_FILES = ["Secret_Project.pdf", "Windows_Security_Audit", "win_optimizer.lnk", "SunShadow", "Trigger", "UpdateService.exe", "Project_Chaos"]
         wanted_mask = pl.col("FileName").str.contains(r"(?i)(" + "|".join(WANTED_FILES) + ")")
 
         kept_df = df.filter(sanctuary_mask | wanted_mask)
@@ -52,7 +49,8 @@ class ChronosEngine:
         NOISE_PATTERNS = [
             r"(?i)PathUnknown", r"(?i)\\Windows\\", r"(?i)\\Program Files", 
             r"(?i)\\ProgramData", r"(?i)\\$Extend",
-            r"(?i)\\Microsoft\.NET", r"(?i)\\WinSxS", r"(?i)\\assembly"
+            r"(?i)\\Microsoft\.NET", r"(?i)\\WinSxS", r"(?i)\\assembly",
+            r"(?i)\\Servicing", r"(?i)\\SoftwareDistribution"
         ]
         for pattern in NOISE_PATTERNS:
             others_df = others_df.filter(~pl.col("ParentPath").str.contains(pattern))
@@ -65,11 +63,10 @@ class ChronosEngine:
         return final_df.filter(~(fp_mask & sys_mask))
 
     def analyze(self, args):
-        print(f"[*] Chronos v10.7 awakening... Targeting: {Path(args.file).name}")
+        print(f"[*] Chronos v11.1 awakening... Targeting: {Path(args.file).name}")
         try:
             lf = pl.scan_csv(args.file, ignore_errors=True)
             
-            # [New] Apply Path Whitelist Early
             for pattern in self.path_whitelist:
                 lf = lf.filter(~pl.col("ParentPath").str.contains(pattern))
 
@@ -99,12 +96,11 @@ class ChronosEngine:
                 pl.col(si_mod).str.to_datetime(format="%Y-%m-%d %H:%M:%S%.f", strict=False).alias("si_mod_dt")
             ]).drop_nulls(["si_dt", "fn_dt"])
 
-            # 1. Calculate Anomalies FIRST
             lf = lf.with_columns((pl.col("si_dt") - pl.col("fn_dt")).dt.total_seconds().alias("diff_sec"))
 
             crit_exts = [".exe", ".dll", ".ps1", ".bat", ".sys", ".cmd", ".vbs", ".scr", ".pdf"]
             crit_pattern = f"(?i)({'|'.join([re.escape(e) for e in crit_exts])})$"
-            WANTED_FILES = ["Secret_Project.pdf", "Windows_Security_Audit", "win_optimizer.lnk", "SunShadow", "Trigger"]
+            WANTED_FILES = ["Secret_Project.pdf", "Windows_Security_Audit", "win_optimizer.lnk", "SunShadow", "Trigger", "UpdateService.exe", "Project_Chaos"]
             wanted_pattern = r"(?i)(" + "|".join(WANTED_FILES) + ")"
             
             lf = lf.filter(
@@ -123,38 +119,42 @@ class ChronosEngine:
                 .when(pl.col("diff_sec") < -60).then(pl.lit("TIMESTOMP_BACKDATE"))
                 .when(pl.col("diff_sec") > self.tolerance).then(pl.lit("FALSIFIED_FUTURE"))
                 .otherwise(pl.lit("")).alias("Anomaly_Time"),
-                
                 pl.when(pl.col("si_mod_dt").dt.microsecond() == 0).then(pl.lit("ZERO_PRECISION")).otherwise(pl.lit("")).alias("Anomaly_Zero")
             ])
             
             lf = lf.with_columns(
                 pl.struct(["Anomaly_Time", "Anomaly_Zero", "FileName"]).map_elements(lambda x: (
+                    200 if x["Anomaly_Time"] == "CRITICAL_ARTIFACT" else
                     150 if x["Anomaly_Time"] == "CRITICAL_ADS_TIMESTOMP" else
-                    100 if x["Anomaly_Time"] == "CRITICAL_ARTIFACT" else
                     100 if x["Anomaly_Time"] == "FALSIFIED_FUTURE" else
                     80 if x["Anomaly_Time"] == "TIMESTOMP_BACKDATE" else
                     50 if x["Anomaly_Zero"] == "ZERO_PRECISION" else 0
                 ), return_dtype=pl.Int64).alias("Chronos_Score")
             )
 
-            # 2. Apply Time Filter (Bypass if Anomaly > 80)
             time_mask = pl.lit(True)
             if args.start:
-                print(f"    -> Filter Start: {args.start} (Bypass enabled for Score > 80)")
                 time_mask = time_mask & (pl.col("si_mod_dt") >= pl.lit(args.start).str.to_datetime())
             if args.end:
-                print(f"    -> Filter End:   {args.end}   (Bypass enabled for Score > 80)")
                 time_mask = time_mask & (pl.col("si_mod_dt") <= pl.lit(args.end).str.to_datetime())
             
             lf = lf.filter(time_mask | (pl.col("Chronos_Score") > 80))
 
             df = lf.filter((pl.col("Anomaly_Time") != "") | (pl.col("Anomaly_Zero") != "")).collect()
+            
             if df.height > 0:
                 df = df.sort("Chronos_Score", descending=True)
                 df.write_csv(args.out)
                 print(df.select(["Chronos_Score", "Anomaly_Time", "FileName", "ParentPath"]).head(15))
             else:
-                print("\n[*] Clean: No significant anomalies found.")
+                print("\n[*] Clean: No significant anomalies found. (Generating empty report)")
+                schema = {
+                    "Chronos_Score": pl.Int64, "Anomaly_Time": pl.Utf8, 
+                    "FileName": pl.Utf8, "ParentPath": pl.Utf8,
+                    "si_dt": pl.Datetime, "fn_dt": pl.Datetime
+                }
+                pl.DataFrame([], schema=schema).write_csv(args.out)
+
         except Exception as e:
             print(f"[!] Critical Error: {e}")
 
