@@ -83,6 +83,27 @@ class AIONEngine:
                 return True
         return False
 
+    def _is_known_noise(self, filename, path):
+        fn = str(filename).lower()
+        fp = str(path).lower()
+
+        # 1. Windows Update / WinSxS Patterns (Hash-prefixed names)
+        # Example: amd64_updateservices-database...
+        if re.match(r"(?i)^(amd64|x86|wow64)_", fn): return True
+        if fn.endswith((".manifest", ".mum", ".cat")): return True
+
+        # 2. .NET GAC / Assembly Artifacts
+        # Example: system.threading.tasks.dll in weird paths
+        if "gac_msil" in fp or "assembly" in fp: return True
+        if fn.startswith("system.") and fn.endswith(".dll"): return True
+        if "microsoft.build" in fn: return True
+
+        # 3. Specific Path Noise
+        # "PathUnknown" often points to unmapped system areas in MFT parsers
+        if "pathunknown" in fp and ("microsoft" in fp or "windows" in fp): return True
+
+        return False
+
     def _load_registry_csvs(self):
         if not self.target_dir: return []
         return list(self.target_dir.rglob("*Registry*.csv")) + list(self.target_dir.rglob("*RECmd*.csv"))
@@ -119,6 +140,10 @@ class AIONEngine:
 
                     if not v_data or len(v_data) < 3: continue
                     if self._is_safe_path(v_data): continue
+                    
+                    # Calculate potential filename from v_data
+                    temp_fname = v_data.split("\\")[-1] if "\\" in v_data else v_data
+                    if self._is_known_noise(temp_fname, v_data): continue
                     if "ctfmon.exe" in v_data.lower() and "windows" in v_data.lower(): continue
                     if "onedrive.exe" in v_data.lower() and "program files" in v_data.lower(): continue
 
@@ -180,6 +205,7 @@ class AIONEngine:
             for row in hotspot_files.iter_rows(named=True):
                 path = str(row.get('ParentPath') or "")
                 if self._is_safe_path(path): continue
+                if self._is_known_noise(row.get('FileName'), path): continue
                 if "onedrive" in str(row.get('FileName',"")).lower() and "program files" in path.lower(): continue
 
                 full_path_str = f"{path}\\{row.get('FileName')}"

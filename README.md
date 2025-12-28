@@ -96,12 +96,21 @@ graph TD
 SkiaHelios/
 ├── SH_HeliosConsole.py       # [ENTRY POINT] Pipeline Orchestrator (v3.9)
 ├── README.md                 # This file
+<<<<<<< HEAD
 ├── SH_PandorasLink.py        # File System Ghost Hunter (v3.8)
 ├── SH_HerculesReferee.py     # Sniper Event Auditor (v3.5)
 ├── SH_HekateWeaver.py        # Report Generator (v7.3)
 ├── tools/
 │   ├── SH_ChaosGrasp.py      # Master Timeline & Event Log Analyzer (v11.1)
 │   ├── SH_ClioGet.py         # Browser History Extractor
+=======
+├── tools/
+│   ├── SH_PandorasLink.py        # File System Ghost Hunter (v3.8)
+│   ├── SH_HerculesReferee.py     # Sniper Event Auditor (v2.0)
+│   ├── SH_HekateWeaver.py        # Report Generator (v6.5)
+│   ├── SH_ChaosGrasp.py      # Master Timeline & Event Log Analyzer
+│   ├── SH_ClioGet.py         # Browser History Extractor (SQLite)
+>>>>>>> 7308104ba031ab7ba45e52e55ea3f7432801205a
 │   ├── SH_PlutosGate.py      # Network & USB Exfiltration Analyzer
 │   ├── SH_ChronosSift.py     # Timestamp Anomaly Detector (v11.1)
 │   ├── SH_AIONDetector.py    # Persistence & Hash Hunter (v13.1)

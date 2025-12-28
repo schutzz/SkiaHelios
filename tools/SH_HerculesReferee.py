@@ -152,6 +152,70 @@ class HerculesReferee:
         # Using schema=df_events.schema tells Polars "Don't guess, use this!"
         return pl.DataFrame(hits, schema=df_events.drop("_dt").schema)
 
+    # --- Logic D: Session Tracker (SID Affinity) ---
+    def track_sessions(self, df_evtx):
+        print("[*] Phase 3D: Tracking User Sessions (SID Transition)...")
+        if df_evtx is None: return
+        
+        # Target Events: 4624 (Logon), 4634/4647 (Logoff), 4672 (Admin Priv)
+        df_sess = df_evtx.filter(pl.col("EventId").cast(pl.Utf8).is_in(["4624", "4634", "4647", "4672"]))
+        if df_sess.is_empty(): return
+
+        # Normalize Columns
+        cols = df_sess.columns
+        uid_col = next((c for c in ["TargetUserSid", "SubjectUserSid", "UserId"] if c in cols), None)
+        lid_col = next((c for c in ["TargetLogonId", "SubjectLogonId", "LogonId"] if c in cols), None)
+        time_col = next((c for c in ["TimeCreated", "Timestamp_UTC"] if c in cols), "Time")
+
+        if not (uid_col and lid_col and time_col):
+            print("[-] Missing critical session columns. Skipping tracker.")
+            return
+
+        # Sort by time
+        df_sess = df_sess.sort(time_col)
+        
+        active_sessions = {} # {LogonId: {SID, Start, Privileges}}
+        session_history = []
+
+        for row in df_sess.iter_rows(named=True):
+            eid = str(row["EventId"])
+            lid = str(row.get(lid_col) or "")
+            sid = str(row.get(uid_col) or "")
+            ts = str(row.get(time_col) or "")
+            
+            if not lid or lid == "0x0": continue
+
+            if eid == "4624": # Logon
+                active_sessions[lid] = {"SID": sid, "Start": ts, "Privileges": [], "End": None}
+            
+            elif eid == "4672": # Special Privileges (Admin)
+                # Usually happens right after 4624 with same LogonId
+                if lid in active_sessions:
+                    # Extract privileges if available (PayloadData often has them in messy format)
+                    # Simplified: Just mark as High Integrity / Admin context
+                    active_sessions[lid]["Privileges"].append("ADMIN_PRIVILEGE_ASSERTED")
+            
+            elif eid in ["4634", "4647"]: # Logoff
+                if lid in active_sessions:
+                    sess = active_sessions.pop(lid)
+                    sess["End"] = ts
+                    session_history.append(sess)
+        
+        # Dump remaining active sessions (implicitly active at end of log)
+        for lid, sess in active_sessions.items():
+            sess["End"] = "ACTIVE"
+            session_history.append(sess)
+            
+        # Export to JSON
+        import json
+        out_path = self.kape_dir / "hercules_sessions.json"
+        try:
+            with open(out_path, "w") as f:
+                json.dump(session_history, f, indent=2)
+            print(f"[+] Session Map Exported: {out_path} ({len(session_history)} sessions)")
+        except Exception as e:
+            print(f"[-] Failed to export session map: {e}")
+
     def execute(self, timeline_csv, ghost_csv, output_csv):
         try:
             df_timeline = pl.read_csv(timeline_csv, ignore_errors=True, infer_schema_length=0)
@@ -160,6 +224,10 @@ class HerculesReferee:
         except Exception as e:
             print(f"[-] Error loading inputs: {e}")
             return
+
+        # 0. Session Tracking (Pre-process)
+        if df_evtx is not None:
+            self.track_sessions(df_evtx)
 
         # 1. Identity
         df_identity = self._audit_authority(df_timeline)

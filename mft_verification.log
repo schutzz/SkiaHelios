@@ -1,0 +1,7 @@
+[*] Setting up Mock Data (Scenario: Rename -> Hidden Existence in MFT)...
+[*] Running Trace_Lifecycle for seed: ['AttackerTool.exe']
+[Debug] Collected Target IDs: {'300'}
+
+[+] Total hits: 6
+[Analysis] Found Filenames: {'AttackerTool.exe', 'System_Config.dat'}
+[SUCCESS] Found current on-disk artifact 'System_Config.dat' via ID Chain!

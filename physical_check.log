@@ -1,0 +1,11 @@
+[+] Import Successful.
+
+[*] Testing Physical Time Correlation (Time-Based Chain Recovery)...
+[*] Input Execution Event: 2025-01-01T12:00:00 (Targeting +/- 2s window)
+[*] Results Found: 2
+  - 2025-01-01 12:00:00.000000 | Lifecycle Trace [Activity]: Payload.bat | Mode: Physical Correlation | Reason: FILE_CLOSE
+Path: C:\Temp
+  - 2025-01-01 10:00:00 | Lifecycle Trace [Activity]: Payload.bat | Mode: Physical Correlation | Reason: N/A
+Path: C:\Temp
+[SUCCESS] Correlated Execution Time -> Physical ID 999 -> Payload.bat History.
+[SUCCESS] Noise (calc.exe in System32) was correctly filtered.

@@ -1,0 +1,19 @@
+[*] Importing SH_HekateWeaver...
+[+] Import Successful.
+
+[*] Checking _is_file_noise Whitelist...
+  - malicious.ps1: Expected=False, Got=False [PASS]
+  - microsoft.powershell.cmd: Expected=False, Got=False [PASS]
+  - auditpol.exe: Expected=True, Got=True [PASS]
+  - random.tmp: Expected=False, Got=False [PASS]
+
+[*] Checking Multi-Column ID Harvesting...
+[*] Tracing seed: ['Attack.ps1']
+  - Lifecycle Trace [Activity]: Normal.txt | Mode: Seed Matching | Reason: N/A
+Path: C:\Temp
+  - Lifecycle Trace [Birth]: Normal.txt | Mode: ID-Chain Recovery | Reason: FILE_CREATE
+Path: None
+  - Lifecycle Trace [Activity]: Normal.txt | Mode: ID-Chain Recovery | Reason: N/A
+Path: C:\Temp
+[SUCCESS] Found 'Normal.txt' via Target_FileName match ('Attack.ps1').
+[SUCCESS] 'Seed Matching' mode confirmed in Detail.

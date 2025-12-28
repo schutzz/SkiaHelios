@@ -6,17 +6,18 @@ import re
 from pathlib import Path
 
 # ============================================================
-#  SH_ChronosSift v11.1 [Sanctuary Restore + Fix]
-#  Mission: Detect Time Anomalies.
-#  Base: User's v10.7 (Sanctuary) + Zero-Result Fix
+#  SH_ChronosSift v12.0 [Noise Killer Edition]
+#  Mission: Detect Time Anomalies (Timestomping).
+#  Fix: Aggressive filtering of OS artifacts (WinSxS, .NET)
+#       that cause false positive timestomp alerts.
 # ============================================================
 
 def print_logo():
     print(r"""
-     _______                          _____  _  ______
-    / ____/hronos   [ Time Lord v11.1 ]   / /
-   / /              "Restored & Ready."  / /
-   \____/                                \/
+       _______                   _____  _  ______
+      / ____/hronos   [ Time Lord v12.0 ]   / /
+     / /             "Anomaly Detected."   / /
+     \____/                               \/
     """)
 
 class ChronosEngine:
@@ -25,7 +26,8 @@ class ChronosEngine:
         self.noise_exts = [
             ".admx", ".adml", ".mum", ".cat", ".png", ".svg", ".js", ".json", 
             ".xml", ".etl", ".log", ".tmp", ".db", ".dat", ".mui", ".inf",
-            ".ico", ".css", ".html", ".pf", ".ini", ".lnk", ".manifest", ".resx"
+            ".ico", ".css", ".html", ".pf", ".ini", ".lnk", ".manifest", ".resx",
+            ".nlp", ".pnf", ".cdf-ms"
         ]
         self.path_whitelist = [
             r"(?i)\\Tools\\", r"(?i)\\ghidra", r"(?i)\\sleuthkit", 
@@ -35,38 +37,65 @@ class ChronosEngine:
         ]
 
     def filter_noise(self, df):
+        # 1. SANCTUARY DEFINITION (Keep specific user areas)
         sanctuary_mask = (
             pl.col("ParentPath").str.to_lowercase().str.contains("users") |
             pl.col("ParentPath").str.to_lowercase().str.contains(r"tasks\\[^m]") | 
             pl.col("ParentPath").str.to_lowercase().str.contains("startup")
         )
+        
+        # 2. TARGET DEFINITION (Always keep these)
         WANTED_FILES = ["Secret_Project.pdf", "Windows_Security_Audit", "win_optimizer.lnk", "SunShadow", "Trigger", "UpdateService.exe", "Project_Chaos"]
         wanted_mask = pl.col("FileName").str.contains(r"(?i)(" + "|".join(WANTED_FILES) + ")")
 
+        # Initial Split
         kept_df = df.filter(sanctuary_mask | wanted_mask)
         others_df = df.filter(~(sanctuary_mask | wanted_mask))
         
+        # 3. BROAD NOISE PATTERNS (For non-sanctuary paths)
         NOISE_PATTERNS = [
             r"(?i)PathUnknown", r"(?i)\\Windows\\", r"(?i)\\Program Files", 
             r"(?i)\\ProgramData", r"(?i)\\$Extend",
             r"(?i)\\Microsoft\.NET", r"(?i)\\WinSxS", r"(?i)\\assembly",
-            r"(?i)\\Servicing", r"(?i)\\SoftwareDistribution"
+            r"(?i)\\Servicing", r"(?i)\\SoftwareDistribution",
+            r"(?i)Microsoft\.Build", r"(?i)GAC_MSIL"
         ]
         for pattern in NOISE_PATTERNS:
             others_df = others_df.filter(~pl.col("ParentPath").str.contains(pattern))
         
+        # Recombine
         final_df = pl.concat([kept_df, others_df]).unique()
         
-        FP_BLACKLIST = ["sbservicetrigger", "servicetrigger", "wkstriggers", "jobtrigger"]
+        # 4. HARD KILL LIST (Applied to EVERYTHING, including Sanctuary)
+        # These are paths/files that are NEVER valid timestomp indicators in this context.
+        HARD_KILL_PATTERNS = [
+            r"(?i)Speech Recognition", # Edge noise in Users
+            r"(?i)Microsoft\.CognitiveServices",
+            r"(?i)Microsoft\.Build",
+            r"(?i)GAC_MSIL",
+            r"(?i)\\WinSxS\\",
+            r"(?i)\\Servicing\\",
+            r"(?i)AppxAllUserStore",
+            r"(?i)CoreUIComponents"
+        ]
+        
+        for pattern in HARD_KILL_PATTERNS:
+            final_df = final_df.filter(~pl.col("ParentPath").str.contains(pattern))
+            final_df = final_df.filter(~pl.col("FileName").str.contains(pattern))
+
+        # 5. SPECIFIC FP BINARIES
+        FP_BLACKLIST = ["sbservicetrigger", "servicetrigger", "wkstriggers", "jobtrigger", "fvecpl.dll"]
         fp_mask = pl.col("FileName").str.to_lowercase().str.contains("|".join(FP_BLACKLIST))
         sys_mask = pl.col("ParentPath").str.to_lowercase().str.contains("windows")
+        
         return final_df.filter(~(fp_mask & sys_mask))
 
     def analyze(self, args):
-        print(f"[*] Chronos v11.1 awakening... Targeting: {Path(args.file).name}")
+        print(f"[*] Chronos v12.0 awakening... Targeting: {Path(args.file).name}")
         try:
             lf = pl.scan_csv(args.file, ignore_errors=True)
             
+            # Apply Pre-filters
             for pattern in self.path_whitelist:
                 lf = lf.filter(~pl.col("ParentPath").str.contains(pattern))
 
@@ -103,6 +132,7 @@ class ChronosEngine:
             WANTED_FILES = ["Secret_Project.pdf", "Windows_Security_Audit", "win_optimizer.lnk", "SunShadow", "Trigger", "UpdateService.exe", "Project_Chaos"]
             wanted_pattern = r"(?i)(" + "|".join(WANTED_FILES) + ")"
             
+            # Logic: Only flag critical extensions OR Wanted files OR huge diffs
             lf = lf.filter(
                 pl.col("FileName").str.contains(crit_pattern) | 
                 (pl.col("diff_sec").abs() > 3600) |

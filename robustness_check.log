@@ -1,0 +1,12 @@
+[+] Import Successful.
+
+[*] Testing Robustness Features (v15.33)...
+--- [1] Sequence Number Validation ---
+[SUCCESS] Correctly filtered by Sequence Number (Picked Seq 1, Ignored Seq 2).
+
+--- [2] Hybrid Birth Fallback ---
+[SUCCESS] Oldest event flagged as [PROVISIONAL ORIGIN].
+
+--- [3] Ghost Merge Logic ---
+[SUCCESS] Nemesis event updated with Confirmation and Merge info.
+[SUCCESS] Pandora event marked for removal.

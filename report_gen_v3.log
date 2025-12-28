@@ -1,0 +1,19 @@
+[*] Generating Final Mock Report...
+Traceback (most recent call last):
+  File "C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\generate_final_report.py", line 107, in <module>
+    generate_mock_report()
+  File "C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\generate_final_report.py", line 103, in generate_mock_report
+    weaver.generate_report(out_path)
+  File "C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\tools\SH_HekateWeaver.py", line 713, in generate_report
+    raw_events.extend([r for r in nemesis.trace_lifecycle(list(seeds)) 
+  File "C:\Users\user\.gemini\antigravity\scratch\SkiaHelios\tools\SH_HekateWeaver.py", line 67, in trace_lifecycle
+    seed_hits = df.filter(filter_expr)
+  File "C:\Users\user\AppData\Roaming\Python\Python310\site-packages\polars\dataframe\frame.py", line 5325, in filter
+    self.lazy()
+  File "C:\Users\user\AppData\Roaming\Python\Python310\site-packages\polars\_utils\deprecation.py", line 97, in wrapper
+    return function(*args, **kwargs)
+  File "C:\Users\user\AppData\Roaming\Python\Python310\site-packages\polars\lazyframe\opt_flags.py", line 328, in wrapper
+    return function(*args, **kwargs)
+  File "C:\Users\user\AppData\Roaming\Python\Python310\site-packages\polars\lazyframe\frame.py", line 2429, in collect
+    return wrap_df(ldf.collect(engine, callback))
+polars.exceptions.InvalidOperationError: expected String type, got: null
