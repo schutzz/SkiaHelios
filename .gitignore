@@ -1,17 +1,37 @@
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
+$content = @'
+# --- SkiaHelios Pure Logic Filter ---
+.env
+*.pem
+*.key
+id_rsa
+id_ed25519
 
-# PyInstaller & Build Artifacts (Anywhere)
+# Artifacts & Noise
+*.raw
+*.mem
+*.vmem
+*.ad1
+*.E01
+*.csv
+*.json
+*.log
+*.tmp
+*.spec
+/case_data/
+/evidence/
+
+# Python & Build
+**/__pycache__/
+*.py[cod]
 build/
 dist/
-*.spec
-*.pkg
-*.toc
 
-# Logs
-*_log.txt
-
+# Analysis Outputs (This is what you want to hide!)
 Helios_Output/
+TestCase/
+/output/
+
+!/.github/
+'@
+
+[System.IO.File]::WriteAllLines("$pwd\.gitignore", $content)

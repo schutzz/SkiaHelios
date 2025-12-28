@@ -1,9 +1,0 @@
-[+] Import Successful.
-
-[*] Testing SID Affinity Mapping (v15.35)...
-[+] Mock Session Map created at c:\Users\user\.gemini\antigravity\scratch\SkiaHelios\hercules_sessions.json
-
-[Results Analysis]
-[SUCCESS] Case A: Escalation Detected (SYSTEM file during User Session).
-[SUCCESS] Case B: Normal event untouched.
-[SUCCESS] Case C: Orphan Origin Detected (No active session).

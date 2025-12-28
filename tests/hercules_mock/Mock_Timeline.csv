@@ -1,7 +1,0 @@
-TimeCreated,Action,Subject_SID,Tag,Message
-2025-01-01 10:00:00,Process Created,S-1-5-18,,System process
-2025-01-01 10:05:00,File Access,S-1-5-21-123-456-789-1001,,UserA Access
-2025-01-01 11:00:00,File Access,S-1-5-21-123-456-789-1002,,UserB Access (Pre-Death)
-2025-01-01 12:00:00,EID:4726 User Account Management/User Account Deleted TargetSid: S-1-5-21-123-456-789-1002,S-1-5-18,ACCOUNT_DELETED,UserB Deleted by SYSTEM
-2025-01-01 12:05:00,Process Created,S-1-5-21-123-456-789-1002,,UserB Access (Ghost)
-2025-01-01 13:00:00,Process Created,S-1-5-21-999-999-999-9999,,Unknown SID Action

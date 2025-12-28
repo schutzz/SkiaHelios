@@ -1,9 +1,0 @@
-[*] Setting up Mock Data with File IDs...
-[*] Running Trace_Lifecycle (ID Chain Mode) for seed: ['Loader.ps1']
-[Debug] Collected Target IDs: {'100'}
-
-[+] Total hits: 7
-[Analysis] Found Filenames: {'System_Log.txt', 'Loader.ps1'}
-
-[SUCCESS] Successfully tracked renamed file 'System_Log.txt' via File ID Chaining!
-[SUCCESS] Deletion of renamed file captured.
