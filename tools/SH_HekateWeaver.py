@@ -25,22 +25,24 @@ TEXT_RES = {
         "title": "Incident Investigation Report",
         "coc_header": "Chain of Custody & Case Info",
         "h1_exec": "1. Executive Summary",
-        "h1_time": "2. Investigation Timeline",
-        "h1_tech": "3. Technical Findings",
-        "h1_rec": "4. Conclusion & Recommendations",
-        "h1_app": "5. Appendices",
-        "cats": {"INIT": "Initial Access", "C2": "Command & Control", "PERSIST": "Persistence", "ANTI": "Anti-Forensics", "EXEC": "Execution", "DROP": "File Creation (Origin)"},
+        "h1_origin": "2. Initial Access Vector (Origin Analysis)",
+        "h1_time": "3. Investigation Timeline",
+        "h1_tech": "4. Technical Findings",
+        "h1_rec": "5. Conclusion & Recommendations",
+        "h1_app": "6. Appendices",
+        "cats": {"INIT": "Initial Access", "C2": "Command & Control", "PERSIST": "Persistence", "ANTI": "Anti-Forensics", "EXEC": "Execution", "DROP": "File Creation (Origin)", "WEB": "Web Access"},
         "investigator": "Forensic Analyst"
     },
     "jp": {
         "title": "インシデント調査報告書",
         "coc_header": "証拠保全および案件情報 (Chain of Custody)",
         "h1_exec": "1. エグゼクティブ・サマリー",
-        "h1_time": "2. 調査タイムライン",
-        "h1_tech": "3. 技術的詳細 (Technical Findings)",
-        "h1_rec": "4. 結論と推奨事項",
-        "h1_app": "5. 添付資料",
-        "cats": {"INIT": "初期侵入 (Initial Access)", "C2": "C2通信 (Command & Control)", "PERSIST": "永続化 (Persistence)", "ANTI": "アンチフォレンジック (Anti-Forensics)", "EXEC": "実行 (Execution)", "DROP": "ファイル作成/流入 (File Drop)"},
+        "h1_origin": "2. 初期侵入経路分析 (Initial Access Vector)",
+        "h1_time": "3. 調査タイムライン",
+        "h1_tech": "4. 技術的詳細 (Technical Findings)",
+        "h1_rec": "5. 結論と推奨事項",
+        "h1_app": "6. 添付資料",
+        "cats": {"INIT": "初期侵入 (Initial Access)", "C2": "C2通信 (Command & Control)", "PERSIST": "永続化 (Persistence)", "ANTI": "アンチフォレンジック (Anti-Forensics)", "EXEC": "実行 (Execution)", "DROP": "ファイル作成/流入 (File Drop)", "WEB": "Webアクセス"},
         "investigator": "担当フォレンジックアナリスト"
     }
 }
@@ -394,6 +396,81 @@ class HekateWeaver:
         if origin_info: return " / ".join(origin_info)
         return None
 
+    def _analyze_origin_context(self, events):
+        """
+        Web履歴(Clio) -> ファイル作成(Pandora/Drop) -> 実行(Sphinx/Exec) の因果連鎖を分析
+        """
+        origin_stories = []
+        
+        drops = [e for e in events if e['Category'] == 'DROP' and e.get('Criticality', 0) >= 70]
+        
+        for drop in drops:
+            drop_dt = drop.get('dt_obj')
+            if not drop_dt: continue
+            
+            kws = drop.get('Keywords', [])
+            if isinstance(kws, str): kws = [kws]
+            fname = str(kws[0]).lower() if kws else ""
+            if not fname: continue
+
+            story = {
+                "File": fname,
+                "Drop_Time": drop_dt,
+                "Web_Correlation": None,
+                "Path_Indicator": None,
+                "Execution_Link": None
+            }
+
+            # A. パスによる判定 (Outlook / Browser Cache)
+            detail = str(drop.get('Detail', '')).lower()
+            if "content.outlook" in detail:
+                story['Path_Indicator'] = "Outlook添付ファイル (Content.Outlook)"
+            elif "inetcache" in detail or "temporary internet files" in detail:
+                story['Path_Indicator'] = "ブラウザキャッシュ (Drive-by Download)"
+            elif "downloads" in detail:
+                story['Path_Indicator'] = "ダウンロードフォルダ"
+
+            # B. Web履歴との相関 (Clio/Timeline in Hercules)
+            # Drop時刻の直前 5分間 を探索
+            if self.dfs['Hercules'] is not None:
+                window_start = drop_dt - datetime.timedelta(minutes=5)
+                # "WebHistory" かつ URLに関連しそうなイベントを検索
+                timeline = self.dfs['Hercules']
+                if "Artifact_Type" in timeline.columns:
+                    # Filter: WebHistory AND Time match
+                    web_hits = timeline.filter(
+                        (pl.col("Artifact_Type") == "WebHistory") & 
+                        (pl.col("Timestamp_UTC").str.to_datetime(strict=False).is_between(window_start, drop_dt))
+                    )
+                    
+                    # 最も近い、かつメールや添付ファイルっぽいURLを優先
+                    candidates = []
+                    for row in web_hits.iter_rows(named=True):
+                        url = str(row.get('Target_Path', '')) + str(row.get('Action', ''))
+                        score = 0
+                        if "mail" in url or "outlook" in url: score += 10
+                        if "attachment" in url or "content" in url: score += 5
+                        if fname in url.lower(): score += 20 # ファイル名がURLに含まれる場合（確信）
+                        candidates.append((score, url, row['Timestamp_UTC']))
+                    
+                    if candidates:
+                        candidates.sort(key=lambda x: x[0], reverse=True)
+                        story['Web_Correlation'] = f"{candidates[0][1]} (@ {candidates[0][2]})"
+
+            # C. 実行とのリンク
+            # Drop時刻より後に行われた、同名の実行イベントを探す
+            execs = [e for e in events if e['Category'] in ['EXEC', 'INIT'] and e.get('dt_obj') and e['dt_obj'] >= drop_dt]
+            for ex in execs:
+                ex_kws = [str(k).lower() for k in ex.get('Keywords', [])]
+                if fname in ex_kws:
+                    story['Execution_Link'] = f"Executed at {ex['Time']} (Source: {ex['Source']})"
+                    break
+            
+            if story['Path_Indicator'] or story['Web_Correlation'] or story['Execution_Link']:
+                origin_stories.append(story)
+
+        return origin_stories
+
     def _is_known_noise(self, file_path, tags=""):
         fp = str(file_path).lower()
         t = str(tags).lower()
@@ -510,10 +587,10 @@ class HekateWeaver:
         if "NETWORK" in s or "C2" in t or "CURL" in d: return "C2"
         if "AION" in s or "PERSISTENCE" in t: return "PERSIST"
         if "PANDORA" in s or "WIPING" in t or "DELETE" in t: return "ANTI"
+        if "CHRONOS" in s and "CREATION" in t: return "DROP" 
+        if "GHOST" in t or "INFERRED" in t or "DROP" in t: return "DROP" 
         if "SPHINX" in s or "DECODED" in t or "POWERSHELL" in d: return "INIT"
         if "CHRONOS" in s or "TIMESTOMP" in t: return "ANTI"
-        if "CHRONOS" in s and "CREATION" in t: return "DROP" 
-        if "GHOST" in t or "INFERRED" in t: return "DROP" 
         return "EXEC"
 
     def _extract_url(self, text):
@@ -755,6 +832,21 @@ class HekateWeaver:
             else:
                 f.write("**結論:**\n現在提供されているログの範囲では、クリティカルな侵害痕跡は確認されませんでした。\n\n")
 
+            # [NEW SECTION: Origin Analysis]
+            origin_stories = self._analyze_origin_context(raw_events)
+            if origin_stories:
+                f.write(f"## {t['h1_origin']}\n")
+                f.write("攻撃の起点（侵入経路）に関する物理的証拠と因果関係の分析結果です。\n\n")
+                f.write("| File (Payload) | 📍 Origin Context (Path/Web) | 🔗 Execution Link |\n|---|---|---|\n")
+                for story in origin_stories:
+                    origin_desc = "**Unknown**"
+                    if story['Path_Indicator']: origin_desc = f"📂 {story['Path_Indicator']}"
+                    if story['Web_Correlation']: origin_desc += f"<br>🌐 {story['Web_Correlation']}"
+                    
+                    exec_desc = story['Execution_Link'] if story['Execution_Link'] else "実行痕跡なし (未実行の可能性)"
+                    f.write(f"| `{story['File']}` | {origin_desc} | {exec_desc} |\n")
+                f.write("\n")
+
             f.write(f"## {t['h1_time']}\n")
             phases = self._partition_timeline(valid_events)
             for idx, phase in enumerate(phases):
@@ -806,7 +898,7 @@ class HekateWeaver:
             
             script_bursts = defaultdict(list)
             
-            for row in hits.iter_rows(named=True):
+            for i, row in enumerate(hits.iter_rows(named=True)):
                 full = row.get("Decoded_Hint") or row.get("Original_Snippet")
                 if self._is_script_noise(full): continue
                 
@@ -824,7 +916,11 @@ class HekateWeaver:
             for t_key, bursts in script_bursts.items():
                 if not bursts: continue
                 base = bursts[0]
-                combined_kws = list(set([k for b in bursts for k in b['kws']]))
+                
+                all_kws = []
+                for b in bursts:
+                    if b.get('kws'): all_kws.extend(b['kws'])
+                combined_kws = list(set(all_kws))
                 
                 if len(bursts) > 1:
                     snippet = f"[Aggregated {len(bursts)} fragments]\n" + base['full'][:200] + "..."
@@ -833,6 +929,12 @@ class HekateWeaver:
 
                 src = self._resolve_source("SPHINX", base['row'])
                 u = self._resolve_user(base['row'], "SPHINX")
+                # [DEFENSIVE] Ensure Keywords are populated
+                if not combined_kws:
+                    # Fallback: Extract from Detail regex or split
+                    fallback_kw = self._extract_filename_from_cmd(snippet)
+                    if fallback_kw: combined_kws.append(fallback_kw)
+                
                 events.append({
                     "Time": base['row']['TimeCreated'], "Source": src, "User": u,
                     "Summary": f"Script Execution: {base['row']['Sphinx_Tags']}",

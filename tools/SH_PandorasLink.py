@@ -125,15 +125,22 @@ class PandoraEngine:
 
     def _apply_noise_reduction(self, lf_ghosts):
         """
-        [v3.8 Update] Intelligent Noise Reduction
-        Splunk, Browser Cache, Windows Update等を安全に除外
+        [v3.9 Update] Intelligent Noise Reduction with Sanctuary Logic
         """
-        print("    -> Applying Intelligent Noise Reduction (Level 2)...")
+        print("    -> Applying Intelligent Noise Reduction (Level 3 - Sanctuary)...")
         
-        # 1. Splunk Noise (tsidx, lock, etc.)
+        # 0. [SANCTUARY CHECK]
+        # 以下のパスに含まれるものは、拡張子が怪しければノイズフィルタをバイパスする
+        # Outlook添付ファイル, IE履歴, ブラウザキャッシュ内の実行可能ファイル等
+        is_sanctuary = (
+            pl.col("ParentPath").str.to_lowercase().str.contains(r"content\.outlook") |
+            pl.col("ParentPath").str.to_lowercase().str.contains(r"content\.ie5") |
+            pl.col("ParentPath").str.to_lowercase().str.contains(r"inetcache\\ie")
+        )
+
+        # 1. Splunk Noise (Aggressive Kill)
         splunk_path_sig = r"splunk[\\/]var[\\/]lib[\\/]splunk"
         splunk_ext_sig = r"\.(tsidx|manifest|lock|dat|rawsize|interim|xml|bucket)$"
-        
         is_splunk = (
             pl.col("ParentPath").str.to_lowercase().str.contains(splunk_path_sig) &
             (
@@ -142,39 +149,49 @@ class PandoraEngine:
             )
         )
 
-        # 2. Browser Cache (Chrome/Edge/Firefox)
-        # キャッシュ内のリソースファイルのみを除外。実行可能ファイルは除外しない。
+        # 2. Browser Cache (Selective)
         browser_cache_sig = r"(google[\\/]chrome|microsoft[\\/]edge|mozilla[\\/]firefox).*(cache|code cache|service worker)"
         safe_ext_sig = r"\.(js|css|png|jpg|jpeg|gif|ico|woff|woff2|svg|html|htm|txt|json|tmp)$"
-        
         is_browser_garbage = (
             pl.col("ParentPath").str.to_lowercase().str.contains(browser_cache_sig) &
             pl.col("Ghost_FileName").str.to_lowercase().str.contains(safe_ext_sig)
         )
 
-        # 3. Windows System Noise (Update, CBS, Defender)
-        # ログや一時ファイルのみを除外。
+        # 3. Windows System Noise
         sys_noise_sig = r"windows[\\/](logs[\\/]cbs|softwaredistribution|servicing|temp)"
         sys_ext_sig = r"\.(log|cab|etl|tlb|xml|dat)$"
-
         is_sys_noise = (
             pl.col("ParentPath").str.to_lowercase().str.contains(sys_noise_sig) &
             pl.col("Ghost_FileName").str.to_lowercase().str.contains(sys_ext_sig)
         )
 
         # 4. Temp Folder Handling
-        # Tempフォルダ内の .tmp/.log は除外するが、.exe/.ps1/.bat 等は残す。
         temp_path_sig = r"appdata[\\/]local[\\/]temp"
         safe_temp_ext = r"(\.tmp|\.log)$"
-
         is_safe_temp = (
             pl.col("ParentPath").str.to_lowercase().str.contains(temp_path_sig) &
             pl.col("Ghost_FileName").str.to_lowercase().str.contains(safe_temp_ext)
         )
 
-        # フィルタ適用: いずれのノイズ条件にも合致しないものを残す
+        # フィルタリング適用:
+        # (Sanctuary かつ Not Garbage) OR (Not Noise Path)
+        # つまり、Outlookフォルダ内の .exe や .pdf は絶対に消さない
+        # Sanctuary内のゴミ(画像等)は is_browser_garbage 等で消えるかもしれないが、
+        # ここでは「Sanctuary内ならゴミ判定されていなければ救出」というロジックにする
+        
+        # is_sanctuary が True ならば、既知のノイズでなければ残す
+        # (ここでは一旦シンプルに、Sanctuaryなら無条件で残すか、Garbage以外を残すか)
+        # Garbage定義を再利用
+        is_universal_garbage = pl.col("Ghost_FileName").str.to_lowercase().str.contains(r"\.(css|png|jpg|jpeg|gif|ico|woff|svg)$")
+
         return lf_ghosts.filter(
-            ~(is_splunk | is_browser_garbage | is_sys_noise | is_safe_temp)
+            (is_sanctuary & ~is_universal_garbage) | 
+            (~(is_splunk | is_browser_garbage | is_sys_noise | is_safe_temp))
+        ).with_columns(
+            pl.when(is_sanctuary)
+            .then(pl.lit("[PHISHING_VECTOR]"))
+            .otherwise(pl.lit(None))
+            .alias("Pandora_Tag") # タグ列を追加（後続処理で使えるように）
         )
 
     def run_gap_analysis(self, start_date, end_date):
