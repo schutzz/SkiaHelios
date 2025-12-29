@@ -3,10 +3,30 @@
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
 ![Platform](https://img.shields.io/badge/Platform-Windows-win)
 ![License](https://img.shields.io/badge/License-MIT-green)
+![Status](https://img.shields.io/badge/Status-Precision_God_Mode-red)
 
-**"Truth is a multi-layered tapestry."**
+**"Truth is a multi-layered tapestry. Weave it."**
 
-SkiaHelios is a modular Digital Forensics & Incident Response (DFIR) framework designed to correlate disparate artifacts (Timeline, Registry, Network, USN Journal) into a single, cohesive narrative. Unlike traditional parsers that output isolated CSVs, SkiaHelios reconstructs the *context* of user activity and generates professional, SANS-style investigation reports.
+SkiaHelios is a modular Digital Forensics & Incident Response (DFIR) framework designed to correlate disparate artifacts (Timeline, Registry, Network, USN Journal, SRUM) into a single, cohesive narrative. Unlike traditional parsers that output isolated CSVs, SkiaHelios reconstructs the *context* of user activity and generates professional, SANS-style investigation reports automatically.
+
+**Current Version:** v17.0 (Core) / v15.37 (Hekate) / v4.0 (Console)
+
+---
+
+## ⚡ Key Features (v17 Update)
+
+* **🛡️ Precision Over Recall (適合率重視):**
+    * 厳格なスコアリングロジックにより、正規プロセス（LOLBins）やWindows Updateの残骸などのノイズを徹底排除。
+    * **"Criticality >= 90"** の確実な脅威のみを技術詳細に記載。
+* **📝 Dynamic Attack Flow Generation:**
+    * イベントカテゴリ（Initial Access, Persistence, C2, etc.）を解析し、攻撃のストーリーラインをExecutive Summaryに自動生成。
+* **🦁 Sphinx v1.9 Integration:**
+    * PowerShell (EID 4104) / Process (EID 4688) の高度な解析。
+    * Base64/XOR難読化の自動解除と、相対パスを含むスクリプト実行の検知。
+* **🕸️ Nemesis Lifecycle Tracing:**
+    * イベントログに残らない「ファイルの誕生・変名・削除」をUSNジャーナル/MFTから芋づる式に復元。
+* **🎮 Helios Console v4.0:**
+    * CLI引数 (`--start`, `--end`) の完全サポートと、各モジュールへの適切なフィルタ分配。
 
 ---
 
@@ -15,143 +35,82 @@ SkiaHelios is a modular Digital Forensics & Incident Response (DFIR) framework d
 ```mermaid
 graph TD
     %% Input Layer
-    Input[("KAPE Artifacts")] -->|"Registry Hives"| Hercules
-    Input -->|"Browser History (SQLite)"| Clio
-    Input -->|"Event Logs / ShellBags"| Chaos
+    Input[("KAPE Artifacts")] -->|"Registry / SRUM"| Hercules
+    Input -->|"Browser History"| Clio
     Input -->|"MFT / USN / Lnk"| Engines
-    Input -->|"SRUM"| Plutos
+    Input -->|"Event Logs"| Sphinx
 
-    %% Processing Layer (The Pantheon)
+    %% Processing Layer
     subgraph SkiaHelios Core
         direction TB
-        Clio("👁️ Clio v2.0<br/>[Browser Scout]")
-        Chaos("🌪️ Chaos v11.1<br/>[Master Timeline]")
-        Hercules("🏛️ Hercules v3.5<br/>[Sniper / Script Hunter]")
+        Clio("👁️ Clio<br/>[Browser Scout]")
+        Chaos("🌪️ Chaos<br/>[Timeline Builder]")
+        Hercules("🏛️ Hercules<br/>[Sniper / Script Hunter]")
         
-        subgraph Engines [Deep Forensics Engines]
-            Plutos("💸 Plutos v1.11<br/>[Exfil & Net]")
-            Chronos("⏳ Chronos v11.1<br/>[Time Anomalies]")
-            Pandora("👻 Pandora v3.8<br/>[Ghost & LNK Hunter]")
-            AION("👁️ AION v13.1<br/>[Persistence & Hash]")
-            Sphinx("🦁 Sphinx v1.5<br/>[Script Decoding]")
+        subgraph Engines [Deep Forensics]
+            Chronos("⏳ Chronos<br/>[Time Stomping]")
+            AION("👁️ AION<br/>[Persistence]")
+            Plutos("💀 Plutos<br/>[Exfiltration]")
+            Sphinx("🦁 Sphinx<br/>[Deobfuscation]")
+            Pandora("📦 Pandora<br/>[Ghost File Recovery]")
         end
+        
+        Nemesis("⚖️ Nemesis<br/>[Lifecycle Tracer]")
     end
 
-    %% Logic Flow
-    Clio -->|"Parsed History CSV"| Chaos
-    Chaos -->|"Timeline Context"| Engines
-    
-    %% Sniper Correlation (Project: CERBERUS)
-    %% This is the core intelligence feed from File System to Event Log analysis
-    Pandora ==>|"Target Ghost Intel<br/>(Timestamps & FileNames)"| Hercules
-    
-    %% Output Feeds to Hekate
-    Hercules -.->|"Sniper Hits, Scripts &<br/>Identity Context"| Hekate
-    Plutos -.->|"C2 & USB Context"| Hekate
-    Chaos -.->|"Event & Execution Trace"| Hekate
-    Engines -.->|"Deep Forensics Findings"| Hekate
-
     %% Output Layer
-    Hekate{"🕸️ Hekate v7.3<br/>(The Grand Weaver)"}
-    Hekate ==>|"Weave Storyline"| Report[/"📜 Grimoire.md<br/>(SANS-Style Report)"/]
-
-    %% Styling
-    style Hercules fill:#f9f,stroke:#333,stroke-width:2px
-    style Chaos fill:#ff9,stroke:#333,stroke-width:2px
-    style Clio fill:#bbf,stroke:#333,stroke-width:2px
-    style Hekate fill:#bfb,stroke:#333,stroke-width:4px
-    style Pandora fill:#aff,stroke:#333,stroke-width:2px
-    style AION fill:#f99,stroke:#333,stroke-width:2px
+    Hercules --> Hekate
+    Engines --> Hekate
+    Nemesis --> Hekate
+    Hekate("🕸️ Hekate<br/>[Grand Weaver]") --> Output("📜 Grimoire Report<br/>(Markdown)")
 ```
 
 ---
 
-## 🚀 Key Features & Updates
+## 🚀 Usage
 
-### 🏛️ Hercules: The Judge (v3.5 [Schema Enforcer])
-* **Sniper Mode**: Focuses on the ±30s window of "Ghost Timestamps" identified by Pandora. Automatically correlates file deletions with process executions (EID: 4688) to detect anti-forensics.
-* **Script Hunter**: Detects malicious command lines (`curl`, `sdelete`, `reg add`, `powershell -enc`) and tags them with high-fidelity indicators (e.g., `ATTACK_SCRIPT_EXEC`, `C2_BEACON`).
-* **Schema Enforcer**: Prevents Polars type inference crashes during complex log aggregation.
-
-### 👁️ AION: Persistence & Hash Hunter (v13.1)
-* **Hybrid Hash Hunter**: Automatically calculates **SHA256 hashes** for detected persistence mechanisms (Run Keys, Services) if the disk image is mounted (`--mount`).
-* **Artifact-Only Mode**: Gracefully handles scenarios where only CSV artifacts are available, focusing on logical persistence paths.
-
-### 🕸️ Hekate: The Grand Weaver (v7.3 [Full Integrity])
-* **Grimoire Generation**: Weaves all module findings into a structured, Markdown-based report suitable for SANS/GIAC presentations.
-* **Tag Awareness**: Intelligently prioritizes critical tags (`SNIPER`, `ATTACK`, `C2`) to build an "Executive Summary" that highlights the attack chain.
-* **Auto-Repair**: Automatically fixes missing columns in timeline CSVs to ensure report generation never fails.
-
-### 👻 Pandora: Ghost Recovery (v3.8)
-* **Gap Analysis**: Reconstructs "Ghost" artifacts (deleted/hidden) using MFT/USN Journal differential analysis, serving as the targeting intel for Hercules.
-
-### ⏳ Chronos: Time Anomaly Detector (v11.1)
-* **Sanctuary Restore**: Advanced whitelist logic to filter WinSxS/System32 noise, exposing only true "Timestomp" anomalies in user directories.
-
----
-
-## 📂 Directory Structure
-
-```text
-SkiaHelios/
-├── SH_HeliosConsole.py       # [ENTRY POINT] Pipeline Orchestrator (v3.9)
-├── README.md                 # This file
-<<<<<<< HEAD
-├── SH_PandorasLink.py        # File System Ghost Hunter (v3.8)
-├── SH_HerculesReferee.py     # Sniper Event Auditor (v3.5)
-├── SH_HekateWeaver.py        # Report Generator (v7.3)
-├── tools/
-│   ├── SH_ChaosGrasp.py      # Master Timeline & Event Log Analyzer (v11.1)
-│   ├── SH_ClioGet.py         # Browser History Extractor
-=======
-├── tools/
-│   ├── SH_PandorasLink.py        # File System Ghost Hunter (v3.8)
-│   ├── SH_HerculesReferee.py     # Sniper Event Auditor (v2.0)
-│   ├── SH_HekateWeaver.py        # Report Generator (v6.5)
-│   ├── SH_ChaosGrasp.py      # Master Timeline & Event Log Analyzer
-│   ├── SH_ClioGet.py         # Browser History Extractor (SQLite)
->>>>>>> 7308104ba031ab7ba45e52e55ea3f7432801205a
-│   ├── SH_PlutosGate.py      # Network & USB Exfiltration Analyzer
-│   ├── SH_ChronosSift.py     # Timestamp Anomaly Detector (v11.1)
-│   ├── SH_AIONDetector.py    # Persistence & Hash Hunter (v13.1)
-│   ├── SH_SphinxDeciphering.py # Obfuscation Decoder
-│   └── ...
-└── Helios_Output/            # Final Reports & Evidence CSVs
+### 1. Prerequisites
+```bash
+pip install -r requirements.txt
 ```
 
----
-
-## ⚡ Usage
-
-### 1. Execution (Helios Console v3.9)
-The orchestrator ensures the correct execution order for **Project: CERBERUS** (Pandora Intel -> Hercules Sniper).
-
-Run the console and follow the interactive prompts:
+### 2. Execution (Helios Console v4.0)
+The orchestrator ensures the correct execution order for **Project: CERBERUS** (Pandora Intel -> Hercules Sniper -> Deep Forensics -> Hekate Weaver).
 
 ```powershell
-python SH_HeliosConsole.py
+python SH_HeliosConsole.py --dir "C:\Case\KAPE_CSV" --raw "C:\Case\Raw_Artifacts" --start 2025-12-01 --end 2025-12-31
 ```
 
-**Required Inputs:**
-1.  **CSV Directory**: Path to KAPE module outputs (CSV files).
-2.  **Raw Directory**: Path to KAPE targets (Raw artifacts like History files).
-3.  **Mount Point (Optional)**: Drive letter (e.g., `E:\`) to enable SHA256 hashing by AION.
+**Arguments:**
+* `--dir`: Path to KAPE module outputs (CSV files).
+* `--raw`: Path to KAPE targets (Raw artifacts like History files).
+* `--mft`: (Optional) Direct path to MFT CSV.
+* `--mount`: (Optional) Mount Point (e.g., `E:\`) for SHA256 hashing by AION.
+* `--start / --end`: (Optional) Time filter (YYYY-MM-DD).
+* `--case`: Case name for the report header.
 
-**Pipeline Flow:**
-1.  **Pandora**: Identifies suspicious deleted files and LNK destruction.
-2.  **Hercules**: Sniper-scans Event Logs using Pandora's timestamp intel.
-3.  **AION**: Hunts for persistence and calculates hashes from the mounted image.
-4.  **Hekate**: Weaves all findings into the final `Grimoire` report.
+### 3. Output (The Grimoire)
+The **`Grimoire_[CaseName]_[Lang].md`** is an actionable report ready for submission.
 
-### 2. Output Highlights
-The **`Grimoire_[CaseName]_[Lang].md`** exposes critical tactical indicators:
-* **SNIPER_HIT**: Confirmed correlation between physical file deletion and Event Log entry.
-* **ATTACK_SCRIPT_EXEC**: Malicious batch/PowerShell execution (e.g., `Attack_Chain.bat`).
-* **C2_BEACON**: Suspicious network activity via CLI tools (e.g., `curl`, `wget`).
-* **FILE_PERSISTENCE**: Malware detected in startup locations with SHA256 hash.
+* **Executive Summary:** High-level attack flow and conclusion.
+* **Investigation Timeline:** Phase-based chronological events.
+* **Technical Findings:** High-confidence artifacts (Score >= 90) with decoded commands and original paths.
 
 ---
 
-## 📜 License
-This project is for educational and DFIR training purposes.
-Use responsibly during authorized investigations and CTFs.
+## 🛠️ Modules Overview
+
+| Module | Role | Key Function |
+| :--- | :--- | :--- |
+| **SH_HeliosConsole** | Orchestrator | Manages the pipeline and time filters (Timekeeper). |
+| **SH_HekateWeaver** | Reporter | Correlates all findings, filters noise, generates the Grimoire. |
+| **SH_HerculesReferee**| Judge | Analyzes Event Logs and Registry to verify execution verdicts. |
+| **SH_SphinxDeciphering**| Decoder | Deep parsing of PowerShell/Process logs, Base64 deobfuscation. |
+| **SH_AIONDetector** | Persistence | Scans Registry (Run/RunOnce) and Startup folders. |
+| **SH_PandorasLink** | Recovery | Identifies deleted files (Ghosts) via USN/MFT analysis. |
+| **SH_ChronosSift** | Anti-Forensics | Detects Time Stomping anomalies ($SI < $FN). |
+| **SH_PlutosGate** | Network | Analyzes SRUM and Event Logs for C2/Exfiltration. |
+
+---
+
+> *"Non-rational thinking is a vice; rational thinking is a virtue."*

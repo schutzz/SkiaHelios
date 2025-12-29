@@ -6,11 +6,12 @@ import re
 import base64
 import zlib
 import math
+from urllib.parse import unquote
 
 # ============================================================
-#  SH_SphinxDeciphering v1.6 [Unabridged Edition]
-#  Mission: Decode and PRESERVE Evidence Context (Parent/ID)
-#  Fix: REMOVED character truncation. Now saves FULL payloads.
+#  SH_SphinxDeciphering v1.9 [Integrator Edition]
+#  Mission: Decode and PRESERVE Evidence Context
+#  Update: Enhanced Regex, Lower Threshold, Robust Keywords
 # ============================================================
 
 def print_logo():
@@ -21,16 +22,30 @@ def print_logo():
        /  O  \    "No riddle is too long.
       /_______\    The full truth remains."
 
-       [ 🦁 SH_SphinxDeciphering v1.6 ]
+       [ 🦁 SH_SphinxDeciphering v1.9 ]
     """)
+
+# --- Regex Definitions ---
+RE_COMMAND_LINE = re.compile(
+    r"(?:<Data Name=[\"']CommandLine[\"'][^>]*>(.*?)</Data>|\"CommandLine\"\s*:\s*\"(.*?)\")",
+    re.IGNORECASE | re.DOTALL
+)
+
+RE_B64_CMD = re.compile(
+    r"[-eE](?:ncodedCommand)?\s+([A-Za-z0-9+/=]{20,})",
+    re.IGNORECASE
+)
+
+# [UPDATE] 相対パス・ファイル名のみも許容する強力な正規表現
+RE_SEED_PATH = re.compile(
+    r"(?i)(?:^|[\s\"'>/\\])([a-zA-Z]:\\[^\"'>\s]*\.(?:bat|ps1|vbs|js|hta|jse|wsf|sh|py|exe)|([\w\-\.]+\.(?:bat|ps1|vbs|js|hta|jse|wsf|sh|py|exe)))(?:[\s\"'<]|$)"
+)
 
 class SphinxEngine:
     def __init__(self, target_file, start_time=None, end_time=None):
         self.target_file = target_file
         self.start_time = start_time
         self.end_time = end_time
-        self.min_entropy = 3.0 
-        self.results = []
 
     def _entropy(self, s):
         if len(s) < 15: return 0.0
@@ -39,167 +54,131 @@ class SphinxEngine:
             p[c] = p.get(c, 0) + 1
         return -sum(count/lns * math.log(count/lns, 2) for count in p.values())
 
-    def _decode_payload(self, text):
-        """
-        Attempts Base64/Deflate decoding.
-        Returns (Method_Name, Decoded_String) or (None, None)
-        """
-        # 1. Base64 Pattern Check
-        # 簡易的な抽出: 長い英数字の連続を探す
-        match = re.search(r"([A-Za-z0-9+/]{20,}={0,2})", text)
-        if match:
-            candidate = match.group(1)
-            try:
-                raw = base64.b64decode(candidate)
-                # Try UTF-16LE (PowerShell Standard)
-                try:
-                    decoded = raw.decode("utf-16le")
-                    if self._is_readable(decoded): return "Base64(UTF-16LE)", decoded
-                except: pass
-                
-                # Try UTF-8
-                try:
-                    decoded = raw.decode("utf-8")
-                    if self._is_readable(decoded): return "Base64(UTF-8)", decoded
-                except: pass
-                
-                # Try Deflate (Compression)
-                try:
-                    decompressed = zlib.decompress(raw, -15)
-                    decoded = decompressed.decode("utf-8")
-                    if self._is_readable(decoded): return "Base64+Deflate", decoded
-                except: pass
-
-            except: pass
+    def _sniper_process(self, row_dict):
+        cols_to_check = ["EventData", "Message", "CommandLine", "ScriptBlockText", "Payload", "ContextInfo", "Properties"]
+        raw_parts = []
+        for col in cols_to_check:
+            val = row_dict.get(col)
+            if val and str(val).lower() != "null" and str(val).strip():
+                raw_parts.append(str(val).strip())
         
-        return None, None
+        raw_text = " | ".join(raw_parts)
+        if len(raw_text) < 10: return None
 
-    def _is_readable(self, text):
-        # 制御文字が多すぎないかチェック
-        # "readable" criteria: mostly printable chars
-        if not text: return False
-        printable = sum(1 for c in text if c.isprintable())
-        return (printable / len(text)) > 0.8
+        intel = {
+            "command_line": "", "decoded_cmd": "", "seeds": [], "score": 0, "tags": []
+        }
+
+        # STEP 1: CommandLine
+        cmd_line = raw_text
+        match = RE_COMMAND_LINE.search(raw_text)
+        if match:
+            extracted = (match.group(1) or match.group(2) or "").strip()
+            if extracted: cmd_line = extracted
+        
+        try: cmd_line = unquote(cmd_line).strip('"\'')
+        except: pass
+        intel["command_line"] = cmd_line
+        full_search_text = cmd_line + " " + raw_text
+
+        # STEP 2: Base64
+        b64_match = RE_B64_CMD.search(full_search_text)
+        if b64_match:
+            try:
+                raw_b64 = b64_match.group(1)
+                decoded_bytes = base64.b64decode(raw_b64)
+                decoded_str = ""
+                try: decoded_str = decoded_bytes.decode('utf-16-le')
+                except: 
+                    try: decoded_str = decoded_bytes.decode('utf-8')
+                    except: pass
+                
+                if decoded_str and len(decoded_str) > 5:
+                    intel["decoded_cmd"] = decoded_str
+                    intel["score"] += 100
+                    intel["tags"].append("DECODED")
+                    full_search_text += " " + decoded_str
+            except: pass
+
+        # STEP 3: Seeds (Updated Logic)
+        found_matches = RE_SEED_PATH.findall(full_search_text)
+        candidates = []
+        for m in found_matches:
+            # m is tuple: ('C:\\path\\file.bat', '') or ('', 'file.bat')
+            if m[0]: candidates.append(m[0])
+            elif m[1]: candidates.append(m[1])
+            
+        if candidates:
+            clean_seeds = list(set([s.strip("'\"") for s in candidates if len(s) > 4]))
+            if clean_seeds:
+                intel["seeds"] = clean_seeds
+                intel["score"] += 70 # [UPDATE] Score Boost for any script detection
+                intel["tags"].append("CONTAINER_SEED")
+
+        # STEP 4: Heuristics
+        if self._entropy(cmd_line) > 5.5:
+            intel["score"] += 40
+            intel["tags"].append("HIGH_ENTROPY")
+        
+        keywords = ["powershell", "bypass", "-enc", "http", "curl", "wget", "invoke-expression", "iex", "downloadstring"]
+        if any(k in full_search_text.lower() for k in keywords):
+            intel["score"] += 50
+            intel["tags"].append("ATTACK_SIG")
+
+        # [UPDATE] Lower threshold to 40 to catch simple bat files
+        if intel["score"] >= 40:
+            # [CRITICAL] List -> Semicolon Separated String for CSV safety
+            keywords_str = ";".join(intel["seeds"]) if intel["seeds"] else ""
+            
+            row_dict.update({
+                "Sphinx_Score": intel["score"],
+                "Original_Snippet": raw_text[:200],
+                "Decoded_Hint": (intel["decoded_cmd"] or intel["command_line"]),
+                "Sphinx_Tags": " ".join(list(set(intel["tags"]))),
+                "Keywords": keywords_str 
+            })
+            return row_dict
+        return None
 
     def analyze(self):
         print(f"[*] Sphinx is gazing at: {os.path.basename(self.target_file)}")
         try:
-            # Lazy load for speed
             lf = pl.scan_csv(self.target_file, ignore_errors=True, infer_schema_length=0)
-            
-            # Filter Strategy: EID 4104 (Script Block) + EID 4688 (Process Creation)
-            # Normalize columns
             schema = lf.collect_schema().names()
-            
-            # Column Mapping
+            target_eids = ["4104", "4688", "800", "4103", "1"]
+            id_col = next((c for c in ["EventId", "EventID", "Id"] if c in schema), "EventId")
             time_col = next((c for c in ["TimeCreated", "Timestamp_UTC"] if c in schema), "Time")
-            id_col = next((c for c in ["EventId", "EventID"] if c in schema), "EventId")
-            
-            # [FIX] Prioritize extracting from multiple potential fields to capture context
-            # Added "EventData" to catch raw JSON/XML where Payload might be buried (EID 800, 4103)
-            potential_msg_cols = [c for c in ["ScriptBlockText", "Payload", "Message", "CommandLine", "ContextInfo", "EventData"] if c in schema]
-            
-            if not potential_msg_cols:
-                print("[!] Error: No payload column found (ScriptBlockText/CommandLine/Payload).")
-                return None
 
-            # Filter relevant events
-            # [FIX] Added 800 (Pipeline), 4103 (Module) to capture "InputObject" details
-            lf = lf.filter(pl.col(id_col).cast(pl.Utf8).is_in(["4104", "4688", "800", "4103"]))
-
-            # Time Filtering
+            lf = lf.filter(pl.col(id_col).cast(pl.Utf8).is_in(target_eids))
             if self.start_time: lf = lf.filter(pl.col(time_col) >= self.start_time)
             if self.end_time:   lf = lf.filter(pl.col(time_col) <= self.end_time)
 
             df = lf.collect()
             print(f"[*] Events to scan: {len(df)}")
-
             results = []
             
-            # Helper to extract context
             def get_context(row):
                 return {
-                    "TimeCreated": row.get(time_col),
-                    "EventId": row.get(id_col),
+                    "TimeCreated": row.get(time_col), "EventId": row.get(id_col),
                     "Provider": row.get("ProviderName") or row.get("Source") or "Unknown",
-                    "ProcessId": row.get("ProcessId"),
-                    "ThreadId": row.get("ThreadId")
+                    "ProcessId": row.get("ProcessId"), "ThreadId": row.get("ThreadId")
                 }
 
-            # Scan Rows
             for row in df.iter_rows(named=True):
-                # [FIX] Concatenate all available message columns to ensure nothing is missed
-                # Use robust filtering to avoid 'None' strings or empty clutter
-                parts = []
-                for c in potential_msg_cols:
-                    val = row.get(c)
-                    if val and str(val).lower() != "null" and str(val).strip():
-                        parts.append(str(val).strip())
-                
-                original_text = " | ".join(parts)
-                
-                if len(original_text) < 10: continue
-
-                # A. Attack Signatures (Simple Keyword Search)
-                score = 0
-                tags = ""
-                
-                # B. Entropy Check (Obfuscation)
-                ent = self._entropy(original_text)
-                if ent > 5.5: 
-                    score += 50
-                    tags = "HIGH_ENTROPY"
-
-                # C. Decode Attempt
-                method, decoded_text = self._decode_payload(original_text)
-                
-                hint = ""
-                # [FIXED] Force Decode if keywords found, even if decode failed or entropy low
-                # (Simple simulated logic for the test case)
-                if "FromBase64String" in original_text or "-Enc" in original_text:
-                    if not decoded_text:
-                        # Fallback for the test case scenario where we might not actually decode logic here
-                        # But if we did decode:
-                        pass
-                
-                if decoded_text:
-                    score += 100
-                    tags = f"DECODED({method})"
-                    # [CRITICAL FIX] NO TRUNCATION HERE!
-                    # Hekate will handle the display length. We save EVERYTHING.
-                    hint = f"[{method}] {decoded_text}" 
-                elif score > 0:
-                     # If high entropy but no decode, save snippet
-                     hint = original_text[:200] # Still limit raw text if not decoded to avoid CSV explosion? No, let's keep it reasonably long.
-                
-                # Check for Suspicious Keywords in Original or Decoded
-                target_text = (decoded_text or "") + original_text
-                keywords = ["powershell", "bypass", "-enc", "http", "curl", "wget", "invoke-expression", "iex"]
-                hits = [k for k in keywords if k in target_text.lower()]
-                
-                if hits:
-                    score += 50
-                    tags = f"{tags} ATTACK_SIG_DETECTED" if tags else "ATTACK_SIG_DETECTED"
-                    if not hint: hint = original_text # Ensure we have something to show
-
-                # D. Seed Detection (Filenames)
-                # Catch "Attack_Chain.bat" or "Malware.ps1" even if no "Invoke-Expression"
-                seed_match = re.search(r"[\w\-\.]+\.(?:bat|ps1|cmd|vbs|js|wsf|hta)(?:\s|[\"']|$)", target_text.lower())
-                if seed_match:
-                    score += 50
-                    tags = f"{tags} POTENTIAL_SEED" if tags else "POTENTIAL_SEED"
-                    if not hint: hint = original_text
-
-                if score >= 50:
-                    item = get_context(row)
-                    item.update({
-                        "Sphinx_Score": score,
-                        "Original_Snippet": original_text[:100], # Keep a snippet of original
-                        "Decoded_Hint": hint, # FULL DECODED TEXT
-                        "Sphinx_Tags": tags
+                base_ctx = get_context(row)
+                base_ctx.update(row)
+                analyzed = self._sniper_process(base_ctx)
+                if analyzed:
+                    results.append({
+                        "TimeCreated": analyzed.get("TimeCreated"),
+                        "EventId": analyzed.get("EventId"),
+                        "Sphinx_Score": analyzed.get("Sphinx_Score"),
+                        "Sphinx_Tags": analyzed.get("Sphinx_Tags"),
+                        "Keywords": analyzed.get("Keywords"),
+                        "Decoded_Hint": analyzed.get("Decoded_Hint"),
+                        "Original_Snippet": analyzed.get("Original_Snippet")
                     })
-                    results.append(item)
-            
+
             if not results: return None
             return pl.DataFrame(results).sort("Sphinx_Score", descending=True)
 
