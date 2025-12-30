@@ -1,122 +1,107 @@
-# SkiaHelios: Advanced DFIR Artifact Correlation Engine
+# SkiaHelios v1.9 - God Mode (Internal Scout Edition)
 
-![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
-![Platform](https://img.shields.io/badge/Platform-Windows-win)
-![License](https://img.shields.io/badge/License-MIT-green)
-![Status](https://img.shields.io/badge/Status-v1.8_God_Mode-red)
+> *"Order restored. Truth revealed. The borders are internal."*
 
-**"Truth is a multi-layered tapestry. Weave it."**
+**SkiaHelios** is an advanced, automated DFIR (Digital Forensics & Incident Response) framework designed for high-resolution artifact correlation. It weaves together disparate logs into a single, cohesive narrative of the attack.
 
-SkiaHelios is a modular Digital Forensics & Incident Response (DFIR) framework designed to correlate disparate artifacts (Timeline, Registry, Network, USN Journal, SRUM, Prefetch) into a single, cohesive narrative. SkiaHelios reconstructs the *context* of user activity and generates professional, SANS-style investigation reports automatically.
-
-**Current Version:** v1.8 (God Mode Final)
+**Current Version:** v1.9 (Internal Scout / Triad Refactor)
 
 ---
 
-## 🏛️ Architecture & Workflow
+## 🏛️ Architecture & Workflow (The Triad)
 
-SkiaHelios uses a **"Seed & Hunt"** architecture. Instead of processing logs linearly, it identifies potential threats (Seeds) in filesystem anomalies and "hunts" for their execution evidence across other artifacts.
+SkiaHelios operates on the **"Seed & Hunt"** architecture. It doesn't just parse logs; it traces the *physical causality* of an attack across the file system, network, and execution artifacts.
 
 ```mermaid
-graph TB
-    %% ========================
-    %% 上から下へ「真実降臨」の神流れ
-    %% ========================
+graph TD
+    %% Define Styles
+    classDef evidence fill:#e1f5fe,stroke:#01579b,stroke-width:2px;
+    classDef ingest fill:#fff9c4,stroke:#fbc02d,stroke-width:2px;
+    classDef logic fill:#ffebee,stroke:#c62828,stroke-width:2px;
+    classDef validator fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px;
+    classDef output fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px;
 
-    %% --- 最上段: 生データ ---
-    subgraph Raw ["📂 Raw Artifacts<br/>証拠源"]
-        direction LR
-        MFT[MFT<br/>$MFT / $I30]
-        USN[USN Journal<br/>$J]
-        EVTX[Event Logs<br/>4688 / 4104]
-        REG[Registry<br/>Run Keys]
-        PF[Prefetch<br/>.pf]
-        AM[Amcache<br/>App Exec]
+    %% Input Data
+    subgraph Evidence [Physical Evidence]
+        EVTX[WinEventLogs]:::evidence
+        MFT[MFT / USN]:::evidence
+        SRUM[SRUM / NetLogs]:::evidence
+        PF[Prefetch / Amcache]:::evidence
     end
 
-    %% --- 第2段: 解析エンジン ---
-    subgraph Engines ["⚙️ Analysis Engines<br/>証拠抽出"]
-        direction LR
-        CH[Chronos<br/>Timestomp Detection]
-        PA[Pandora<br/>Ghost & Rename Trace]
-        SP[Sphinx<br/>PS Deobfuscation]
-        HE[Hercules<br/>Timeline Judgment]
-        AI[AION<br/>Persistence Hunt]
-        SI[Sirenhunt<br/>Execution Validator<br/>Prefetch + Amcache]
+    %% Ingestion Layer (Clotho)
+    subgraph Ingest [Phase 1: The Spinners]
+        Clotho(SH_ClothoReader):::ingest
+        Plutos(SH_PlutosGate v2.4):::ingest
+        Pandora(SH_PandorasLink):::ingest
+        Hercules(SH_HerculesReferee):::ingest
     end
 
-    %% --- 第3段: コア統合 ---
-    subgraph Core ["🧠 Core Orchestration"]
-        direction TB
-        HC[HeliosConsole<br/>Master Orchestrator]
-        HK[HekateWeaver<br/>Cause Correlation<br/>God Mode Scoring]
+    %% Logic Layer (Atropos)
+    subgraph Logic [Phase 2: The Thinkers]
+        Atropos(SH_AtroposThinker):::logic
+        Nemesis{Nemesis Tracer}:::logic
+        InternalScout{Internal Scout}:::logic
     end
 
-    %% --- 最下段: 聖典 ---
-    REP["📜 Grimoire<br/>Final Investigation Report<br/>(PHISHING_ATTACHMENT_EXEC Activated)"]
+    %% Validation Layer (Siren)
+    subgraph Validate [Phase 3: The Validators]
+        Siren(SH_Sirenhunt):::validator
+    end
 
-    %% ========================
-    %% データフロー（降臨の道筋）
-    %% ========================
+    %% Output Layer (Lachesis)
+    subgraph Output [Phase 4: The Allotter]
+        Lachesis(SH_LachesisWriter):::output
+        Report[Grimoire Report]:::output
+        Chimera[Chimera Campaign View]:::output
+    end
 
-    %% Raw → Engines
-    MFT --> CH
-    USN --> PA
-    EVTX --> SP
-    EVTX --> HE
-    REG --> AI
-    PF --> SI
-    AM --> SI
+    %% Connections
+    EVTX --> Hercules
+    EVTX --> Plutos
+    SRUM --> Plutos
+    MFT --> Pandora
+    PF --> Siren
 
-    %% Seeds to Sirenhunt
-    CH & PA -.->|Suspicious Seeds| SI
-
-    %% Engines → Hekate
-    CH & PA & SP & HE & AI --> HK
-    SI ==>|Verified Execution| HK
-
-    %% Orchestration & Final Descent
-    HC -.->|Commands All Engines| Engines
-    HC --> HK
-    HK ==>|Weaves Truth| REP
-
-    %% ========================
-    %% スタイリング（神々しく）
-    %% ========================
-
-    classDef raw fill:#1e1e1e,stroke:#666,stroke-width:2px,color:#fff;
-    classDef engine fill:#0d47a1,stroke:#fff,stroke-width:2px,color:#fff;
-    classDef siren fill:#b71c1c,stroke:#ff5252,stroke-width:4px,color:#fff;
-    classDef core fill:#1b5e20,stroke:#4caf50,stroke-width:3px,color:#fff;
-    classDef report fill:#311b92,stroke:#7e57c2,stroke-width:4px,color:#fff;
-
-    class MFT,USN,EVTX,REG,PF,AM raw;
-    class CH,PA,SP,HE,AI engine;
-    class SI siren;
-    class HC,HK core;
-    class REP report;
-
-    %% 枠を神聖に
-    style Raw stroke:#fff,stroke-width:2px,stroke-dasharray: 8 4
-    style Engines stroke:#fff,stroke-width:2px,stroke-dasharray: 8 4
-    style Core stroke:#fff,stroke-width:3px
+    Hercules --> Clotho
+    Plutos --> Clotho
+    Pandora --> Clotho
+    
+    Clotho --> Atropos
+    
+    Atropos <--> Nemesis
+    Atropos <--> InternalScout
+    
+    %% Siren Validation Loop
+    Siren -- "Execution Proof (God Mode)" --> Atropos
+    Atropos -- "Suspects" --> Siren
+    
+    %% Final Write
+    Atropos --> Lachesis
+    Lachesis --> Report
+    Lachesis -.-> Chimera
 ```
 
 ---
 
-## ⚡ Key Features (v1.8 God Mode)
+## ⚡ Key Features (v1.9 Updates)
 
-* **🛡️ Precision Over Recall (適合率重視):**
-    * 厳格なスコアリングロジックにより、正規プロセス（LOLBins）やWindows Updateの残骸などのノイズを徹底排除。
-    * **"Criticality >= 90"** の確実な脅威のみを技術詳細に記載。
-* **🏹 SirenHunt Integration (New!):**
-    * **Seed Harvesting:** Chronos (MFT) と Pandora (USN) から「不審なファイル操作（リネーム、タイムスタンプ偽装）」を抽出。
-    * **Execution Validation:** 抽出されたSeedが実際に実行されたかを **Prefetch** と **Amcache** で裏取り（Cross-Validation）。
-    * **Signature Verification:** デジタル署名の有無を確認し、署名のない不審な実行ファイルを「確定クロ」としてマーク。
-* **📝 Dynamic Attack Flow Generation:**
-    * イベントカテゴリを解析し、攻撃のストーリーライン（侵入→実行→隠滅）をExecutive Summaryに自動生成。
-* **🦁 Sphinx v1.9 Integration:**
-    * PowerShell ScriptBlock (EID 4104) のBase64/XOR難読化を自動解除し、攻撃意図を可視化。
+### 1. Internal Scout & Lateral Movement Detection
+The Gatekeeper (**Plutos**) has turned its eyes inward.
+* **RFC1918 Patrol:** Automatically identifies internal IPs (10.x, 172.16.x, 192.168.x) and differentiates them from external C2.
+* **Admin Share Watch:** Detects lateral tool drops into `\\*\C$`, `\\*\ADMIN$`, or `\\*\IPC$`.
+* **SRUM Burst Scout:** Flags "Internal Burst Transfers" (>50MB) even without IP logs, exposing data staging via SMB/WMI.
+* **Lateral Scoring:** Complex scoring engine for RDP, WMI, PsExec, and WinRM usage patterns.
+
+### 2. The Hekate Triad (Modular Core)
+The monolithic correlation engine (`HekateWeaver`) has been refactored into three goddesses for maximum scalability:
+* **🧶 Clotho (The Reader):** Normalizes and ingests all artifact streams.
+* **✂️ Atropos (The Thinker):** The brain. Handles correlation, `Nemesis` tracing, and `Siren` validation integration.
+* **✍️ Lachesis (The Writer):** Weaves the final verdict into a SANS-style markdown report.
+
+### 3. God Mode Validation (Siren Integration)
+* **Execution Proof:** Cross-references file system events with **Prefetch** and **Amcache** via `SH_Sirenhunt`.
+* **Anti-False Positive:** Only flags artifacts that *actually executed*, reducing analyst fatigue.
 
 ---
 
@@ -124,41 +109,43 @@ graph TB
 
 | Module | Role | Key Function |
 | :--- | :--- | :--- |
-| **SH_HeliosConsole** | Orchestrator | Pipeline & Timekeeper management. (指揮・統合) |
-| **SH_Sirenhunt** | **Hunter** | **Cross-validates seeds from MFT/USN with Prefetch & Amcache.** (物理的実行証明) |
-| **SH_HekateWeaver** | Weaver | Noise filtering & Grimoire generation. (相関分析・レポート作成) |
-| **SH_HerculesReferee**| Judge | Sniper scanning & Verdict execution. (イベントログ判定) |
-| **SH_Chronos** | Timekeeper | MFT Analysis & Timestomp detection ($SI < $FN). (時間異常検知) |
-| **SH_Pandora** | Necromancer| USN Journal analysis for deleted/renamed files. (削除・痕跡復元) |
-| **SH_SphinxDeciphering**| Decoder | PowerShell/Process deobfuscation. (難読化解除) |
+| **SH_PlutosGate** | Network Hunter | **(v2.4)** Internal Scout, C2 detection, Lateral Movement scoring. |
+| **SH_HerculesReferee** | EventLog Sniper | **(v3.6)** Identity tracking, Script block analysis, Hostname extraction. |
+| **SH_PandorasLink** | File System Tracer | USN/MFT analysis for file drops and deletions (Timestomping detection). |
+| **SH_ChronosSift** | Time Anomaly | `$SI < $FN` timestamp comparison for NTFS timestomping. |
+| **SH_Sirenhunt** | Validator | Verifies execution using Prefetch/Amcache ("Did it run?"). |
+| **SH_HekateWeaver** | Orchestrator | **(v16.0)** The Triad controller. Merges all above into the `Grimoire`. |
 
 ---
 
 ## 🚀 Usage
 
-### 1. Prerequisites
+### Standard Analysis (Single Host)
 ```bash
-pip install -r requirements.txt
+# Run the Triad Controller (Hekate)
+python tools/SH_HekateWeaver.py \
+  --input "KAPE/Timeline.csv" \
+  --plutos "KAPE/Plutos_Report.csv" \
+  --pandora "KAPE/Pandora_Ghosts.csv" \
+  --siren "KAPE/Siren_Hunt.json" \
+  --out "Reports/Grimoire_HostA.md" \
+  --case "Operation Chimera"
 ```
 
-### 2. Execution (Helios Console v4.0)
-```powershell
-python SH_HeliosConsole.py --dir "C:\Case\KAPE_CSV" --raw "C:\Case\Raw_Artifacts"
+### Network & Lateral Hunting (Plutos Standalone)
+```bash
+# Scan for Lateral Movement & Internal Exfiltration
+python tools/SH_PlutosGate.py \
+  --dir "KAPE_Output/" \
+  --pandora "KAPE/Pandora_Ghosts.csv" \
+  --out "Lateral_Report.csv"
 ```
-
-**Arguments:**
-* `--dir`: Path to KAPE module outputs (CSV files).
-* `--raw`: Path to KAPE targets (Raw artifacts).
-* `--mount`: (Optional) Mount Point for SHA256 hashing.
-* `--start / --end`: (Optional) Time filter (YYYY-MM-DD).
-
-### 3. Output (The Grimoire)
-The **`Grimoire_[CaseName]_[Lang].md`** provides:
-* **Executive Summary:** Attack flow and compromised accounts (w/ Verdict Flags like `[PHISHING_ATTACHMENT_EXEC]`).
-* **Origin Analysis:** Correlation between File Drop, Web History, and Execution.
-* **Timeline:** Phase-based chronological narrative.
-* **Technical Findings:** Validated evidence (Score >= 90).
 
 ---
 
-*Verified by SkiaHelios v1.8 (2025)*
+## 🔮 Roadmap: Project Chimera
+* **SH_ChimeraFusion:** Multi-host report integration (Coming Soon).
+* **Attack Graph:** Visualizing lateral movement paths across the network.
+
+---
+*Powered by Python, Polars, and Paranoia.*
