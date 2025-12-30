@@ -19,65 +19,85 @@ SkiaHelios uses a **"Seed & Hunt"** architecture. Instead of processing logs lin
 
 ```mermaid
 graph TD
-    %% --- Layer 1: Raw Artifacts ---
-    subgraph Raw_Layer [📂 Raw Artifacts]
-        MFT[($MFT)]
-        USN[($J)]
-        PF[Prefetch]
-        AM[Amcache]
-        EVTX[Event Logs]
-        REG[Registry]
+    %% ========================
+    %% 全体レイアウト：左から右へ明確な流れ
+    %% ========================
+
+    %% --- 左側: 生データソース ---
+    subgraph Raw["📂 Raw Artifacts<br/>証拠源"]
+        MFT[MFT<br/>$MFT / $I30]
+        USN[USN Journal<br/>$J]
+        EVTX[Event Logs<br/>4688 / 4104 etc.]
+        REG[Registry<br/>Run Keys etc.]
+        PF[Prefetch<br/>.pf Files]
+        AM[Amcache<br/>App Execution]
     end
 
-    %% --- Layer 2: The Parsers & Hunters ---
-    subgraph Tool_Layer [⚙️ Analysis Engines]
-        CH(Chronos<br/><i>MFT Anomaly & Timestomp</i>)
-        PA(Pandora<br/><i>USN Ghost & Rename</i>)
-        SP(Sphinx<br/><i>PowerShell Deobfuscation</i>)
-        HE(Hercules<br/><i>Timeline Judgment</i>)
-        AI(AION<br/><i>Persistence & IOC</i>)
-        
-        %% The New Module
-        SI{SH_Sirenhunt<br/><i>Execution Validator</i>}
+    %% --- 中央: 解析エンジン群 ---
+    subgraph Engines["⚙️ Analysis Engines<br/>証拠抽出"]
+        CH[Chronos<br/>Timestomp &<br/>MFT Anomaly]
+        PA[Pandora<br/>Ghost Files &<br/>Rename Trace]
+        SP[Sphinx<br/>PowerShell<br/>Deobfuscation]
+        HE[Hercules<br/>Timeline<br/>Judgment]
+        AI[AION<br/>Persistence<br/>Detection]
+        SI[Sirenhunt<br/>Execution Validator<br/>Prefetch + Amcache]
     end
 
-    %% --- Layer 3: Orchestration & Output ---
-    subgraph Core_Layer [🧠 Core Logic]
-        HC[HeliosConsole<br/><i>Orchestrator</i>]
-        HK(Hekate<br/><i>The Weaver</i>)
-        REP[📜 Grimoire<br/><i>SANS Report</i>]
+    %% --- 右側: コア統合 & 出力 ---
+    subgraph Core["🧠 Core Orchestration"]
+        HC[HeliosConsole<br/>Orchestrator]
+        HK[HekateWeaver<br/>Cause Correlation<br/>God Mode Scoring]
+        REP["📜 Grimoire<br/>SANS Report<br/>(PHISHING_ATTACHMENT_EXEC 発動)"]
     end
 
-    %% Data Flow Connections
+    %% ========================
+    %% データフロー（太線で明確に）
+    %% ========================
+
+    %% Raw → Engines
     MFT --> CH
     USN --> PA
-    EVTX --> HE & SP
+    EVTX --> SP
+    EVTX --> HE
     REG --> AI
-    
-    %% The Hunt Flow (Cross-Validation)
-    CH -- "Seed (Timestomp)" --> SI
-    PA -- "Seed (Deleted/Renamed)" --> SI
-    PF -- "Execution Check" --> SI
-    AM -- "Signature Check" --> SI
-    
-    %% The Weaving Flow
-    CH & PA & SP & HE & AI --> HK
-    SI -- "Verified Threats (God Mode)" --> HK
-    
-    %% Final Output
-    HC -.-> CH & PA & SP & HE & AI & SI & HK
+    PF --> SI
+    AM --> SI
+
+    %% Engines → Hekate
+    CH --> HK
+    PA --> HK
+    SP --> HK
+    HE --> HK
+    AI --> HK
+
+    %% Sirenhuntの特別フロー（Executionの最終検証）
+    CH & PA -.->|Seeds<br/>Suspicious Files| SI
+    SI -->|Verified Execution<br/>+ Signature| HK
+
+    %% Orchestration
+    HC -.->|Controls All Engines| CH & PA & SP & HE & AI & SI & HK
     HK --> REP
 
-    %% Styling
-    classDef raw fill:#2d2d2d,stroke:#fff,stroke-width:2px,color:#fff;
-    classDef tool fill:#2b5c8a,stroke:#fff,stroke-width:2px,color:#fff;
-    classDef siren fill:#8a2b2b,stroke:#f00,stroke-width:4px,color:#fff;
-    classDef logic fill:#2b8a5c,stroke:#fff,stroke-width:2px,color:#fff;
-    
-    class MFT,USN,PF,AM,EVTX,REG raw;
-    class CH,PA,SP,HE,AI tool;
+    %% ========================
+    %% スタイリング（視認性最優先）
+    %% ========================
+
+    classDef raw fill:#1e1e1e,stroke:#666,stroke-width:2px,color:#fff;
+    classDef engine fill:#0d47a1,stroke:#fff,stroke-width:2px,color:#fff;
+    classDef siren fill:#b71c1c,stroke:#ff5252,stroke-width:4px,color:#fff;
+    classDef core fill:#1b5e20,stroke:#4caf50,stroke-width:3px,color:#fff;
+    classDef report fill:#311b92,stroke:#7e57c2,stroke-width:3px,color:#fff;
+
+    class MFT,USN,EVTX,REG,PF,AM raw;
+    class CH,PA,SP,HE,AI engine;
     class SI siren;
-    class HC,HK,REP logic;
+    class HC,HK core;
+    class REP report;
+
+    %% 枠線強調
+    style Raw stroke:#fff,stroke-width:3px,stroke-dasharray: 5 5
+    style Engines stroke:#fff,stroke-width:3px,stroke-dasharray: 5 5
+    style Core stroke:#fff,stroke-width:3px,stroke-dasharray: 5 5
 ```
 
 ---
