@@ -3,17 +3,18 @@ import argparse
 from pathlib import Path
 import sys
 import datetime
+import json
 
 # ============================================================
-#  SH_HerculesReferee v3.5 [Schema Enforcer]
+#  SH_HerculesReferee v3.6 [Identity + Schema Safe]
 #  Mission: Identity + Script Hunter + GHOST CORRELATION
-#  Fix: Explicit schema enforcement to prevent type inference crashes.
+#  Update: Merged Schema Enforcement with Chimera Hostname Logic
 # ============================================================
 
 def print_logo():
     print(r"""
       | | | | | |
-    -- HERCULES --   [ Referee v3.5 ]
+    -- HERCULES --   [ Referee v3.6 ]
       | | | | | |    "Sniper Mode: LOCKED."
     """)
 
@@ -27,6 +28,25 @@ class HerculesReferee:
         target = csvs[0]
         print(f"[*] Loading Event Logs from: {target.name}")
         return pl.read_csv(target, ignore_errors=True, infer_schema_length=0)
+
+    def extract_host_identity(self, df_evtx):
+        print("[*] Phase 0: Identifying Hostname...")
+        if df_evtx is None: return "Unknown_Host"
+        
+        # Computerカラムからホスト名を抽出（最も頻出する値を採用）
+        cols = df_evtx.columns
+        comp_col = next((c for c in ["Computer", "ComputerName", "System_Computer"] if c in cols), None)
+        
+        if comp_col:
+            try:
+                # FQDNの場合はホスト名部分だけ取る (DESKTOP-XYZ.corp.local -> DESKTOP-XYZ)
+                top_host = df_evtx.select(pl.col(comp_col)).drop_nulls().group_by(comp_col).count().sort("count", descending=True).row(0)[0]
+                host_name = str(top_host).split('.')[0].upper()
+                print(f"   > Hostname Identified: {host_name}")
+                return host_name
+            except: pass
+        
+        return "Unknown_Host"
 
     # --- Logic A: Identity ---
     def _audit_authority(self, df_timeline):
@@ -52,7 +72,8 @@ class HerculesReferee:
     # --- Logic B: Script Hunter ---
     def analyze_process_tree(self, df_evtx):
         print("[*] Phase 3B: Script Hunter (Process Tree)...")
-        df_proc = df_evtx.filter(pl.col("EventId") == "4688")
+        if "EventId" not in df_evtx.columns: return []
+        df_proc = df_evtx.filter(pl.col("EventId").cast(pl.Utf8) == "4688")
         if df_proc.is_empty(): return []
 
         judgments = []
@@ -93,7 +114,6 @@ class HerculesReferee:
         if df_ghosts is None or df_ghosts.is_empty(): return df_events
         
         # 1. Force strict string schema for ALL relevant columns
-        # This prevents "Null vs String" inference crashes during rebuild
         cols_to_force = [
             "Tag", "Judge_Verdict", "Target_Path", "User", "Resolved_User", 
             "Action", "Source_File", "Subject_SID", "Account_Status", "Artifact_Type"
@@ -105,7 +125,6 @@ class HerculesReferee:
             else:
                 df_events = df_events.with_columns(pl.col(col).cast(pl.Utf8).fill_null(""))
 
-        # Filter high risk ghosts
         risky_ghosts = df_ghosts.filter(pl.col("Risk_Tag").is_in(["RISK_EXT", "OBFUSCATED"]))
         if risky_ghosts.is_empty(): return df_events
 
@@ -127,7 +146,6 @@ class HerculesReferee:
         if not ghost_times: return df_events.drop("_dt")
 
         for ev in events:
-            # Drop helper column from dict to keep clean
             dt_val = ev.pop("_dt", None)
             
             if dt_val is None: 
@@ -135,7 +153,6 @@ class HerculesReferee:
                 continue
             
             ev_tag = ev["Tag"]
-            is_hit = False
             
             for gt, gname in ghost_times:
                 delta = (dt_val - gt).total_seconds()
@@ -143,13 +160,11 @@ class HerculesReferee:
                     new_tag = f"[SNIPER] (Correlated w/ {gname})"
                     ev["Tag"] = f"{ev_tag}, {new_tag}" if ev_tag else new_tag
                     ev["Judge_Verdict"] = "SNIPER_HIT"
-                    is_hit = True
                     break
             
             hits.append(ev)
 
-        # 2. Rebuild with explicit schema from the sanitized df_events
-        # Using schema=df_events.schema tells Polars "Don't guess, use this!"
+        # 2. Rebuild with explicit schema
         return pl.DataFrame(hits, schema=df_events.drop("_dt").schema)
 
     # --- Logic D: Session Tracker (SID Affinity) ---
@@ -157,11 +172,9 @@ class HerculesReferee:
         print("[*] Phase 3D: Tracking User Sessions (SID Transition)...")
         if df_evtx is None: return
         
-        # Target Events: 4624 (Logon), 4634/4647 (Logoff), 4672 (Admin Priv)
         df_sess = df_evtx.filter(pl.col("EventId").cast(pl.Utf8).is_in(["4624", "4634", "4647", "4672"]))
         if df_sess.is_empty(): return
 
-        # Normalize Columns
         cols = df_sess.columns
         uid_col = next((c for c in ["TargetUserSid", "SubjectUserSid", "UserId"] if c in cols), None)
         lid_col = next((c for c in ["TargetLogonId", "SubjectLogonId", "LogonId"] if c in cols), None)
@@ -171,10 +184,9 @@ class HerculesReferee:
             print("[-] Missing critical session columns. Skipping tracker.")
             return
 
-        # Sort by time
         df_sess = df_sess.sort(time_col)
         
-        active_sessions = {} # {LogonId: {SID, Start, Privileges}}
+        active_sessions = {}
         session_history = []
 
         for row in df_sess.iter_rows(named=True):
@@ -187,27 +199,19 @@ class HerculesReferee:
 
             if eid == "4624": # Logon
                 active_sessions[lid] = {"SID": sid, "Start": ts, "Privileges": [], "End": None}
-            
-            elif eid == "4672": # Special Privileges (Admin)
-                # Usually happens right after 4624 with same LogonId
+            elif eid == "4672": # Admin
                 if lid in active_sessions:
-                    # Extract privileges if available (PayloadData often has them in messy format)
-                    # Simplified: Just mark as High Integrity / Admin context
                     active_sessions[lid]["Privileges"].append("ADMIN_PRIVILEGE_ASSERTED")
-            
             elif eid in ["4634", "4647"]: # Logoff
                 if lid in active_sessions:
                     sess = active_sessions.pop(lid)
                     sess["End"] = ts
                     session_history.append(sess)
         
-        # Dump remaining active sessions (implicitly active at end of log)
         for lid, sess in active_sessions.items():
             sess["End"] = "ACTIVE"
             session_history.append(sess)
             
-        # Export to JSON
-        import json
         out_path = self.kape_dir / "hercules_sessions.json"
         try:
             with open(out_path, "w") as f:
@@ -225,9 +229,18 @@ class HerculesReferee:
             print(f"[-] Error loading inputs: {e}")
             return
 
-        # 0. Session Tracking (Pre-process)
+        # 0. Host Identity & Session Tracking
+        detected_hostname = "Unknown_Host"
         if df_evtx is not None:
+            detected_hostname = self.extract_host_identity(df_evtx)
             self.track_sessions(df_evtx)
+
+        # Export Hostname for Chimera/Hekate
+        host_info_path = Path(output_csv).parent / "Host_Identity.json"
+        try:
+            with open(host_info_path, "w") as f:
+                json.dump({"Hostname": detected_hostname}, f)
+        except: pass
 
         # 1. Identity
         df_identity = self._audit_authority(df_timeline)
@@ -241,9 +254,8 @@ class HerculesReferee:
                 df_scripts = pl.DataFrame(script_hits)
                 
                 # Align columns explicitly
-                # Enforce string types on Identity DF before concat to match Script DF
                 df_identity = df_identity.with_columns([
-                    pl.col(c).cast(pl.Utf8) for c in df_identity.columns if c != "Timestamp_UTC" # Keep time mostly raw or string is fine
+                    pl.col(c).cast(pl.Utf8) for c in df_identity.columns if c != "Timestamp_UTC"
                 ])
                 
                 df_combined = pl.concat([df_identity, df_scripts], how="diagonal")
