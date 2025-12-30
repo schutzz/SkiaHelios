@@ -18,40 +18,45 @@ SkiaHelios is a modular Digital Forensics & Incident Response (DFIR) framework d
 SkiaHelios uses a **"Seed & Hunt"** architecture. Instead of processing logs linearly, it identifies potential threats (Seeds) in filesystem anomalies and "hunts" for their execution evidence across other artifacts.
 
 ```mermaid
-graph TD
+graph TB
     %% ========================
-    %% 全体レイアウト：左から右へ明確な流れ
+    %% 上から下へ「真実降臨」の神流れ
     %% ========================
 
-    %% --- 左側: 生データソース ---
-    subgraph Raw["📂 Raw Artifacts<br/>証拠源"]
+    %% --- 最上段: 生データ ---
+    subgraph Raw ["📂 Raw Artifacts<br/>証拠源"]
+        direction LR
         MFT[MFT<br/>$MFT / $I30]
         USN[USN Journal<br/>$J]
-        EVTX[Event Logs<br/>4688 / 4104 etc.]
-        REG[Registry<br/>Run Keys etc.]
-        PF[Prefetch<br/>.pf Files]
-        AM[Amcache<br/>App Execution]
+        EVTX[Event Logs<br/>4688 / 4104]
+        REG[Registry<br/>Run Keys]
+        PF[Prefetch<br/>.pf]
+        AM[Amcache<br/>App Exec]
     end
 
-    %% --- 中央: 解析エンジン群 ---
-    subgraph Engines["⚙️ Analysis Engines<br/>証拠抽出"]
-        CH[Chronos<br/>Timestomp &<br/>MFT Anomaly]
-        PA[Pandora<br/>Ghost Files &<br/>Rename Trace]
-        SP[Sphinx<br/>PowerShell<br/>Deobfuscation]
-        HE[Hercules<br/>Timeline<br/>Judgment]
-        AI[AION<br/>Persistence<br/>Detection]
+    %% --- 第2段: 解析エンジン ---
+    subgraph Engines ["⚙️ Analysis Engines<br/>証拠抽出"]
+        direction LR
+        CH[Chronos<br/>Timestomp Detection]
+        PA[Pandora<br/>Ghost & Rename Trace]
+        SP[Sphinx<br/>PS Deobfuscation]
+        HE[Hercules<br/>Timeline Judgment]
+        AI[AION<br/>Persistence Hunt]
         SI[Sirenhunt<br/>Execution Validator<br/>Prefetch + Amcache]
     end
 
-    %% --- 右側: コア統合 & 出力 ---
-    subgraph Core["🧠 Core Orchestration"]
-        HC[HeliosConsole<br/>Orchestrator]
+    %% --- 第3段: コア統合 ---
+    subgraph Core ["🧠 Core Orchestration"]
+        direction TB
+        HC[HeliosConsole<br/>Master Orchestrator]
         HK[HekateWeaver<br/>Cause Correlation<br/>God Mode Scoring]
-        REP["📜 Grimoire<br/>SANS Report<br/>(PHISHING_ATTACHMENT_EXEC 発動)"]
     end
 
+    %% --- 最下段: 聖典 ---
+    REP["📜 Grimoire<br/>Final Investigation Report<br/>(PHISHING_ATTACHMENT_EXEC Activated)"]
+
     %% ========================
-    %% データフロー（太線で明確に）
+    %% データフロー（降臨の道筋）
     %% ========================
 
     %% Raw → Engines
@@ -63,30 +68,27 @@ graph TD
     PF --> SI
     AM --> SI
 
+    %% Seeds to Sirenhunt
+    CH & PA -.->|Suspicious Seeds| SI
+
     %% Engines → Hekate
-    CH --> HK
-    PA --> HK
-    SP --> HK
-    HE --> HK
-    AI --> HK
+    CH & PA & SP & HE & AI --> HK
+    SI ==>|Verified Execution| HK
 
-    %% Sirenhuntの特別フロー（Executionの最終検証）
-    CH & PA -.->|Seeds<br/>Suspicious Files| SI
-    SI -->|Verified Execution<br/>+ Signature| HK
-
-    %% Orchestration
-    HC -.->|Controls All Engines| CH & PA & SP & HE & AI & SI & HK
-    HK --> REP
+    %% Orchestration & Final Descent
+    HC -.->|Commands All Engines| Engines
+    HC --> HK
+    HK ==>|Weaves Truth| REP
 
     %% ========================
-    %% スタイリング（視認性最優先）
+    %% スタイリング（神々しく）
     %% ========================
 
     classDef raw fill:#1e1e1e,stroke:#666,stroke-width:2px,color:#fff;
     classDef engine fill:#0d47a1,stroke:#fff,stroke-width:2px,color:#fff;
     classDef siren fill:#b71c1c,stroke:#ff5252,stroke-width:4px,color:#fff;
     classDef core fill:#1b5e20,stroke:#4caf50,stroke-width:3px,color:#fff;
-    classDef report fill:#311b92,stroke:#7e57c2,stroke-width:3px,color:#fff;
+    classDef report fill:#311b92,stroke:#7e57c2,stroke-width:4px,color:#fff;
 
     class MFT,USN,EVTX,REG,PF,AM raw;
     class CH,PA,SP,HE,AI engine;
@@ -94,10 +96,10 @@ graph TD
     class HC,HK core;
     class REP report;
 
-    %% 枠線強調
-    style Raw stroke:#fff,stroke-width:3px,stroke-dasharray: 5 5
-    style Engines stroke:#fff,stroke-width:3px,stroke-dasharray: 5 5
-    style Core stroke:#fff,stroke-width:3px,stroke-dasharray: 5 5
+    %% 枠を神聖に
+    style Raw stroke:#fff,stroke-width:2px,stroke-dasharray: 8 4
+    style Engines stroke:#fff,stroke-width:2px,stroke-dasharray: 8 4
+    style Core stroke:#fff,stroke-width:3px
 ```
 
 ---
