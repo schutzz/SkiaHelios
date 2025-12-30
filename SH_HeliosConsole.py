@@ -4,13 +4,15 @@ import argparse
 from pathlib import Path
 import time
 import importlib
+import json
+from datetime import datetime
 
 # ============================================================
-#  SH_HeliosConsole v4.0 [Timekeeper Edition]
-#  Mission: Coordinate all modules & enable Sniper Intel flow.
+#  SH_HeliosConsole v4.1 [Timekeeper & Benchmark]
+#  Mission: Coordinate all modules & Measure Performance.
 #  Updates:
-#    - Implemented argparse for CLI support (start/end fixed).
-#    - Selective time-filter distribution (prevent AION/Hekate crash).
+#    - Merged v4.0 logic (Cerberus Pipeline) with v1.9 Benchmarking.
+#    - Auto-generates 'execution_stats.json'.
 # ============================================================
 
 def print_logo():
@@ -20,18 +22,43 @@ def print_logo():
       , '   _ _ _ _   ' ,
      ,     |_______|      ,
     ,       _______        ,  < SKIA HELIOS >
-   ,       |_______|        ,  v4.0 - Timekeeper
+   ,       |_______|        ,  v4.1 - Timekeeper
    ,       _______          ,
     ,      |_______|       ,
      ,                    ,
       , _ _ _ _ _ _ _ _ ,
           ' - _ _ - '
-    "Illuminating Identity, Authority, and Intent."
+    "Illuminating Identity, Authority, Intent, and Velocity."
     """)
+
+class BenchmarkTimer:
+    """
+    [Cronus: The Time Keeper]
+    実行時間を計測し、統計データに記録するコンテキストマネージャ。
+    """
+    def __init__(self, name, stats_dict):
+        self.name = name
+        self.stats = stats_dict
+        self.start_time = None
+
+    def __enter__(self):
+        self.start_time = time.perf_counter()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        elapsed = time.perf_counter() - self.start_time
+        self.stats[self.name] = round(elapsed, 4)
+        # エラー時は記録しない、またはエラーとして記録するロジックも可
 
 class HeliosCommander:
     def __init__(self):
         self.modules = {}
+        # 統計情報用コンテナ
+        self.stats = {
+            "Total_Execution_Time": 0,
+            "Timestamp": datetime.now().isoformat(),
+            "Modules": {}
+        }
         self._load_modules()
 
     def _import_dynamic(self, script_name):
@@ -46,6 +73,7 @@ class HeliosCommander:
         return None
 
     def _load_modules(self):
+        # 重複を削除して整理
         tool_map = {
             "clio": "SH_ClioGet",
             "chaos": "SH_ChaosGrasp",
@@ -55,10 +83,8 @@ class HeliosCommander:
             "aion": "SH_AIONDetector",
             "plutos": "SH_PlutosGate",
             "hekate": "SH_HekateWeaver",
-            "plutos": "SH_PlutosGate",
-            "hekate": "SH_HekateWeaver",
             "sphinx": "SH_SphinxDeciphering",
-            "siren": "SH_Sirenhunt" # [NEW]
+            "siren": "SH_Sirenhunt" 
         }
         for key, script in tool_map.items():
             self.modules[key] = self._import_dynamic(script)
@@ -70,19 +96,33 @@ class HeliosCommander:
             return False
         
         print(f"\n>>> [EXECUTING] {key.upper()} Stage...")
+        
+        # タイマー起動 (自動計測)
+        start_t = time.perf_counter()
+        success = False
+        
         try:
             func(args)
-            return True
+            success = True
         except Exception as e:
             print(f"[!] {key.upper()} Stage Failed: {e}")
             import traceback
             traceback.print_exc()
-            return False
+            success = False
+        finally:
+            elapsed = time.perf_counter() - start_t
+            self.stats["Modules"][key] = round(elapsed, 4)
+            status_str = "DONE" if success else "FAILED"
+            print(f">>> [{status_str}] {key.upper()} finished in {elapsed:.4f}s")
+        
+        return success
 
     def full_auto_scan(self, csv_dir, raw_dir, out_dir, case_name, start_date=None, end_date=None, mount_point=None):
         print_logo()
         print(f"[*] --- INITIATING CERBERUS PIPELINE: {case_name} ---")
         if start_date: print(f"[*] Time Filter: {start_date} -> {end_date}")
+        
+        pipeline_start = time.perf_counter()
         
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         case_dir = Path(out_dir) / f"{case_name}_{timestamp}"
@@ -140,13 +180,11 @@ class HeliosCommander:
         evtx_raw = next(Path(csv_dir).rglob("*EvtxECmd_Output.csv"), None)
         if evtx_raw:
             # Sphinx supports Time
-            # Sphinx supports Time
             self.run_module("sphinx", ["-f", str(evtx_raw), "-o", str(sphinx_out)] + time_args)
 
-        # 5.5. Sirenhunt (The Validator) - [NEW STAGE]
-        # Find Prefetch/Amcache for Siren
+        # 5.5. Sirenhunt (The Validator)
         prefetch_raw = next(Path(csv_dir).rglob("*PECmd_Output.csv"), None)
-        amcache_raw = next(Path(csv_dir).rglob("*Amcache_UnassociatedFileEntries.csv"), None) # Typical AmcacheParser output
+        amcache_raw = next(Path(csv_dir).rglob("*Amcache_UnassociatedFileEntries.csv"), None)
         
         siren_json = case_dir / "Sirenhunt_Results.json"
         siren_cmd = [
@@ -157,14 +195,10 @@ class HeliosCommander:
         if prefetch_raw: siren_cmd.extend(["--prefetch", str(prefetch_raw)])
         if amcache_raw: siren_cmd.extend(["--amcache", str(amcache_raw)])
         
-        # We need to add 'siren' to _load_modules tool_map first, or just run it via run_module if we add it there.
-        # But wait, SH_HeliosConsole.py's _load_modules is hardcoded. I should verify if I need to add 'siren' there too.
-        # Yes, I do. Let's do that in a separate chunk.
         self.run_module("siren", siren_cmd)
 
         # 6. Hekate (The Final Weaver)
-        # Hekate usually consumes all events. Filtering is done at ingestion or report time if needed.
-        # DO NOT pass time_args to Hekate CLI unless v15.33 main() supports it (it currently doesn't).
+        # v1.9ではここが Clotho/Atropos/Lachesis を内包するラッパーとして機能
         for lang in ["jp", "en"]:
             report_path = case_dir / f"Grimoire_{case_name}_{lang}.md"
             self.run_module("hekate", [
@@ -176,16 +210,30 @@ class HeliosCommander:
                 "--plutos-net", str(plutos_net_out),
                 "--sphinx", str(sphinx_out), 
                 "--chronos", str(chronos_out),
-                "--sphinx", str(sphinx_out), 
-                "--chronos", str(chronos_out),
                 "--pandora", str(pandora_out),
-                "--siren", str(siren_json) # [NEW] Pass Siren JSON
+                "--siren", str(siren_json)
             ])
 
+        # Finalize Pipeline Stats
+        total_elapsed = time.perf_counter() - pipeline_start
+        self.stats["Total_Execution_Time"] = round(total_elapsed, 4)
+        self._export_stats(case_dir)
+        
         print(f"\n[*] SUCCESS: Pipeline finished. Case dir: {case_dir}")
+        print(f"[*] Total Time: {total_elapsed:.2f}s")
+
+    def _export_stats(self, out_dir):
+        """ベンチマーク結果をJSONファイルに出力"""
+        try:
+            stats_path = Path(out_dir) / "execution_stats.json"
+            with open(stats_path, "w") as f:
+                json.dump(self.stats, f, indent=4)
+            print(f"[+] Benchmark stats saved to '{stats_path.name}'")
+        except Exception as e:
+            print(f"[!] Failed to save stats: {e}")
 
 def main():
-    parser = argparse.ArgumentParser(description="SH_HeliosConsole v4.0")
+    parser = argparse.ArgumentParser(description="SH_HeliosConsole v4.1 [Timekeeper]")
     parser.add_argument("--dir", required=True, help="Parsed CSV Directory (KAPE Modules)")
     parser.add_argument("--raw", help="Raw Artifact Directory (Optional)")
     parser.add_argument("--mft", help="MFT Path (Optional, auto-detected if in dir)")
@@ -195,14 +243,12 @@ def main():
     parser.add_argument("--case", default="Investigation", help="Case Name")
     parser.add_argument("-o", "--out", default="Helios_Output", help="Output Directory")
     
-    # Check if arguments are passed, otherwise fallback to interactive
     if len(sys.argv) > 1:
         args = parser.parse_args()
         commander = HeliosCommander()
-        raw_target = args.raw if args.raw else args.dir # Fallback
+        raw_target = args.raw if args.raw else args.dir
         commander.full_auto_scan(args.dir, raw_target, args.out, args.case, args.start, args.end, args.mount)
     else:
-        # Interactive Mode
         print_logo()
         commander = HeliosCommander()
         try:

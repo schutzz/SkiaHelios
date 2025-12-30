@@ -2,17 +2,19 @@ import polars as pl
 import json
 from pathlib import Path
 import sys
+import re
 
 # ============================================================
-#  SH_ClothoReader v1.0 [The Spinner]
+#  SH_ClothoReader v1.9.2 [Session Aware]
 #  Mission: Normalize & Ingest all forensic artifacts.
+#  Update: Load 'hercules_sessions.json' for Privilege Escalation checks.
 # ============================================================
 
 class ClothoReader:
     """
     [Clotho: The Spinner]
     運命の糸（ログ）を紡ぎ出し、解析可能な状態（DataFrame）に正規化するクラス。
-    全てのデータソースの読み込みと、ホスト名の特定を担当する。
+    全てのデータソースの読み込みと、ホスト名・ユーザー属性の特定を担当する。
     """
     def __init__(self, args):
         self.args = args
@@ -30,38 +32,50 @@ class ClothoReader:
         # 1. Primary Timeline (Hercules)
         self.dfs['Hercules'] = self._safe_load(self.args.input)
         
-        # 2. Network (Often derived from Hercules Timeline in Legacy Hekate)
-        # ネットワーク分析用にTimelineと同じデータを保持、またはPlutosNetを優先
+        # 2. Network
         self.dfs['Network'] = self._safe_load(self.args.input)
 
         # 3. Dedicated Artifacts
-        # AION (Persistence) - Support legacy arg name 'persistence' too
         aion_path = getattr(self.args, 'aion', None) or getattr(self.args, 'persistence', None)
         self.dfs['AION'] = self._safe_load(aion_path)
         
         self.dfs['Pandora']   = self._safe_load(getattr(self.args, 'pandora', None))
-        
-        # Plutos (Lateral/Internal) & PlutosNet
         self.dfs['Plutos']    = self._safe_load(getattr(self.args, 'plutos', None))
         self.dfs['PlutosNet'] = self._safe_load(getattr(self.args, 'plutos_net', None))
-        
         self.dfs['Sphinx']    = self._safe_load(getattr(self.args, 'sphinx', None))
         self.dfs['Chronos']   = self._safe_load(getattr(self.args, 'chronos', None))
         self.dfs['Prefetch']  = self._safe_load(getattr(self.args, 'prefetch', None))
 
-        # 4. JSON Data (SirenHunt)
+        # [NEW] 4. Session Map (from Hercules)
+        # 権限昇格検知のためにセッション情報をロードする
+        if self.args.input:
+            session_path = Path(self.args.input).parent / "hercules_sessions.json"
+            if session_path.exists():
+                try:
+                    with open(session_path, 'r', encoding='utf-8') as f:
+                        # JSONをPolars DataFrameに変換して保持
+                        self.dfs['Sessions'] = pl.DataFrame(json.load(f))
+                    print(f"   -> Session Map Loaded: {len(self.dfs['Sessions'])} sessions.")
+                except Exception as e:
+                    print(f"[!] Warning: Failed to load Session Map: {e}")
+
+        # 5. JSON Data (SirenHunt)
         self.siren_data = self._load_json(getattr(self.args, 'siren', None))
 
-        # 5. Identify Host
+        # 6. Identify Host
         self._identify_host()
+
+        # 7. 5W1H Enrichment
+        print(f"[*] Clotho is weaving 5W1H attributes for host: {self.hostname}...")
+        for key, df in self.dfs.items():
+            if df is not None and key != 'Sessions': # Sessionsは正規化対象外
+                self.dfs[key] = self._enrich_5w1h(df, key)
 
         return self.dfs, self.siren_data, self.hostname
 
     def _safe_load(self, path):
-        """CSVを安全に読み込む（型推論エラー回避のため全カラム文字列として読む場合あり）"""
         if path and Path(path).exists():
             try:
-                # infer_schema_length=0 で全カラムを文字列として読み込み、パースエラーを防ぐ
                 return pl.read_csv(path, ignore_errors=True, infer_schema_length=0)
             except Exception as e:
                 print(f"[!] Clotho Warning: Failed to load CSV {path}: {e}")
@@ -69,7 +83,6 @@ class ClothoReader:
         return None
 
     def _load_json(self, path):
-        """JSONを安全に読み込む"""
         if path and Path(path).exists():
             try:
                 with open(path, 'r', encoding='utf-8') as f:
@@ -80,12 +93,6 @@ class ClothoReader:
         return []
 
     def _identify_host(self):
-        """
-        ホスト名を特定する。
-        1. 入力CSVディレクトリにある 'Host_Identity.json' (Herculesが生成) を優先
-        2. Timeline CSVの中身から推測 (Fallback)
-        """
-        # Strategy 1: Host_Identity.json
         if self.args.input:
             host_info_path = Path(self.args.input).parent / "Host_Identity.json"
             if host_info_path.exists():
@@ -96,8 +103,36 @@ class ClothoReader:
                     print(f"   -> Host Identity Found (from JSON): {self.hostname}")
                     return
                 except: pass
-        
-        # Strategy 2: Extract from HERCULES Timeline (Target Host column often exists in reports but not raw CSV)
-        # ここでは簡易的なフォールバックとして、ファイル名や親フォルダ名を使う手もあるが、
-        # HerculesRefereeが必ずJSONを吐くようになったので、基本はStrategy 1でカバーできるはず。
-        pass
+
+    def _enrich_5w1h(self, df, source_name):
+        target_cols = ["Auth_Domain", "Auth_User", "Src_Host", "Logon_Type"]
+        for col in target_cols:
+            if col not in df.columns:
+                df = df.with_columns(pl.lit(None).cast(pl.Utf8).alias(col))
+
+        df = df.with_columns(pl.col("Src_Host").fill_null(self.hostname))
+
+        if "User" in df.columns:
+            df = df.with_columns([
+                pl.when(pl.col("User").str.contains(r"\\"))
+                .then(pl.col("User").str.extract(r"^([^\\]+)\\", 1))
+                .otherwise(pl.lit("Local"))
+                .alias("Extracted_Domain"),
+                
+                pl.when(pl.col("User").str.contains(r"\\"))
+                .then(pl.col("User").str.extract(r"\\(.+)$", 1))
+                .otherwise(pl.col("User"))
+                .alias("Extracted_User")
+            ])
+            
+            df = df.with_columns([
+                pl.coalesce(["Auth_Domain", "Extracted_Domain"]).alias("Auth_Domain"),
+                pl.coalesce(["Auth_User", "Extracted_User"]).alias("Auth_User")
+            ]).drop(["Extracted_Domain", "Extracted_User"])
+
+        df = df.with_columns([
+            pl.col("Auth_Domain").fill_null("Local"),
+            pl.col("Auth_User").fill_null("System/Unknown")
+        ])
+
+        return df

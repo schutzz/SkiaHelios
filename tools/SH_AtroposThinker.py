@@ -5,16 +5,14 @@ from pathlib import Path
 from collections import defaultdict, Counter
 
 # ============================================================
-#  SH_AtroposThinker v1.0 [The Cutter]
+#  SH_AtroposThinker v1.9.2 [Privilege Hunter]
 #  Mission: Analyze correlations, deduce verdicts, cut noise.
+#  Update: Added Privilege Escalation Detection logic.
 # ============================================================
 
 class NemesisTracer:
-    """
-    [Nemesis: The Inescapable]
-    物理アーティファクト(MFT/USN)を用いて、攻撃の痕跡（Seed）から
-    ファイルのライフサイクル（作成・変名・削除）を追跡するクラス。
-    """
+    # (v1.9.1 のコードを維持 - 省略なしで記述が必要なら展開するっス)
+    # ここでは既存のNemesisTracerクラス定義をそのまま使用
     def __init__(self, df_mft, df_usn, noise_validator=None):
         self.df_mft = df_mft
         self.df_usn = df_usn
@@ -82,7 +80,6 @@ class NemesisTracer:
                     target_seq = target_ids_dict.get(row_entry)
                     check_seq = row.get(seq_col) or row_packed_seq
                     
-                    # Sequence Number Check (Strict)
                     if target_seq is not None and check_seq is not None:
                          try:
                              if int(check_seq) != int(target_seq) and int(target_seq) != 0: continue
@@ -138,10 +135,7 @@ class NemesisTracer:
                     if name_cols:
                         try:
                             name_filter = pl.any_horizontal([pl.col(c).str.to_lowercase().str.contains(f"(?i){pattern}") for c in name_cols])
-                            # Polars datetime filter handling
-                            # Assuming string comparison for robustness if strict casting fails, or try-catch
                             hits = self.df_usn.filter(name_filter)
-                            # Logic simplified: Filter by name first, then check time in loop to avoid Polars Schema issues
                             for row in hits.iter_rows(named=True):
                                 row_t = str(row.get(time_col)).replace('Z','')
                                 try:
@@ -161,7 +155,6 @@ class NemesisTracer:
                                         break
                         except: pass
             
-            # MFT Logic (similar simplified flow)
             if self.df_mft is not None:
                 mft_name_cols = [c for c in ["FileName", "Ghost_FileName", "Chaos_FileName"] if c in self.df_mft.columns]
                 if mft_name_cols:
@@ -210,11 +203,8 @@ class NemesisTracer:
         summary = f"Lifecycle Trace [{spec}]: {fname}"
         if old_name and old_name != fname: summary = f"Lifecycle Trace [Identity Shift]: {old_name} -> {fname}"
         
-        t_str = str(row.get("si_dt") or row.get("Ghost_Time_Hint") or row.get("Timestamp_UTC")).replace('Z', '')
-        dt_obj = None
-        try: dt_obj = datetime.datetime.fromisoformat(t_str)
-        except: pass
-
+        t_str = str(row.get("si_dt") or row.get("Ghost_Time_Hint") or row.get("Timestamp_UTC"))
+        
         return {
             "Time": t_str,
             "Source": f"Nemesis ({source_type})", "User": "System/Inferred",
@@ -223,7 +213,7 @@ class NemesisTracer:
             "Criticality": 95, "Category": "ANTI" if "DELETE" in reason else "DROP",
             "Keywords": [fname],
             "Owner_SID": owner,
-            "dt_obj": dt_obj
+            "dt_obj": None 
         }
 
 
@@ -243,11 +233,66 @@ class AtroposThinker:
         self.lateral_summary = ""
         self.compromised_users = Counter()
         self.flow_steps = []
+        
+        # [Optimization] Pre-compile Regex
+        self.re_ip = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b')
+        self.re_filename = re.compile(r'([\w\-\.]+\.(?:exe|ps1|bat|dll))', re.IGNORECASE)
+
+    def _parse_strict_time(self, t_str):
+        """
+        [Optimized Physics]
+        文字列の特徴からフォーマットを推論し、高速にパースする。
+        総当たりによるオーバーヘッドを回避。
+        """
+        if not t_str: return None
+        s = str(t_str).strip()
+        if not s or s.lower() in ("none", "nan", ""): return None
+        
+        # 1. ISO Format (Fastest Check)
+        # 'T' が含まれていれば ISO 8601 の可能性大
+        if 'T' in s:
+            try:
+                # Z除去などは最低限に
+                if s.endswith('Z'): s = s[:-1] + '+00:00'
+                return datetime.datetime.fromisoformat(s)
+            except: pass
+
+        # 2. Heuristic Parsing based on Delimiters
+        # 区切り文字で分岐して試行回数を減らす
+        if '-' in s:
+            # YYYY-MM-DD 系
+            if '.' in s: # ミリ秒あり
+                try: return datetime.datetime.strptime(s, "%Y-%m-%d %H:%M:%S.%f")
+                except: pass
+            else: # 秒まで、または分まで
+                try: return datetime.datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
+                except:
+                    try: return datetime.datetime.strptime(s, "%Y-%m-%d %H:%M")
+                    except: pass
+        elif '/' in s:
+            # MM/DD/YYYY or YYYY/MM/DD 系
+            # スラッシュの数や位置でさらに分岐も可能だが、ここはリストを絞る
+            formats = [
+                "%m/%d/%Y %H:%M:%S",
+                "%Y/%m/%d %H:%M:%S",
+                "%m/%d/%Y %H:%M",
+                "%Y/%m/%d %H:%M"
+            ]
+            for fmt in formats:
+                try: return datetime.datetime.strptime(s, fmt)
+                except: pass
+        
+        # 3. Fallback (Last Resort)
+        # それでもダメなら汎用的に試す（が、ここまで来るケースは稀にしたい）
+        try: return datetime.datetime.fromisoformat(s.replace(' ', 'T'))
+        except: pass
+            
+        return None
 
     def contemplate(self):
         """
         メインの思考プロセス。
-        収集 -> Nemesis追跡 -> ソート -> コンテキスト分析 -> 判定 -> 横展開検知
+        収集 -> Nemesis追跡 -> ソート(物理時間) -> コンテキスト分析 -> 判定 -> 横展開検知
         """
         print("[*] Atropos is contemplating the fate of artifacts...")
         
@@ -261,7 +306,6 @@ class AtroposThinker:
         if seeds:
             print(f"   -> Nemesis identified {len(seeds)} attack seeds. Tracing...")
             nemesis_events = nemesis.trace_lifecycle(list(seeds))
-            # Merge unique
             current_sigs = {e['Summary'] + str(e['Time']) for e in raw_events}
             for ne in nemesis_events:
                 if (ne['Summary'] + str(ne['Time'])) not in current_sigs:
@@ -269,6 +313,9 @@ class AtroposThinker:
 
         # 3. Execution Tracing (Physical Proof)
         execution_events = self._filter_execution_events(raw_events)
+        for ev in execution_events:
+             if not ev.get('dt_obj'): ev['dt_obj'] = self._parse_strict_time(ev.get('Time'))
+        
         phys_events = nemesis.trace_origin_by_execution(execution_events)
         if phys_events:
             current_sigs = {e['Summary'] + str(e['Time']) for e in raw_events}
@@ -277,17 +324,21 @@ class AtroposThinker:
                     raw_events.append(pe)
 
         # 4. Ghost Merge (Nemesis vs Pandora)
+        for ev in raw_events:
+            if not ev.get('dt_obj'): ev['dt_obj'] = self._parse_strict_time(ev.get('Time'))
         self._merge_ghosts(raw_events)
 
         # 5. Inferred Execution
         self._infer_execution_drops(raw_events)
+        
+        # [NEW] 5.5. Privilege Escalation Detection
+        # ここで「ユーザーセッション中のSYSTEM実行」を炙り出す
+        self._detect_privilege_escalation(raw_events)
 
-        # 6. Time Sort
+        # 6. Time Sort (Strict Physics)
         for ev in raw_events:
             if not ev.get('dt_obj'):
-                t_str = str(ev['Time']).replace('T', ' ').split('.')[0].replace('Z','')
-                try: ev['dt_obj'] = datetime.datetime.fromisoformat(t_str)
-                except: ev['dt_obj'] = None
+                ev['dt_obj'] = self._parse_strict_time(ev.get('Time'))
         raw_events.sort(key=lambda x: x.get('dt_obj') or datetime.datetime.max)
 
         # 7. Origin Analysis & Context
@@ -304,14 +355,12 @@ class AtroposThinker:
 
         # 11. Final Validation
         self.valid_events = raw_events
-        # (Filtering logic for report generation could go here, but passing all for now)
         
         # Extract compromised users
         for ev in raw_events:
             if ev.get('User') and "System" not in str(ev['User']) and "N/A" not in str(ev['User']):
                 self.compromised_users[ev['User']] += 1
 
-        # Partition Phases
         phases = self._partition_timeline(self.valid_events)
 
         return {
@@ -326,6 +375,76 @@ class AtroposThinker:
 
     # --- Core Logic Methods ---
 
+    def _detect_privilege_escalation(self, events):
+        """
+        [v1.9.2 New Logic]
+        Herculesのセッション情報(Login/Logout)と照合し、
+        「一般ユーザーのセッション中」に発生した「SYSTEM権限でのクリティカルな活動」を検知する。
+        これにより、ExploitやUAC Bypassによる権限昇格の瞬間を特定する。
+        """
+        df_sessions = self.dfs.get('Sessions')
+        if df_sessions is None or df_sessions.is_empty():
+            return # セッション情報がない場合はスキップ
+
+        # セッションリストの準備
+        user_sessions = []
+        try:
+            for row in df_sessions.iter_rows(named=True):
+                # SYSTEMセッション自体は無視
+                sid = str(row.get('SID', ''))
+                if "S-1-5-18" in sid: continue
+                
+                # 時刻パース
+                start_t = self._parse_strict_time(row.get('Start'))
+                end_raw = row.get('End')
+                end_t = datetime.datetime.max if str(end_raw) == "ACTIVE" else self._parse_strict_time(end_raw)
+                
+                if start_t and end_t:
+                    user_sessions.append({
+                        "SID": sid, "Start": start_t, "End": end_t, 
+                        "User": "Unknown" # Session map doesn't always have username, relying on SID
+                    })
+        except: return
+
+        if not user_sessions: return
+        print(f"   -> Analyzing {len(user_sessions)} user sessions for Privilege Escalation...")
+
+        count = 0
+        for ev in events:
+            # ターゲット: SYSTEM権限での実行・永続化・痕跡隠滅
+            user = str(ev.get('User', '')).lower()
+            if "system" not in user and "s-1-5-18" not in str(ev.get('Owner_SID', '')).lower():
+                continue # SYSTEM以外は興味なし
+            
+            cat = ev.get('Category', '')
+            if cat not in ['EXEC', 'PERSIST', 'ANTI', 'DROP']:
+                continue # クリティカルでないカテゴリは無視
+            
+            ev_time = ev.get('dt_obj')
+            if not ev_time: continue
+
+            # 重なりチェック: いずれかのUserセッション中に発生したか？
+            is_overlap = False
+            victim_sid = None
+            
+            for sess in user_sessions:
+                if sess['Start'] <= ev_time <= sess['End']:
+                    is_overlap = True
+                    victim_sid = sess['SID']
+                    break
+            
+            if is_overlap:
+                # 権限昇格疑いあり！
+                ev['Criticality'] = 100
+                ev['Summary'] = "[PRIVILEGE_ESCALATION] " + ev['Summary']
+                ev['Detail'] += f"\n[!] ALERT: SYSTEM Activity detected during active User Session (SID: {victim_sid}). Potential Exploit/UAC Bypass."
+                self.verdict_flags.add("[PRIVILEGE_ESCALATION]")
+                count += 1
+
+        if count > 0:
+            print(f"   [!] DETECTED: {count} Potential Privilege Escalation events.")
+
+    # (以降、既存のメソッド群: _harvest_seeds, _filter_execution_events などは変更なし)
     def _harvest_seeds(self, events):
         seeds = set()
         for ev in events:
@@ -379,7 +498,7 @@ class AtroposThinker:
                 p_time = p_ev.get('dt_obj')
                 if not p_time: continue
                 
-                # Time correlation window (5 sec)
+                # Time correlation window (Strict 5 sec)
                 if abs((n_time - p_time).total_seconds()) > 5: continue
                 
                 n_names = set(str(k).lower().split("\\")[-1] for k in n_ev.get('Keywords', []))
@@ -389,9 +508,7 @@ class AtroposThinker:
                     n_ev['Summary'] += f" <br>(Matches Pandora Ghost: {p_ev['Summary']})"
                     indices_to_remove.add(i)
         
-        # Remove consumed Pandora events
         if indices_to_remove:
-            # Rebuild list excluding removed indices
             kept = [ev for i, ev in enumerate(events) if i not in indices_to_remove]
             events.clear()
             events.extend(kept)
@@ -457,12 +574,6 @@ class AtroposThinker:
             elif "inetcache" in detail: story['Path_Indicator'] = "ブラウザキャッシュ (Drive-by Download)"
             elif "downloads" in detail: story['Path_Indicator'] = "ダウンロードフォルダ"
 
-            # B. Web Correlation (Hercules Timeline)
-            if self.dfs.get('Hercules') is not None:
-                window_start = drop_dt - datetime.timedelta(minutes=5)
-                # Filter logic would go here if Hercules DF is accessible row-by-row
-                # (Simplified for this snippet)
-
             # C. Execution Link
             execs = [e for e in events if e['Category'] in ['EXEC', 'INIT'] and e.get('dt_obj') and e['dt_obj'] >= drop_dt]
             for ex in execs:
@@ -508,7 +619,6 @@ class AtroposThinker:
                      self.verdict_flags.add("[PHISHING_ATTACHMENT_EXEC]")
 
     def _detect_lateral_movement(self, events):
-        """ [v1.9] Lateral Movement Detection Logic """
         lateral_lines = []
         has_lateral = False
         
@@ -518,7 +628,6 @@ class AtroposThinker:
             cat = ev.get('Category', '')
             kws = str(ev.get('Keywords', ''))
             
-            # v1.9 Keywords + Hercules/Plutos Tags
             if "LATERAL" in summary or "INTERNAL_EXFIL" in summary or "RDP_" in summary or "SMB_WMI" in kws:
                 has_lateral = True
                 direction = "Unknown"
@@ -530,6 +639,52 @@ class AtroposThinker:
                     direction = f"OUTGOING ATTACK (Source: {self.hostname} -> {target_ip if target_ip else 'Unknown'})"
                 
                 lateral_lines.append(f"- **[{direction}]** {ev['Summary']}")
+
+    def _measure_heat_correlation(self, events):
+        """
+        [v1.9.3] Heat Correlation
+        Plutosが検知した「High Heat Activity」周辺のタイムラインを調査し、
+        関連する実行痕跡があれば「状況証拠による確定（High Confidence Verdict）」を下す。
+        """
+        heat_events = [e for e in events if "Plutos" in str(e.get('Source')) and "HEAT" in str(e.get('Summary', '')).upper()]
+        
+        if not heat_events: return
+
+        print(f"   -> Measuring Heat Correlation for {len(heat_events)} burst events...")
+
+        for h_ev in heat_events:
+            burst_time = h_ev.get('dt_obj')
+            if not burst_time: continue
+            
+            # Window: +/- 5 minutes
+            start_w = burst_time - datetime.timedelta(minutes=5)
+            end_w = burst_time + datetime.timedelta(minutes=5)
+
+            correlated = False
+            
+            # Search for related execution in window
+            for ev in events:
+                if ev == h_ev: continue
+                ev_time = ev.get('dt_obj')
+                if not ev_time: continue
+                
+                if start_w <= ev_time <= end_w:
+                    cat = ev.get('Category', '')
+                    summary = str(ev.get('Summary', '')).lower()
+                    
+                    # Check for archivers, lateral tools, etc.
+                    if cat in ['EXEC', 'DROP'] or "service" in summary:
+                        kws = str(ev.get('Keywords', '')).lower()
+                        if any(x in kws for x in ['7z', 'rar', 'psexec', 'curl', 'wget', 'copy']):
+                            h_ev['Summary'] += " [CORRELATED_WITH_EXECUTION]"
+                            h_ev['Detail'] += f"\n[!] CORRELATION: Coincides with {ev['Summary']} at {ev['Time']}"
+                            h_ev['Criticality'] = 100 # Boost to MAX
+                            ev['Criticality'] = 100   # Boost the execution event too
+                            self.verdict_flags.add("[DATA_EXFIL_CONFIRMED]")
+                            correlated = True
+            
+            if correlated:
+                print(f"      [!] Heat Burst at {burst_time} confirmed as malicious activity.")
 
         if has_lateral:
             block = ["\n### 🚨 Lateral Movement & Internal Exfiltration Detected\n"]
@@ -577,12 +732,8 @@ class AtroposThinker:
         phases.append(current_phase)
         return phases
 
-    # --- Data Collection & Helpers ---
-
     def _collect_and_filter_events(self):
         events = []
-        
-        # 1. Prefetch (God Mode)
         if self.dfs.get('Prefetch') is not None:
             df = self.dfs['Prefetch']
             name_col = next((c for c in ["ExecutableName", "SourceFilename", "FileName"] if c in df.columns), None)
@@ -600,10 +751,8 @@ class AtroposThinker:
                             f"Run Count: {run_count}", 100, "EXEC", [fname]
                         ))
 
-        # 2. Sphinx (Bursts)
         if self.dfs.get('Sphinx') is not None:
             df = self.dfs['Sphinx']
-            # Simple iteration for snippets
             hits = df.filter(pl.col("Sphinx_Tags").str.contains("ATTACK|DECODED"))
             for row in hits.iter_rows(named=True):
                 full = row.get("Decoded_Hint") or row.get("Original_Snippet") or ""
@@ -613,7 +762,6 @@ class AtroposThinker:
                     f"Script Exec: {row.get('Sphinx_Tags')}", full[:300], 100, "INIT", []
                 ))
 
-        # 3. Hercules (Verdicts)
         if self.dfs.get('Hercules') is not None and "Judge_Verdict" in self.dfs['Hercules'].columns:
             hits = self.dfs['Hercules'].filter(pl.col("Judge_Verdict").str.contains("CRITICAL|SUSPICIOUS"))
             for row in hits.iter_rows(named=True):
@@ -625,18 +773,26 @@ class AtroposThinker:
                     f"Suspicious: {row.get('Tag')}", f"Cmd: {target}", 100 if "CRITICAL" in str(row['Judge_Verdict']) else 80, "EXEC", [fname] if fname else []
                 ))
 
-        # 4. Plutos (Network/Lateral)
         if self.dfs.get('Plutos') is not None:
-            # Plutos CSV usually contains high fidelity scored events
             for row in self.dfs['Plutos'].iter_rows(named=True):
+                 heat = 0
+                 try: heat = int(row.get('Heat_Score', 0))
+                 except: pass
+                 
+                 summary = f"{row.get('Plutos_Verdict')}: {row.get('Remote_IP')}"
+                 crit = 90
+                 
+                 if heat >= 80:
+                     summary = f"[HIGH HEAT] {summary}"
+                     crit = 95 # Atropos will boost to 100 if correlated
+
                  events.append(self._create_event(
                      row.get('Timestamp'), "Plutos Gate", "Network",
-                     f"{row.get('Plutos_Verdict')}: {row.get('Remote_IP')}", 
-                     f"Process: {row.get('Process')}\nTags: {row.get('Tags')}",
-                     90, "C2", [row.get('Process')]
+                     summary,
+                     f"Process: {row.get('Process')}\nTags: {row.get('Tags')}\nHeat: {heat}",
+                     crit, "C2", [row.get('Process')]
                  ))
         
-        # 5. Pandora (Ghosts)
         if self.dfs.get('Pandora') is not None:
              for row in self.dfs['Pandora'].iter_rows(named=True):
                  fname = str(row.get('Ghost_FileName'))
@@ -646,7 +802,6 @@ class AtroposThinker:
                          f"File Deletion: {fname}", f"Path: {row.get('ParentPath')}", 80, "ANTI", [fname]
                      ))
 
-        # 6. Chronos (Timestomp & Drop)
         if self.dfs.get('Chronos') is not None and "FileName" in self.dfs['Chronos'].columns:
              for row in self.dfs['Chronos'].iter_rows(named=True):
                  fname = str(row.get('FileName'))
@@ -665,7 +820,6 @@ class AtroposThinker:
 
         return events
 
-    # --- Helpers ---
     def _create_event(self, time, src, user, summary, detail, crit, cat, kws):
         return {
             "Time": time, "Source": src, "User": user, "Summary": summary,
@@ -686,11 +840,11 @@ class AtroposThinker:
         return False
 
     def _extract_filename_from_cmd(self, text):
-        m = re.search(r'([\w\-\.]+\.(?:exe|ps1|bat|dll))', str(text), re.IGNORECASE)
+        m = self.re_filename.search(str(text))
         return m.group(1) if m else None
 
     def _extract_ip(self, text):
-        m = re.search(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', str(text))
+        m = self.re_ip.search(str(text))
         return m.group(0) if m else None
 
     def _resolve_user(self, row, src):

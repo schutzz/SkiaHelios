@@ -1,10 +1,13 @@
 import datetime
 from pathlib import Path
 import polars as pl
+from collections import Counter
+import json
 
 # ============================================================
-#  SH_LachesisWriter v1.0 [The Allotter]
+#  SH_LachesisWriter v1.9.1 [Chimera Tagging]
 #  Mission: Weave the verdict into a human-readable report.
+#  Update: Embed hidden metadata for Chimera Fusion.
 # ============================================================
 
 TEXT_RES = {
@@ -61,10 +64,22 @@ class LachesisWriter:
         compromised_users = analysis_result["compromised_users"]
         flow_steps = analysis_result["flow_steps"]
 
+        # [Chimera Logic] Identify Primary User for Tagging
+        # 最もアクティビティの多いユーザーを特定してタグに埋め込む
+        primary_user = "Unknown"
+        if compromised_users:
+            # compromised_users is a Counter object
+            top_user = compromised_users.most_common(1)
+            if top_user:
+                primary_user = top_user[0][0]
+
         out_file = Path(output_path)
         if not out_file.parent.exists(): out_file.parent.mkdir(parents=True, exist_ok=True)
 
         with open(out_file, "w", encoding="utf-8") as f:
+            # [Chimera Logic] Embed Hidden Tags FIRST
+            self._embed_chimera_tags(f, primary_user)
+
             # Header
             self._write_header(f)
             
@@ -84,7 +99,97 @@ class LachesisWriter:
             # 5. IOC Appendix
             self._write_ioc_appendix(f, dfs_for_ioc)
 
-            f.write(f"\n---\n*Report woven by SkiaHelios (The Triad v1.0)*")
+            f.write(f"\n---\n*Report woven by SkiaHelios (The Triad v1.9)*")
+        
+        # [NEW] JSON Grimoire Dump for Chimera
+        # Markdownと同じ場所に .json を吐き出す
+        json_path = out_file.with_suffix('.json')
+        self._export_json_grimoire(analysis_result, dfs_for_ioc, json_path, primary_user)
+
+    def _export_json_grimoire(self, analysis_result, dfs_for_ioc, json_path, primary_user):
+        """
+        [Chimera Link]
+        解析結果を構造化データ(JSON)として保存する。
+        ChimeraFusionはこのファイルを読み込んで統合を行う。
+        """
+        # 1. Timeline Serialization
+        # datetimeオブジェクトを文字列に変換
+        serializable_events = []
+        for ev in analysis_result["events"]:
+            serializable_events.append({
+                "Time": str(ev.get('dt_obj', ev['Time'])), # Use strict time object if avail
+                "User": ev.get('User'),
+                "Category": ev.get('Category'),
+                "Summary": ev.get('Summary'),
+                "Source": ev.get('Source'),
+                "Criticality": ev.get('Criticality', 0)
+            })
+
+        # 2. IOC Serialization
+        iocs = {"File": [], "Network": [], "Cmd": []}
+        
+        # File IOC
+        if dfs_for_ioc.get('AION') is not None:
+            df = dfs_for_ioc['AION']
+            if 'File_Hash_SHA256' in df.columns or 'File_Hash_SHA1' in df.columns:
+                cond = pl.lit(False)
+                if 'File_Hash_SHA256' in df.columns: cond = cond | pl.col("File_Hash_SHA256").is_not_null()
+                if 'File_Hash_SHA1' in df.columns: cond = cond | pl.col("File_Hash_SHA1").is_not_null()
+                hits = df.filter(cond & (pl.col("AION_Score").cast(pl.Int64, strict=False) >= 10))
+                for row in hits.iter_rows(named=True):
+                    iocs["File"].append({
+                        "Name": row.get('Target_FileName'),
+                        "SHA1": row.get('File_Hash_SHA1'),
+                        "SHA256": row.get('File_Hash_SHA256'),
+                        "Path": row.get('Full_Path')
+                    })
+
+        # Network IOC
+        if dfs_for_ioc.get('PlutosNet') is not None:
+            df = dfs_for_ioc['PlutosNet']
+            if 'Remote_IP' in df.columns:
+                hits = df.filter(pl.col("Remote_IP").is_not_null())
+                for row in hits.iter_rows(named=True):
+                    iocs["Network"].append({
+                        "IP": row.get('Remote_IP'),
+                        "Port": row.get('Remote_Port'),
+                        "Process": row.get('Process')
+                    })
+        
+        # 3. Construct Final Dict
+        grimoire_data = {
+            "Metadata": {
+                "Host": self.hostname,
+                "Case": self.case_name,
+                "Primary_User": primary_user,
+                "Generated_At": datetime.datetime.now().isoformat()
+            },
+            "Verdict": {
+                "Flags": list(analysis_result["verdict_flags"]),
+                "Lateral_Summary": analysis_result["lateral_summary"]
+            },
+            "Timeline": serializable_events,
+            "IOCs": iocs
+        }
+
+        try:
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(grimoire_data, f, indent=2, ensure_ascii=False)
+            print(f"   -> [Chimera Ready] JSON Grimoire saved: {json_path}")
+        except Exception as e:
+            print(f"   [!] Failed to export JSON Grimoire: {e}")
+
+    def _embed_chimera_tags(self, f, primary_user):
+        """
+        [Chimera Tagging]
+        レポートの先頭に機械可読なメタデータを埋め込む。
+        これはMarkdownとしては表示されないが、ChimeraFusionがパースする際に使用する。
+        """
+        tags = [
+            "",
+            "" # Empty line for separation
+        ]
+        f.write("\n".join(tags))
 
     def _write_header(self, f):
         t = self.txt
