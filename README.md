@@ -30,7 +30,7 @@ graph TD
     end
 
     %% Ingestion Layer (Clotho)
-    subgraph Ingest [Phase 1: The Spinners]
+    subgraph Ingest [Phase 1: The Spinner]
         Clotho(SH_ClothoReader):::ingest
         Plutos(SH_PlutosGate v2.4):::ingest
         Pandora(SH_PandorasLink):::ingest
@@ -38,14 +38,14 @@ graph TD
     end
 
     %% Logic Layer (Atropos)
-    subgraph Logic [Phase 2: The Thinkers]
+    subgraph Logic [Phase 2: The Thinker]
         Atropos(SH_AtroposThinker):::logic
         Nemesis{Nemesis Tracer}:::logic
         InternalScout{Internal Scout}:::logic
     end
 
     %% Validation Layer (Siren)
-    subgraph Validate [Phase 3: The Validators]
+    subgraph Validate [Phase 3: The Validator]
         Siren(SH_Sirenhunt):::validator
     end
 
@@ -72,16 +72,15 @@ graph TD
     Atropos <--> Nemesis
     Atropos <--> InternalScout
     
-    %% Siren Validation Loop
+    %% Siren Validation Loop (FIXED)
+    Atropos -- "Query Suspects" --> Siren
     Siren -- "Execution Proof (God Mode)" --> Atropos
-    Atropos -- "Suspects" --> Siren
     
     %% Final Write
     Atropos --> Lachesis
     Lachesis --> Report
     Lachesis -.-> Chimera
 ```
-
 ---
 
 ## ⚡ Key Features (v1.9 Updates)
