@@ -3,81 +3,112 @@
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
 ![Platform](https://img.shields.io/badge/Platform-Windows-win)
 ![License](https://img.shields.io/badge/License-MIT-green)
-![Status](https://img.shields.io/badge/Status-Precision_God_Mode-red)
+![Status](https://img.shields.io/badge/Status-v1.8_God_Mode-red)
 
 **"Truth is a multi-layered tapestry. Weave it."**
 
-SkiaHelios is a modular Digital Forensics & Incident Response (DFIR) framework designed to correlate disparate artifacts (Timeline, Registry, Network, USN Journal, SRUM) into a single, cohesive narrative. SkiaHelios reconstructs the *context* of user activity and generates professional, SANS-style investigation reports automatically.
+SkiaHelios is a modular Digital Forensics & Incident Response (DFIR) framework designed to correlate disparate artifacts (Timeline, Registry, Network, USN Journal, SRUM, Prefetch) into a single, cohesive narrative. SkiaHelios reconstructs the *context* of user activity and generates professional, SANS-style investigation reports automatically.
 
-**Current Version:** v17.0 (Core) / v15.37 (Hekate) / v4.0 (Console)
+**Current Version:** v1.8 (God Mode Final)
 
 ---
 
-## ⚡ Key Features (v17 Update)
+## 🏛️ Architecture & Workflow
+
+SkiaHelios uses a **"Seed & Hunt"** architecture. Instead of processing logs linearly, it identifies potential threats (Seeds) in filesystem anomalies and "hunts" for their execution evidence across other artifacts.
+
+```mermaid
+graph TD
+    %% --- Layer 1: Raw Artifacts ---
+    subgraph Raw_Layer [📂 Raw Artifacts]
+        MFT[($MFT)]
+        USN[($J)]
+        PF[Prefetch]
+        AM[Amcache]
+        EVTX[Event Logs]
+        REG[Registry]
+    end
+
+    %% --- Layer 2: The Parsers & Hunters ---
+    subgraph Tool_Layer [⚙️ Analysis Engines]
+        CH(Chronos<br/><i>MFT Anomaly & Timestomp</i>)
+        PA(Pandora<br/><i>USN Ghost & Rename</i>)
+        SP(Sphinx<br/><i>PowerShell Deobfuscation</i>)
+        HE(Hercules<br/><i>Timeline Judgment</i>)
+        AI(AION<br/><i>Persistence & IOC</i>)
+        
+        %% The New Module
+        SI{SH_Sirenhunt<br/><i>Execution Validator</i>}
+    end
+
+    %% --- Layer 3: Orchestration & Output ---
+    subgraph Core_Layer [🧠 Core Logic]
+        HC[HeliosConsole<br/><i>Orchestrator</i>]
+        HK(Hekate<br/><i>The Weaver</i>)
+        REP[📜 Grimoire<br/><i>SANS Report</i>]
+    end
+
+    %% Data Flow Connections
+    MFT --> CH
+    USN --> PA
+    EVTX --> HE & SP
+    REG --> AI
+    
+    %% The Hunt Flow (Cross-Validation)
+    CH -- "Seed (Timestomp)" --> SI
+    PA -- "Seed (Deleted/Renamed)" --> SI
+    PF -- "Execution Check" --> SI
+    AM -- "Signature Check" --> SI
+    
+    %% The Weaving Flow
+    CH & PA & SP & HE & AI --> HK
+    SI -- "Verified Threats (God Mode)" --> HK
+    
+    %% Final Output
+    HC -.-> CH & PA & SP & HE & AI & SI & HK
+    HK --> REP
+
+    %% Styling
+    classDef raw fill:#2d2d2d,stroke:#fff,stroke-width:2px,color:#fff;
+    classDef tool fill:#2b5c8a,stroke:#fff,stroke-width:2px,color:#fff;
+    classDef siren fill:#8a2b2b,stroke:#f00,stroke-width:4px,color:#fff;
+    classDef logic fill:#2b8a5c,stroke:#fff,stroke-width:2px,color:#fff;
+    
+    class MFT,USN,PF,AM,EVTX,REG raw;
+    class CH,PA,SP,HE,AI tool;
+    class SI siren;
+    class HC,HK,REP logic;
+```
+
+---
+
+## ⚡ Key Features (v1.8 God Mode)
 
 * **🛡️ Precision Over Recall (適合率重視):**
     * 厳格なスコアリングロジックにより、正規プロセス（LOLBins）やWindows Updateの残骸などのノイズを徹底排除。
     * **"Criticality >= 90"** の確実な脅威のみを技術詳細に記載。
+* **🏹 SirenHunt Integration (New!):**
+    * **Seed Harvesting:** Chronos (MFT) と Pandora (USN) から「不審なファイル操作（リネーム、タイムスタンプ偽装）」を抽出。
+    * **Execution Validation:** 抽出されたSeedが実際に実行されたかを **Prefetch** と **Amcache** で裏取り（Cross-Validation）。
+    * **Signature Verification:** デジタル署名の有無を確認し、署名のない不審な実行ファイルを「確定クロ」としてマーク。
 * **📝 Dynamic Attack Flow Generation:**
-    * イベントカテゴリを解析し、攻撃のストーリーラインをExecutive Summaryに自動生成。
+    * イベントカテゴリを解析し、攻撃のストーリーライン（侵入→実行→隠滅）をExecutive Summaryに自動生成。
 * **🦁 Sphinx v1.9 Integration:**
-    * PowerShell (4104) / Process (4688) のBase64難読化を自動解除し、相対パス実行も検知。
-* **🕸️ Nemesis Lifecycle Tracing:**
-    * MFT/USNから「ファイルの誕生・変名・削除」を芋づる式に完全復元。
+    * PowerShell ScriptBlock (EID 4104) のBase64/XOR難読化を自動解除し、攻撃意図を可視化。
 
 ---
 
-## 🧩 Architecture: The Cerberus Pipeline
+## 🛠️ Modules Overview
 
-```mermaid
-graph TD
-    %% === 1. Ingestion Layer ===
-    subgraph Ingestion["🔍 Evidence Ingestion (KAPE Modules)"]
-        direction LR
-        MFT["MFT / USN Journal"] -->|Timeline| Chaos
-        Reg[Registry] -->|Persistence| AION
-        Evtx["Event Logs\n(Security, PowerShell, Sysmon)"] -->|Execution| Sphinx
-        Net["Network / SRUM"] -->|Exfil| Plutos
-    end
-
-    %% === 2. Core Processing ===
-    Chaos["🌪️ ChaosGrasp\nMaster Timeline Builder"] 
-    Sphinx["🦁 Sphinx v1.7\nDeobfuscation & Seed Extraction"]
-    AION["👁️ AIONDetector\nPersistence Scanner"]
-    Plutos["💀 PlutosGate\nNetwork & Exfil Analysis"]
-    Pandora["📦 Pandora\nGhost File Recovery"]
-
-    %% === 3. Correlation Engine ===
-    subgraph Correlation["⚔️ Nemesis Correlation Engine"]
-        direction TB
-        Nemesis["⛓️ NemesisTracer\nLifecycle Reconstruction\n(Birth → Rename → Execution → Death)"]
-        Hercules["🏛️ HerculesReferee\nHigh-Precision Judgment\n(Criticality Scoring)"]
-    end
-
-    %% === 4. Final Weaver ===
-    Hekate["🕸️ HekateWeaver v15.32\nPrecision Filter & Report Generator"]
-
-    %% === Flow ===
-    Ingestion --> Chaos
-    Chaos --> Sphinx & AION & Plutos & Pandora
-    Sphinx -->|Extracted Seeds| Nemesis
-    Pandora -->|Recovered Paths| Nemesis
-    AION & Plutos -->|Artifacts| Nemesis
-    Nemesis -->|Enriched Events| Hercules
-    Hercules -->|Validated Timeline| Hekate
-    Hekate --> Report[(📜 Grimoire Report\nSANS-Grade Markdown)]
-
-    %% === Styling ===
-    classDef ingestion fill:#2a2a2a,stroke:#555,color:#fff
-    classDef core fill:#1a365d,stroke:#2c5282,color:#fff
-    classDef correlation fill:#4a148c,stroke:#7e22ce,color:#fff
-    classDef output fill:#1e40af,stroke:#2563eb,color:#fff,font-weight:bold
-
-    class MFT,Reg,Evtx,Net ingestion
-    class Chaos,Sphinx,AION,Plutos,Pandora core
-    class Nemesis,Hercules correlation
-    class Hekate,Report output
-```
+| Module | Role | Key Function |
+| :--- | :--- | :--- |
+| **SH_HeliosConsole** | Orchestrator | Pipeline & Timekeeper management. (指揮・統合) |
+| **SH_Sirenhunt** | **Hunter** | **Cross-validates seeds from MFT/USN with Prefetch & Amcache.** (物理的実行証明) |
+| **SH_HekateWeaver** | Weaver | Noise filtering & Grimoire generation. (相関分析・レポート作成) |
+| **SH_HerculesReferee**| Judge | Sniper scanning & Verdict execution. (イベントログ判定) |
+| **SH_Chronos** | Timekeeper | MFT Analysis & Timestomp detection ($SI < $FN). (時間異常検知) |
+| **SH_Pandora** | Necromancer| USN Journal analysis for deleted/renamed files. (削除・痕跡復元) |
+| **SH_SphinxDeciphering**| Decoder | PowerShell/Process deobfuscation. (難読化解除) |
 
 ---
 
@@ -90,7 +121,7 @@ pip install -r requirements.txt
 
 ### 2. Execution (Helios Console v4.0)
 ```powershell
-python SH_HeliosConsole.py --dir "C:\Case\KAPE_CSV" --raw "C:\Case\Raw_Artifacts" --start 2025-12-01 --end 2025-12-31
+python SH_HeliosConsole.py --dir "C:\Case\KAPE_CSV" --raw "C:\Case\Raw_Artifacts"
 ```
 
 **Arguments:**
@@ -101,25 +132,11 @@ python SH_HeliosConsole.py --dir "C:\Case\KAPE_CSV" --raw "C:\Case\Raw_Artifacts
 
 ### 3. Output (The Grimoire)
 The **`Grimoire_[CaseName]_[Lang].md`** provides:
-* **Executive Summary:** Attack flow and compromised accounts.
+* **Executive Summary:** Attack flow and compromised accounts (w/ Verdict Flags like `[PHISHING_ATTACHMENT_EXEC]`).
+* **Origin Analysis:** Correlation between File Drop, Web History, and Execution.
 * **Timeline:** Phase-based chronological narrative.
 * **Technical Findings:** Validated evidence (Score >= 90).
 
 ---
 
-## 🛠️ Modules Overview
-
-| Module | Role | Key Function |
-| :--- | :--- | :--- |
-| **SH_HeliosConsole** | Orchestrator | Pipeline & Timekeeper management. |
-| **SH_HekateWeaver** | Weaver | Noise filtering & Grimoire generation. |
-| **SH_HerculesReferee**| Judge | Sniper scanning & Verdict execution. |
-| **SH_SphinxDeciphering**| Decoder | PowerShell/Process deobfuscation. |
-| **SH_AIONDetector** | Persistence | Registry & Startup folder scanning. |
-| **SH_PandorasLink** | Recovery | Deleted file (Ghost) identification. |
-| **SH_ChronosSift** | Anti-Forensics | Timestomp anomaly detection. |
-| **SH_PlutosGate** | Network | SRUM & C2 beacon analysis. |
-
----
-
-> *"Non-rational thinking is a vice; rational thinking is a virtue."*
+*Verified by SkiaHelios v1.8 (2025)*

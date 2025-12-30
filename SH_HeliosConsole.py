@@ -55,7 +55,10 @@ class HeliosCommander:
             "aion": "SH_AIONDetector",
             "plutos": "SH_PlutosGate",
             "hekate": "SH_HekateWeaver",
-            "sphinx": "SH_SphinxDeciphering"
+            "plutos": "SH_PlutosGate",
+            "hekate": "SH_HekateWeaver",
+            "sphinx": "SH_SphinxDeciphering",
+            "siren": "SH_Sirenhunt" # [NEW]
         }
         for key, script in tool_map.items():
             self.modules[key] = self._import_dynamic(script)
@@ -137,7 +140,27 @@ class HeliosCommander:
         evtx_raw = next(Path(csv_dir).rglob("*EvtxECmd_Output.csv"), None)
         if evtx_raw:
             # Sphinx supports Time
+            # Sphinx supports Time
             self.run_module("sphinx", ["-f", str(evtx_raw), "-o", str(sphinx_out)] + time_args)
+
+        # 5.5. Sirenhunt (The Validator) - [NEW STAGE]
+        # Find Prefetch/Amcache for Siren
+        prefetch_raw = next(Path(csv_dir).rglob("*PECmd_Output.csv"), None)
+        amcache_raw = next(Path(csv_dir).rglob("*Amcache_UnassociatedFileEntries.csv"), None) # Typical AmcacheParser output
+        
+        siren_json = case_dir / "Sirenhunt_Results.json"
+        siren_cmd = [
+            "--chronos", str(chronos_out),
+            "--pandora", str(pandora_out),
+            "-o", str(siren_json)
+        ]
+        if prefetch_raw: siren_cmd.extend(["--prefetch", str(prefetch_raw)])
+        if amcache_raw: siren_cmd.extend(["--amcache", str(amcache_raw)])
+        
+        # We need to add 'siren' to _load_modules tool_map first, or just run it via run_module if we add it there.
+        # But wait, SH_HeliosConsole.py's _load_modules is hardcoded. I should verify if I need to add 'siren' there too.
+        # Yes, I do. Let's do that in a separate chunk.
+        self.run_module("siren", siren_cmd)
 
         # 6. Hekate (The Final Weaver)
         # Hekate usually consumes all events. Filtering is done at ingestion or report time if needed.
@@ -153,7 +176,10 @@ class HeliosCommander:
                 "--plutos-net", str(plutos_net_out),
                 "--sphinx", str(sphinx_out), 
                 "--chronos", str(chronos_out),
-                "--pandora", str(pandora_out)
+                "--sphinx", str(sphinx_out), 
+                "--chronos", str(chronos_out),
+                "--pandora", str(pandora_out),
+                "--siren", str(siren_json) # [NEW] Pass Siren JSON
             ])
 
         print(f"\n[*] SUCCESS: Pipeline finished. Case dir: {case_dir}")

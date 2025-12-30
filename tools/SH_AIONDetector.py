@@ -47,19 +47,22 @@ class AIONEngine:
         ]
 
     def _calculate_file_hash(self, relative_path):
-        if not self.mount_point or not relative_path: return "N/A"
+        if not self.mount_point or not relative_path: return "N/A", "N/A" # Return tuple
         clean_path = str(relative_path).lstrip(".\\").lstrip("\\")
         if ":" in clean_path:
             try: clean_path = clean_path.split(":", 1)[1].lstrip("\\")
             except: pass
         full_path = self.mount_point / clean_path
-        if not full_path.exists(): return "FILE_NOT_FOUND_ON_MOUNT"
+        if not full_path.exists(): return "FILE_NOT_FOUND_ON_MOUNT", "FILE_NOT_FOUND_ON_MOUNT"
         try:
             sha256_hash = hashlib.sha256()
+            sha1_hash = hashlib.sha1() # Added SHA1
             with open(full_path, "rb") as f:
-                for byte_block in iter(lambda: f.read(4096), b""): sha256_hash.update(byte_block)
-            return sha256_hash.hexdigest()
-        except: return "HASH_ERROR"
+                for byte_block in iter(lambda: f.read(8192), b""): # Optimized buffer
+                    sha256_hash.update(byte_block)
+                    sha1_hash.update(byte_block)
+            return sha256_hash.hexdigest(), sha1_hash.hexdigest()
+        except: return "HASH_ERROR", "HASH_ERROR"
 
     def _is_safe_path(self, path_str):
         if not path_str: return False
@@ -146,7 +149,7 @@ class AIONEngine:
                         tags.append("SCRIPT_PERSISTENCE")
 
                     if score >= 10:
-                        f_hash = self._calculate_file_hash(full_path_candidate)
+                        sha256, sha1 = self._calculate_file_hash(full_path_candidate)
                         detected.append({
                             "Last_Executed_Time": ts,
                             "AION_Score": score,
@@ -154,7 +157,8 @@ class AIONEngine:
                             "Target_FileName": fname,
                             "Entry_Location": f"Reg: {k_path}",
                             "Full_Path": full_path_candidate,
-                            "File_Hash": f_hash
+                            "File_Hash_SHA256": sha256, 
+                            "File_Hash_SHA1": sha1
                         })
 
             except Exception as e: pass
@@ -179,7 +183,7 @@ class AIONEngine:
                 if self._is_known_noise(fname, path): continue
                 
                 full_path_str = f"{path}\\{fname}"
-                f_hash = self._calculate_file_hash(full_path_str)
+                sha256, sha1 = self._calculate_file_hash(full_path_str)
                 detected.append({
                     "Last_Executed_Time": row.get("Timestamp_UTC") or row.get("Created0x10"),
                     "AION_Score": 15, 
@@ -187,7 +191,8 @@ class AIONEngine:
                     "Target_FileName": fname,
                     "Entry_Location": path,
                     "Full_Path": full_path_str,
-                    "File_Hash": f_hash
+                    "File_Hash_SHA256": sha256,
+                    "File_Hash_SHA1": sha1
                 })
         return detected
 

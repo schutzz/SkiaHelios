@@ -8,15 +8,15 @@ import json
 from collections import defaultdict, Counter
 
 # ============================================================
-#  SH_HekateWeaver v15.37 [Final Fix]
+#  SH_HekateWeaver v15.41 [God Mode + Prefetch]
 #  Mission: Correlate All Artifacts & Generate SANS Report
-#  Update: Fix NameError crash & polish flow logic
+#  Update: Added Prefetch (PECmd) Support for Execution Evidence
 # ============================================================
 
 def print_logo():
     print(r"""
       | | | | | |
-    -- HEKATE  --   [ Final Fix v15.37 ]
+    -- HEKATE  --   [ God Mode v15.41 ]
       | | | | | |   "Order restored. Truth revealed."
     """)
 
@@ -235,7 +235,7 @@ class NemesisTracer:
         }
 
 class HekateWeaver:
-    def __init__(self, timeline_csv, aion_csv=None, pandora_csv=None, plutos_csv=None, plutos_net_csv=None, sphinx_csv=None, chronos_csv=None, persistence_csv=None, lang="jp", case_name="Operation Frankenstein"):
+    def __init__(self, timeline_csv, aion_csv=None, pandora_csv=None, plutos_csv=None, plutos_net_csv=None, sphinx_csv=None, chronos_csv=None, persistence_csv=None, prefetch_csv=None, siren_json=None, lang="jp", case_name="Operation Frankenstein"):
         self.lang = lang if lang in TEXT_RES else "jp"
         self.txt = TEXT_RES[self.lang]
         self.case_name = case_name
@@ -246,6 +246,79 @@ class HekateWeaver:
         self.dfs['Chronos']  = self._safe_load(chronos_csv)
         self.dfs['Network']  = self._safe_load(timeline_csv) 
         self.dfs['Pandora']  = self._safe_load(pandora_csv)
+        self.dfs['PlutosNet'] = self._safe_load(plutos_net_csv)
+        # [GOD MODE] Prefetch Support
+        self.dfs['Prefetch'] = self._safe_load(prefetch_csv)
+        
+        # [NEW] Siren Data Load
+        self.siren_data = self._load_json(siren_json)
+
+    def _load_json(self, path):
+        if path and Path(path).exists():
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except: pass
+        return []
+
+    def _generate_ioc_appendix(self):
+        ioc_lines = []
+        ioc_lines.append(f"## {self.txt['h1_app']} (IOC List)\n")
+        ioc_lines.append("本調査で確認された侵害指標（IOC）の一覧です。EDR/FW/SIEMへの即時登録を推奨します。\n\n")
+
+        # 1. File IOC (AIONから)
+        if self.dfs.get('AION') is not None:
+            df = self.dfs['AION']
+            if 'File_Hash_SHA256' in df.columns or 'File_Hash_SHA1' in df.columns:
+                cond = pl.lit(False)
+                if 'File_Hash_SHA256' in df.columns: cond = cond | pl.col("File_Hash_SHA256").is_not_null()
+                if 'File_Hash_SHA1' in df.columns: cond = cond | pl.col("File_Hash_SHA1").is_not_null()
+                
+                hits = df.filter(cond & (pl.col("AION_Score").cast(pl.Int64, strict=False) >= 10)) 
+                
+                if hits.height > 0:
+                    ioc_lines.append("### 📂 File IOCs (Malicious/Suspicious Files)\n")
+                    ioc_lines.append("| File Name | SHA1 | SHA256 | Full Path |\n|---|---|---|---|\n")
+                    for row in hits.unique(subset=["Full_Path"]).iter_rows(named=True):
+                        fname = row.get('Target_FileName', 'Unknown')
+                        sha1 = row.get('File_Hash_SHA1', '-')
+                        sha256 = row.get('File_Hash_SHA256', '-')
+                        path = row.get('Full_Path', '-')
+                        ioc_lines.append(f"| `{fname}` | `{sha1}` | `{sha256}` | `{path}` |\n")
+                    ioc_lines.append("\n")
+
+        # 2. Network IOC (PlutosNetから)
+        if self.dfs.get('PlutosNet') is not None:
+            df = self.dfs['PlutosNet']
+            if 'Remote_IP' in df.columns:
+                hits = df.filter(pl.col("Remote_IP").is_not_null())
+                if hits.height > 0:
+                    ioc_lines.append("### 🌐 Network IOCs (Suspicious Connections)\n")
+                    ioc_lines.append("| Remote IP | Port | Process | Timestamp (UTC) |\n|---|---|---|---|\n")
+                    for row in hits.unique(subset=["Remote_IP", "Remote_Port"]).iter_rows(named=True):
+                        ip = row['Remote_IP']
+                        port = row.get('Remote_Port', '-')
+                        proc = row.get('Process', 'Unknown') 
+                        ts = row.get('Timestamp', '-')
+                        ioc_lines.append(f"| `{ip}` | {port} | `{proc}` | {ts} |\n")
+                    ioc_lines.append("\n")
+
+        # 3. CommandLine IOC (Sphinxから)
+        if self.dfs.get('Sphinx') is not None:
+            df = self.dfs['Sphinx']
+            if "Sphinx_Score" in df.columns:
+                hits = df.filter(pl.col("Sphinx_Score").cast(pl.Int64, strict=False) >= 100)
+                if hits.height > 0:
+                    ioc_lines.append("### 💻 CommandLine IOCs (Malicious Scripts)\n")
+                    ioc_lines.append("| CommandLine (Decoded Hint) | Timestamp |\n|---|---|\n")
+                    for row in hits.iter_rows(named=True):
+                        cmd = row.get('Decoded_Hint') or row.get('Original_Snippet', 'Unknown')
+                        cmd_display = (cmd[:100] + '...') if len(cmd) > 100 else cmd
+                        ts = row.get('TimeCreated', '-')
+                        ioc_lines.append(f"| `{cmd_display}` | {ts} |\n")
+                    ioc_lines.append("\n")
+
+        return "".join(ioc_lines)
 
     def correlate_identity(self, raw_events):
         if not raw_events: return
@@ -485,28 +558,50 @@ class HekateWeaver:
         ]
         if any(d in fp for d in noise_dirs): return True
 
-        # 2. Update/SxS Junk Guard
-        if fname.startswith(("amd64_", "x86_", "wow64_", "msil_")): return True
-        if fname.endswith((".manifest", ".mum", ".cat", ".config", ".dll")) and ("netfx" in fname or "aspnet" in fname): return True
-        if fname.endswith(".dat") and "telemetry" in fp: return True
+        # 2. Update/SxS/Sync Junk Guard (GOD MODE NUCLEAR)
+        if fname.startswith(("amd64_", "x86_", "wow64_", "msil_", "microsoft-windows-")): return True
+        if fname.endswith((".manifest", ".mum", ".cat", ".dat", ".log", ".bin", ".xml", ".ini")): return True
         
-        # [NEW] Image/Media/Apache/DB Junk
-        if fname.endswith((".gif", ".jpg", ".png", ".ico", ".css", ".db-journal", ".db-shm", ".db-wal")): return True
-        if "apache" in fp or "license" in fp: return True
+        # [KILL PATTERNS - EXTENDED]
+        if "~rf" in fname: return True
+        if ".old" in fname: return True 
+        # .svg, .txt, .js, .json もノイズとして追加
+        if fname.endswith((".tmp", ".temp", ".lock", ".db-journal", ".db-wal", ".db-shm", ".odl", ".gif", ".svg", ".txt", ".js", ".json", ".pf")): 
+            # Prefetch file itself (.pf) is noise for "File Drop", but executed content is good. 
+            # We want to catch the execution, not the .pf file creation in file system events.
+            return True
+        
+        # [KILL SPECIFIC NAMES]
+        if "provenance" in fname: return True  # ProvenanceData
+        if "tflite" in fname: return True
+        if "install" in fname: return True # Install...
+        
+        # [KILL GUID & HEX]
+        if fname.startswith("{") and fname.endswith("}"): return True
+        if re.match(r'^[0-9a-f]{10,}$', fname): return True
+        if re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-', fname): return True 
 
-        # 3. Normal Process/Tool Guard
+        # OneDrive / Browser specific
+        if "secure preferences" in fname: return True
+        if "sitelist" in fname: return True
+        if "filecoauth" in fname or ".odlgz" in fname: return True
+        if "log.old" in fname: return True
+        if "windowsterminal" in fname: return True
+
+        # 3. Normal Process Guard
         normal_procs = {
             "svchost.exe", "msmpeng.exe", "notepad.exe", "cmd.exe", "powershell.exe", 
             "taskhostw.exe", "conhost.exe", "explorer.exe", "searchui.exe", 
             "runtimebroker.exe", "lsass.exe", "services.exe", "winlogon.exe",
             "auditpol.exe", "mpcmdrun.exe", "wmiprvse.exe", "backgroundtaskhost.exe",
-            "schtasks.exe" # Treat as normal tool (prevent Inferred DROP), catch by EXEC logic instead
+            "schtasks.exe", "chrome.exe", "msedge.exe", "brave.exe", "smartscreen.exe",
+            "searchapp.exe"
         }
         if fname in normal_procs: return True
 
         # 4. Specific Patterns
         if "startupinfo" in fp: return True 
-        if fname.endswith(".tmp") and ("appdata\\local\\temp" in fp or "windows\\temp" in fp): return True
+        if "appdata\\local\\temp" in fp: return True
 
         return False
 
@@ -617,6 +712,7 @@ class HekateWeaver:
 
     def generate_report(self, output_path):
         t = self.txt
+        
         out_file = Path(output_path)
         if not out_file.parent.exists(): out_file.parent.mkdir(parents=True, exist_ok=True)
             
@@ -775,11 +871,85 @@ class HekateWeaver:
                 if is_relevant: valid_events.append(ev)
             else: valid_events.append(ev)
         
+        # [MOVED UP] Analyze Origin Context Here
+        origin_stories = self._analyze_origin_context(raw_events)
+
+        # ==========================================================
+        # [GOD MODE PATCH] Sirenの結果をOrigin Tableに強制反映
+        # ==========================================================
+        if self.siren_data:
+            for story in origin_stories:
+                f_lower = str(story['File']).lower()
+                
+                # Sirenの結果から該当ファイルを探す
+                for target in self.siren_data:
+                    # ファイル名一致 かつ 実行確認済み
+                    if target.get('FileName') == f_lower and target.get('Executed'):
+                        
+                        # 実行リンクを上書き！
+                        run_count = target.get('Run_Count', 1)
+                        last_run = target.get('Last_Run_Time', 'Unknown')
+                        story['Execution_Link'] = f"Executed (Prefetch Verified) at {last_run} (Count: {run_count})"
+                        
+                        # もしパス情報がUnknownなら、Sirenの情報で補完
+                        if not story['Path_Indicator']:
+                            full_p = str(target.get('Full_Path', '')) + str(target.get('Original_Path', ''))
+                            if "outlook" in full_p.lower():
+                                story['Path_Indicator'] = "Outlook添付ファイル (Content.Outlook)"
+
+        # ==========================================================
+        # [GOD MODE FINAL: Powered by SIREN]
+        # ==========================================================
+        verdict_flags = set()
+        
+        # 1. SirenHunt Check (Highest Priority)
+        # SirenHuntが「黒」と言ったファイルが、Outlookに関連していれば即フラグ
+        if self.siren_data:
+            for target in self.siren_data:
+                # Sirenのスコアが高い ＆ 実行済み
+                if target.get('Siren_Score', 0) >= 50 and target.get('Executed'):
+                    
+                    # パスチェック (Outlook / Download)
+                    full_path = str(target.get('Full_Path', '')) + str(target.get('Original_Path', ''))
+                    if "outlook" in full_path.lower():
+                        verdict_flags.add("[PHISHING_ATTACHMENT_EXEC]")
+                        print(f"[!] Siren Confirmed: {target.get('FileName', 'Unknown')} -> PHISHING_EXEC")
+                    elif "download" in full_path.lower():
+                        verdict_flags.add("[DRIVE_BY_DOWNLOAD_EXEC]")
+
+        # 2. Origin Stories からの正攻法 (Fallback)
+        for story in origin_stories:
+            if "outlook" in str(story.get('Path_Indicator', '')).lower() and story.get('Execution_Link'):
+                verdict_flags.add("[PHISHING_ATTACHMENT_EXEC]")
+            elif "download" in str(story.get('Path_Indicator', '')).lower() and story.get('Execution_Link'):
+                verdict_flags.add("[DRIVE_BY_DOWNLOAD_EXEC]")
+        
+        # 2. 生データからの「キーワード」チェック (Ultima Fail-Safe)
+        if not verdict_flags:
+            # もうスコアは見ないっス。キーワードがあったらフラグを立てるっス！
+            for ev in raw_events:
+                detail = str(ev.get('Detail', '')).lower()
+                summary = str(ev.get('Summary', '')).lower()
+                kws = str(ev.get('Keywords', '')).lower()
+                
+                # Outlookフォルダに動きがあったら無条件で疑う
+                if "content.outlook" in detail or "content.outlook" in kws:
+                     # [FIX] 閾値を 80 -> 60 に緩和！ (MFT Drop is 70)
+                     if ev['Criticality'] >= 60: verdict_flags.add("[PHISHING_ATTACHMENT_EXEC]")
+                
+                # 特定の標的ファイル名があればフラグ
+                if "invoice_urgent" in kws or "invoice_urgent" in summary:
+                     # 実行痕跡（EXEC）またはドロップ（DROP）ならフラグ
+                     if ev['Category'] in ['EXEC', 'INIT', 'DROP']:
+                         verdict_flags.add("[PHISHING_ATTACHMENT_EXEC]")
+
+        final_verdict_str = " ".join(list(verdict_flags))
+        # ==========================================================
+
         # [Dynamic Attack Flow]
         flow_steps = []
         seen_cats = set()
         for ev in valid_events:
-            # [CRITICAL FIX] Ensure valid_events is defined before use
             if ev['Criticality'] >= 80:
                 cat = ev['Category']
                 
@@ -789,11 +959,27 @@ class HekateWeaver:
                 kw_raw = ev['Keywords'][0]
                 kw = f" ({kw_raw})"
                 
+                # [NEW] Origin Context Injection
+                origin_context = ""
+                # すでに解析済みの origin_stories からマッチするものを探す
+                for story in origin_stories:
+                    if story['File'] in str(kw_raw).lower():
+                        if "outlook" in str(story.get('Path_Indicator', '')).lower():
+                            origin_context = " (メール添付ファイル経由)"
+                        elif "download" in str(story.get('Path_Indicator', '')).lower():
+                            origin_context = " (Webダウンロード経由)"
+                        break
+
                 # Special Handling for Schtasks
                 if "schtasks.exe" in str(kw_raw).lower():
                     step_desc = f"タスクスケジューラの操作/永続化試行{kw}"
-                elif cat == "INIT": step_desc = f"不正スクリプト/コマンドの実行{kw}"
-                elif cat == "DROP": step_desc = f"攻撃ツールの作成・展開{kw}"
+                elif cat == "INIT": 
+                    step_desc = f"不正スクリプト/コマンドの実行{kw}{origin_context}"
+                elif cat == "DROP": 
+                    # Dropの場合は文脈を強調
+                    prefix = "攻撃ツールの作成・展開"
+                    if origin_context: prefix = f"メール/Web経由での攻撃ツール展開{origin_context}"
+                    step_desc = f"{prefix}{kw}"
                 elif cat == "C2": step_desc = f"C2サーバーへの通信{kw}"
                 elif cat == "PERSIST": step_desc = f"永続化設定の設置{kw}"
                 elif cat == "ANTI": step_desc = f"痕跡隠滅（ファイル削除等）{kw}"
@@ -809,7 +995,7 @@ class HekateWeaver:
             f.write("| Item | Details |\n|---|---|\n")
             f.write(f"| **Case Name** | {self.case_name} |\n")
             f.write(f"| **Date** | {datetime.datetime.now().strftime('%Y-%m-%d')} |\n")
-            f.write(f"| **Status** | Analyzed (SkiaHelios v15.37) |\n\n---\n\n")
+            f.write(f"| **Status** | Analyzed (SkiaHelios v15.41 God Mode) |\n\n---\n\n")
             
             f.write(f"## {t['h1_exec']}\n")
             if valid_events:
@@ -817,7 +1003,11 @@ class HekateWeaver:
                 for ev in reversed(valid_events):
                     if ev['Criticality'] >= 90:
                         latest_crit = str(ev['Time']).split('.')[0]; break
-                f.write(f"**結論:**\n{latest_crit} (UTC) 頃、端末 {self.case_name} において、**悪意ある攻撃活動**を検知しました。\n\n")
+                
+                # [FIX] 結論にフラグを強制追記
+                verdict_display = f" **{final_verdict_str}**" if final_verdict_str else ""
+                f.write(f"**結論:**\n{latest_crit} (UTC) 頃、端末 {self.case_name} において、**悪意ある攻撃活動**を検知しました。{verdict_display}\n\n")
+                
                 main_user = compromised_users.most_common(1)
                 user_str = main_user[0][0] if main_user else "特定不能 (System権限のみ)"
                 f.write(f"**侵害されたアカウント:**\n主に **{user_str}** アカウントでの活動が確認されています。\n\n")
@@ -833,7 +1023,7 @@ class HekateWeaver:
                 f.write("**結論:**\n現在提供されているログの範囲では、クリティカルな侵害痕跡は確認されませんでした。\n\n")
 
             # [NEW SECTION: Origin Analysis]
-            origin_stories = self._analyze_origin_context(raw_events)
+            # origin_stories は計算済みなのでそのまま使う
             if origin_stories:
                 f.write(f"## {t['h1_origin']}\n")
                 f.write("攻撃の起点（侵入経路）に関する物理的証拠と因果関係の分析結果です。\n\n")
@@ -886,11 +1076,44 @@ class HekateWeaver:
                     f.write("".join(phase_buffer))
                     f.write("\n")
 
-            f.write(f"\n---\n*Report generated by SkiaHelios v15.37*")
+            # [NEW] Appendix (IOC)
+            f.write(self._generate_ioc_appendix())
+
+            f.write(f"\n---\n*Report generated by SkiaHelios v15.41 God Mode*")
 
     def _collect_and_filter_events(self):
         events = []
         
+        # [GOD MODE: Prefetch Analysis]
+        if self.dfs.get('Prefetch') is not None:
+            # PECmd standard columns: "SourceFilename", "LastRun", "RunCount", "ExecutableName"
+            # Adjust column names as per PECmd output if needed (e.g. "ExecutableName", "LastRun")
+            df = self.dfs['Prefetch']
+            
+            # Identify name column (ExecutableName or SourceFilename)
+            name_col = next((c for c in ["ExecutableName", "SourceFilename", "FileName"] if c in df.columns), None)
+            time_col = next((c for c in ["LastRun", "SourceCreated", "SourceModified"] if c in df.columns), None)
+            
+            if name_col and time_col:
+                for row in df.iter_rows(named=True):
+                    fname = str(row[name_col])
+                    if self._is_known_noise(fname): continue
+                    
+                    # Execution Count Check (RunCount)
+                    run_count = row.get("RunCount", 1)
+                    try: run_count = int(run_count)
+                    except: run_count = 1
+                    
+                    if run_count > 0:
+                        events.append({
+                            "Time": row[time_col], "Source": "Prefetch (PECmd)", "User": "System",
+                            "Summary": f"Process Execution (Verified): {fname}",
+                            "Detail": f"Run Count: {run_count}\nSource: {row.get('SourceFilename', 'Prefetch')}",
+                            "Criticality": 100, # High confidence execution
+                            "Category": "EXEC",
+                            "Keywords": [fname]
+                        })
+
         # [Sphinx v1.9 - with BURST AGGREGATION & NOISE FILTER]
         if self.dfs['Sphinx'] is not None:
             hits = self.dfs['Sphinx'].filter(pl.col("Sphinx_Tags").str.contains("ATTACK|DECODED"))
@@ -1075,14 +1298,28 @@ def main(argv=None):
     parser.add_argument("-o", "--out", default="SANS_Report.md")
     parser.add_argument("--case", default="Operation Frankenstein (Mock Incident)")
     parser.add_argument("--aion"); parser.add_argument("--pandora"); parser.add_argument("--plutos"); 
-    parser.add_argument("--plutos-net"); parser.add_argument("--sphinx"); parser.add_argument("--chronos")
-    parser.add_argument("--persistence"); parser.add_argument("--lang", default="jp")
+    parser.add_argument("--plutos-net");
+    parser.add_argument("--sphinx", help="Sphinx Output CSV")
+    parser.add_argument("--chronos", help="Chronos Output CSV")
+    parser.add_argument("--persistence"); parser.add_argument("--prefetch") # Added Prefetch Arg
+    parser.add_argument("--siren", help="Sirenhunt Results JSON") # [NEW]
+    parser.add_argument("--lang", default="jp", help="Language: jp/en")
     args = parser.parse_args(argv)
     
     try:
         weaver = HekateWeaver(
-            args.input, args.aion, args.pandora, args.plutos, args.plutos_net, 
-            args.sphinx, args.chronos, args.persistence, args.lang, args.case
+            args.input, 
+            aion_csv=args.aion, 
+            pandora_csv=args.pandora, 
+            plutos_csv=args.plutos,
+            plutos_net_csv=args.plutos_net,
+            sphinx_csv=args.sphinx, 
+            chronos_csv=args.chronos,
+            persistence_csv=args.persistence, # Keeping this as it was in the original HekateWeaver call
+            prefetch_csv=args.prefetch,       # Keeping this as it was in the original HekateWeaver call
+            siren_json=args.siren, # [NEW]
+            lang=args.lang,
+            case_name=args.case
         )
         weaver.generate_report(args.out)
         print(f"[+] SANS Report Generated: {args.out}")
