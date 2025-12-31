@@ -4,6 +4,7 @@
 ![Polars](https://img.shields.io/badge/Engine-Polars_0.20%2B-orange?logo=polars)
 ![Status](https://img.shields.io/badge/Status-Battle_Tested-green)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey)
+![SkiaHelios CI](https://github.com/schutzz/SkiaHelios/actions/workflows/test.yml/badge.svg)
 
 > *"From Shadows to Sun. Order restored. Truth revealed."*
 
