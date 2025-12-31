@@ -52,35 +52,69 @@ SkiaHelios separates concerns into three divine roles to ensure modularity and l
 
 ```mermaid
 graph TD
+    %% Style Definitions
+    classDef inputClass fill:#2D1B3A,stroke:#E0B0FF,stroke-width:2px,color:#E0B0FF;
+    classDef phaseClass fill:#1E0B2A,stroke:#B19CD9,stroke-width:3px,color:#FFFFFF,rx:15,ry:15;
+    classDef coreClass fill:#3A1B4F,stroke:#D8BFD8,stroke-width:2px,color:#FFFFFF;
+    classDef moduleClass fill:#4A2B5F,stroke:#9370DB,stroke-width:2px,color:#E6E6FA;
+    classDef outputClass fill:#2F1B3A,stroke:#BA55D3,stroke-width:2px,color:#DDA0DD;
+    classDef fusionClass fill:#1A0033,stroke:#FF69B4,stroke-width:3px,color:#FFB6C1;
+
+    %% Title
+    title[("⚡️ SkiaHelios v1.9 Triad Architecture ⚡️\nFrom Shadows to Sun")]:::inputClass
+
     %% Input
-    Evidence[Raw Artifacts / KAPE CSVs] --> Clotho
+    Evidence[📂 Raw Artifacts<br/>KAPE CSVs / EVTX / MFT / Prefetch]:::inputClass
 
-    %% Phase 1: Ingest
-    subgraph "Phase 1: Clotho (The Spinner)"
-        Clotho[SH_ClothoReader] -->|Normalize & Enrich| DataFrame[(Polars DataFrame)]
-        Modules[Plutos / Pandora / AION / Hercules] -.-> Clotho
+    %% Phase 1: Clotho
+    subgraph Phase1 ["🧶 Phase 1: Clotho (The Spinner) - Ingestion & Enrichment"]
+        direction TB
+        Clotho[SH_ClothoReader<br/>Universal Ingestion<br/>5W1H Enrichment<br/>Session Awareness]:::coreClass
+        Hunters[🐍 Specialized Hunters<br/>• PlutosGate • HerculesReferee<br/>• Pandora • ChronosSift<br/>• Sirenhunt • Sphinx • AION]:::moduleClass
     end
 
-    %% Phase 2: Logic
-    subgraph "Phase 2: Atropos (The Thinker)"
-        DataFrame --> Atropos[SH_AtroposThinker]
-        Atropos --> Nemesis{Nemesis Engine}
-        Atropos --> Chronos{Chronos Time Lord}
-        Atropos --> InternalScout{Lateral Scout}
+    %% Phase 2: Atropos
+    subgraph Phase2 ["✂️ Phase 2: Atropos (The Thinker) - Correlation & Judgment"]
+        direction TB
+        Atropos[SH_AtroposThinker<br/>Physics Time Sort<br/>Heat Correlation<br/>Privilege Escalation Detection]:::coreClass
+        Nemesis[Nemesis Tracing<br/>File Lifecycle Reconstruction]:::moduleClass
+        Chronos[Chronos Time Lord<br/>Timestomp Detection]:::moduleClass
+        Scout[Internal Scout<br/>Lateral Movement Analysis<br/>RFC1918 Patrol]:::moduleClass
     end
 
-    %% Phase 3: Output
-    subgraph "Phase 3: Lachesis (The Allotter)"
-        Atropos --> Lachesis[SH_LachesisWriter]
-        Lachesis --> Report[Grimoire Report (.md)]
-        Lachesis --> JSON[Grimoire Data (.json)]
+    %% Phase 3: Lachesis
+    subgraph Phase3 ["✍️ Phase 3: Lachesis (The Allotter) - Reporting"]
+        direction TB
+        Lachesis[SH_LachesisWriter<br/>Grimoire Generation<br/>IOC Extraction]:::coreClass
+        Report[📜 Grimoire Report<br/>SANS-Style Markdown]:::outputClass
+        JSONData[📊 Structured JSON Dump<br/>Machine-Readable Evidence]:::outputClass
     end
 
-    %% Phase 4: Fusion
-    subgraph "Phase 4: Chimera (The Beast)"
-        JSON --> Chimera[SH_ChimeraFusion]
-        Chimera --> CampaignReport[Campaign Report (.md)]
+    %% Phase 4: Chimera
+    subgraph Phase4 ["🦁 Phase 4: Chimera (The Beast) - Multi-Host Fusion"]
+        direction TB
+        Chimera[SH_ChimeraFusion v1.9<br/>Campaign-Level Integration<br/>Lateral Chain Visualization]:::fusionClass
+        Campaign[🏛️ Campaign Report<br/>Cross-Host Attack Narrative]:::outputClass
     end
+
+    %% Flow
+    Evidence --> Clotho
+    Hunters -.->|Feed Seeds & Insights| Clotho
+    Clotho -->|Enriched Polars DataFrame| Atropos
+    Atropos --> Nemesis
+    Atropos --> Chronos
+    Atropos --> Scout
+    Atropos --> Lachesis
+    Lachesis --> Report
+    Lachesis --> JSONData
+    JSONData --> Chimera
+    Chimera --> Campaign
+
+    %% Overall Layout
+    Phase1 --> Phase2 --> Phase3 --> Phase4
+
+    %% Footer
+    footer[("Powered by Python • Polars • Pure Logic\n© schutzz - God Mode Final Achieved")]:::inputClass
 ```
 
 ---
