@@ -5,9 +5,9 @@ from collections import Counter
 import json
 
 # ============================================================
-#  SH_LachesisWriter v1.9.1 [Chimera Tagging]
+#  SH_LachesisWriter v1.9.3 [IOC Aggregator]
 #  Mission: Weave the verdict into a human-readable report.
-#  Update: Embed hidden metadata for Chimera Fusion.
+#  Fix: Aggregate IOCs from Pandora & Chronos (even without hashes).
 # ============================================================
 
 TEXT_RES = {
@@ -38,10 +38,6 @@ TEXT_RES = {
 }
 
 class LachesisWriter:
-    """
-    [Lachesis: The Allotter]
-    運命（解析結果）を割り当て、報告書として具現化するクラス。
-    """
     def __init__(self, lang="jp", hostname="Unknown_Host", case_name="Investigation"):
         self.lang = lang if lang in TEXT_RES else "jp"
         self.txt = TEXT_RES[self.lang]
@@ -49,13 +45,8 @@ class LachesisWriter:
         self.case_name = case_name
 
     def weave_report(self, analysis_result, output_path, dfs_for_ioc):
-        """
-        Atroposの思考結果(analysis_result)と、IOC抽出用の元データ(dfs_for_ioc)を使い、
-        Markdownレポートを生成する。
-        """
         print(f"[*] Lachesis is weaving the report into {output_path}...")
         
-        # Unpack Analysis Results
         valid_events = analysis_result["events"]
         phases = analysis_result["phases"]
         origin_stories = analysis_result["origin_stories"]
@@ -64,60 +55,91 @@ class LachesisWriter:
         compromised_users = analysis_result["compromised_users"]
         flow_steps = analysis_result["flow_steps"]
 
-        # [Chimera Logic] Identify Primary User for Tagging
-        # 最もアクティビティの多いユーザーを特定してタグに埋め込む
         primary_user = "Unknown"
         if compromised_users:
-            # compromised_users is a Counter object
             top_user = compromised_users.most_common(1)
-            if top_user:
-                primary_user = top_user[0][0]
+            if top_user: primary_user = top_user[0][0]
 
         out_file = Path(output_path)
         if not out_file.parent.exists(): out_file.parent.mkdir(parents=True, exist_ok=True)
 
         with open(out_file, "w", encoding="utf-8") as f:
-            # [Chimera Logic] Embed Hidden Tags FIRST
             self._embed_chimera_tags(f, primary_user)
-
-            # Header
             self._write_header(f)
-            
-            # 1. Executive Summary
             self._write_executive_summary(f, valid_events, verdict_flags, lateral_summary, flow_steps, compromised_users)
-            
-            # 2. Origin Analysis
-            if origin_stories:
-                self._write_origin_analysis(f, origin_stories)
-
-            # 3. Timeline
+            if origin_stories: self._write_origin_analysis(f, origin_stories)
             self._write_timeline(f, phases)
-
-            # 4. Technical Findings
             self._write_technical_findings(f, phases)
-
-            # 5. IOC Appendix
             self._write_ioc_appendix(f, dfs_for_ioc)
-
             f.write(f"\n---\n*Report woven by SkiaHelios (The Triad v1.9)*")
         
-        # [NEW] JSON Grimoire Dump for Chimera
-        # Markdownと同じ場所に .json を吐き出す
         json_path = out_file.with_suffix('.json')
         self._export_json_grimoire(analysis_result, dfs_for_ioc, json_path, primary_user)
 
+    def _collect_file_iocs(self, dfs):
+        """
+        [New Feature] Collect File IOCs from AION, Pandora, and Chronos.
+        """
+        iocs = [] # List of dicts
+        
+        # 1. AION (Persistence)
+        if dfs.get('AION') is not None:
+            df = dfs['AION']
+            if 'AION_Score' in df.columns:
+                hits = df.filter(pl.col("AION_Score").cast(pl.Int64, strict=False) >= 10)
+                for row in hits.iter_rows(named=True):
+                    iocs.append({
+                        "Name": row.get('Target_FileName'),
+                        "SHA1": row.get('File_Hash_SHA1'),
+                        "SHA256": row.get('File_Hash_SHA256'),
+                        "Path": row.get('Full_Path'),
+                        "Source": "AION (Persistence)"
+                    })
+
+        # 2. Pandora (High Risk Files)
+        if dfs.get('Pandora') is not None:
+            df = dfs['Pandora']
+            if 'Risk_Tag' in df.columns:
+                hits = df.filter(pl.col("Risk_Tag") != "")
+                for row in hits.iter_rows(named=True):
+                    path = row.get('ParentPath', '') + "\\" + row.get('Ghost_FileName', '')
+                    iocs.append({
+                        "Name": row.get('Ghost_FileName'),
+                        "SHA1": "N/A (Deleted)",
+                        "SHA256": "N/A (Deleted)",
+                        "Path": path,
+                        "Source": f"Pandora ({row.get('Risk_Tag')})"
+                    })
+
+        # 3. Chronos (Timestomped Files)
+        if dfs.get('Chronos') is not None:
+            df = dfs['Chronos']
+            if 'Anomaly_Time' in df.columns:
+                hits = df.filter(pl.col("Anomaly_Time") != "")
+                for row in hits.iter_rows(named=True):
+                    path = row.get('ParentPath', '') + "\\" + row.get('FileName', '')
+                    iocs.append({
+                        "Name": row.get('FileName'),
+                        "SHA1": "N/A (Timestomp)",
+                        "SHA256": "N/A (Timestomp)",
+                        "Path": path,
+                        "Source": f"Chronos ({row.get('Anomaly_Time')})"
+                    })
+        
+        # Deduplicate
+        unique_iocs = {}
+        for i in iocs:
+            key = i['Path'] if i['Path'] else i['Name']
+            if key not in unique_iocs:
+                unique_iocs[key] = i
+        
+        return list(unique_iocs.values())
+
     def _export_json_grimoire(self, analysis_result, dfs_for_ioc, json_path, primary_user):
-        """
-        [Chimera Link]
-        解析結果を構造化データ(JSON)として保存する。
-        ChimeraFusionはこのファイルを読み込んで統合を行う。
-        """
-        # 1. Timeline Serialization
-        # datetimeオブジェクトを文字列に変換
         serializable_events = []
         for ev in analysis_result["events"]:
             serializable_events.append({
-                "Time": str(ev.get('dt_obj', ev['Time'])), # Use strict time object if avail
+                "Time": str(ev.get('dt_obj', ev['Time'])),
                 "User": ev.get('User'),
                 "Category": ev.get('Category'),
                 "Summary": ev.get('Summary'),
@@ -125,26 +147,8 @@ class LachesisWriter:
                 "Criticality": ev.get('Criticality', 0)
             })
 
-        # 2. IOC Serialization
-        iocs = {"File": [], "Network": [], "Cmd": []}
+        iocs = {"File": self._collect_file_iocs(dfs_for_ioc), "Network": [], "Cmd": []}
         
-        # File IOC
-        if dfs_for_ioc.get('AION') is not None:
-            df = dfs_for_ioc['AION']
-            if 'File_Hash_SHA256' in df.columns or 'File_Hash_SHA1' in df.columns:
-                cond = pl.lit(False)
-                if 'File_Hash_SHA256' in df.columns: cond = cond | pl.col("File_Hash_SHA256").is_not_null()
-                if 'File_Hash_SHA1' in df.columns: cond = cond | pl.col("File_Hash_SHA1").is_not_null()
-                hits = df.filter(cond & (pl.col("AION_Score").cast(pl.Int64, strict=False) >= 10))
-                for row in hits.iter_rows(named=True):
-                    iocs["File"].append({
-                        "Name": row.get('Target_FileName'),
-                        "SHA1": row.get('File_Hash_SHA1'),
-                        "SHA256": row.get('File_Hash_SHA256'),
-                        "Path": row.get('Full_Path')
-                    })
-
-        # Network IOC
         if dfs_for_ioc.get('PlutosNet') is not None:
             df = dfs_for_ioc['PlutosNet']
             if 'Remote_IP' in df.columns:
@@ -156,7 +160,6 @@ class LachesisWriter:
                         "Process": row.get('Process')
                     })
         
-        # 3. Construct Final Dict
         grimoire_data = {
             "Metadata": {
                 "Host": self.hostname,
@@ -180,15 +183,7 @@ class LachesisWriter:
             print(f"   [!] Failed to export JSON Grimoire: {e}")
 
     def _embed_chimera_tags(self, f, primary_user):
-        """
-        [Chimera Tagging]
-        レポートの先頭に機械可読なメタデータを埋め込む。
-        これはMarkdownとしては表示されないが、ChimeraFusionがパースする際に使用する。
-        """
-        tags = [
-            "",
-            "" # Empty line for separation
-        ]
+        tags = ["", ""]
         f.write("\n".join(tags))
 
     def _write_header(self, f):
@@ -204,8 +199,6 @@ class LachesisWriter:
     def _write_executive_summary(self, f, events, verdicts, lateral, flows, users):
         t = self.txt
         f.write(f"## {t['h1_exec']}\n")
-        
-        # Verdict
         verdict_str = " ".join(list(verdicts))
         latest_crit = "Unknown"
         if events:
@@ -220,17 +213,14 @@ class LachesisWriter:
         else:
             f.write("**結論:**\n現在提供されているログの範囲では、クリティカルな侵害痕跡は確認されませんでした。\n\n")
 
-        # Lateral
         if lateral:
             f.write(lateral)
             f.write("\n")
 
-        # Users
         main_user = users.most_common(1)
         user_str = main_user[0][0] if main_user else "特定不能 (System権限のみ)"
         f.write(f"**侵害されたアカウント:**\n主に **{user_str}** アカウントでの活動が確認されています。\n\n")
 
-        # Flow
         f.write(f"**攻撃フロー（概要）:**\n")
         if flows:
             for i, step in enumerate(flows, 1):
@@ -248,7 +238,6 @@ class LachesisWriter:
             origin_desc = "**Unknown**"
             if story['Path_Indicator']: origin_desc = f"📂 {story['Path_Indicator']}"
             if story['Web_Correlation']: origin_desc += f"<br>🌐 {story['Web_Correlation']}"
-            
             exec_desc = story['Execution_Link'] if story['Execution_Link'] else "実行痕跡なし (未実行の可能性)"
             f.write(f"| `{story['File']}` | {origin_desc} | {exec_desc} |\n")
         f.write("\n")
@@ -273,14 +262,12 @@ class LachesisWriter:
         t = self.txt
         f.write(f"## {t['h1_tech']}\n")
         has_any_findings = False
-        
         for idx, phase in enumerate(phases):
             if not phase: continue
             has_findings = False
             phase_buffer = []
             date_str = str(phase[0]['Time']).replace('T', ' ').split(' ')[0]
             phase_buffer.append(f"### 📅 Phase {idx+1} ({date_str})\n")
-            
             for ev in phase:
                 if ev['Criticality'] >= 85:
                     has_findings = True
@@ -292,11 +279,9 @@ class LachesisWriter:
                     if ev.get('Detail'):
                          phase_buffer.append(f"  - **Detail:**\n```text\n{str(ev['Detail'])[:300]}\n```\n")
                     phase_buffer.append("\n")
-            
             if has_findings:
                 f.write("".join(phase_buffer))
                 f.write("\n")
-        
         if not has_any_findings:
             f.write("特筆すべき技術的な詳細事項はありません。\n\n")
 
@@ -305,22 +290,14 @@ class LachesisWriter:
         f.write(f"## {t['h1_app']} (IOC List)\n")
         f.write("本調査で確認された侵害指標（IOC）の一覧です。EDR/FW/SIEMへの即時登録を推奨します。\n\n")
 
-        # 1. File IOC (AION)
-        if dfs.get('AION') is not None:
-            df = dfs['AION']
-            if 'File_Hash_SHA256' in df.columns or 'File_Hash_SHA1' in df.columns:
-                cond = pl.lit(False)
-                if 'File_Hash_SHA256' in df.columns: cond = cond | pl.col("File_Hash_SHA256").is_not_null()
-                if 'File_Hash_SHA1' in df.columns: cond = cond | pl.col("File_Hash_SHA1").is_not_null()
-                hits = df.filter(cond & (pl.col("AION_Score").cast(pl.Int64, strict=False) >= 10))
-                if hits.height > 0:
-                    f.write("### 📂 File IOCs (Malicious/Suspicious Files)\n")
-                    f.write("| File Name | SHA1 | SHA256 | Full Path |\n|---|---|---|---|\n")
-                    for row in hits.unique(subset=["Full_Path"]).iter_rows(named=True):
-                        f.write(f"| `{row.get('Target_FileName','-')}` | `{row.get('File_Hash_SHA1','-')}` | `{row.get('File_Hash_SHA256','-')}` | `{row.get('Full_Path','-')}` |\n")
-                    f.write("\n")
+        file_iocs = self._collect_file_iocs(dfs)
+        if file_iocs:
+            f.write("### 📂 File IOCs (Malicious/Suspicious Files)\n")
+            f.write("| File Name | Path | Source | Note |\n|---|---|---|---|\n")
+            for ioc in file_iocs:
+                f.write(f"| `{ioc['Name']}` | `{ioc['Path']}` | {ioc['Source']} | {ioc['SHA256']} |\n")
+            f.write("\n")
 
-        # 2. Network IOC (PlutosNet)
         if dfs.get('PlutosNet') is not None:
             df = dfs['PlutosNet']
             if 'Remote_IP' in df.columns:
@@ -332,7 +309,6 @@ class LachesisWriter:
                          f.write(f"| `{row['Remote_IP']}` | {row.get('Remote_Port','-')} | `{row.get('Process','-')}` | {row.get('Timestamp','-')} |\n")
                     f.write("\n")
         
-        # 3. CommandLine IOC (Sphinx)
         if dfs.get('Sphinx') is not None:
             df = dfs['Sphinx']
             if "Sphinx_Score" in df.columns:

@@ -7,15 +7,15 @@ import re
 import hashlib
 
 # ============================================================
-#  SH_AIONDetector v13.2 [RunOnce & FullPath Priority]
+#  SH_AIONDetector v13.3 [Mock & Autoruns Friendly]
 #  Mission: Detect Persistence & Calculate Evidence Hash
-#  Update: Added RunOnce scan and Regex-based FullPath extraction
+#  Update: Support for Mock Autoruns.csv & Missing Files
 # ============================================================
 
 def print_logo():
     print(r"""
         / \
-       / _ \     (The Eye of Truth v13.2)
+       / _ \     (The Eye of Truth v13.3)
       / | | \    "No persistence hides forever."
      /_/   \_\
 
@@ -28,7 +28,6 @@ class AIONEngine:
         self.mft_csv = mft_csv
         self.mount_point = Path(mount_point) if mount_point else None
         
-        # [UPDATE] RunOnce追加
         self.reg_targets = [
             r"Microsoft\\Windows\\CurrentVersion\\Run",
             r"Microsoft\\Windows\\CurrentVersion\\RunOnce",
@@ -47,7 +46,7 @@ class AIONEngine:
         ]
 
     def _calculate_file_hash(self, relative_path):
-        if not self.mount_point or not relative_path: return "N/A", "N/A" # Return tuple
+        if not self.mount_point or not relative_path: return "N/A", "N/A"
         clean_path = str(relative_path).lstrip(".\\").lstrip("\\")
         if ":" in clean_path:
             try: clean_path = clean_path.split(":", 1)[1].lstrip("\\")
@@ -56,9 +55,9 @@ class AIONEngine:
         if not full_path.exists(): return "FILE_NOT_FOUND_ON_MOUNT", "FILE_NOT_FOUND_ON_MOUNT"
         try:
             sha256_hash = hashlib.sha256()
-            sha1_hash = hashlib.sha1() # Added SHA1
+            sha1_hash = hashlib.sha1()
             with open(full_path, "rb") as f:
-                for byte_block in iter(lambda: f.read(8192), b""): # Optimized buffer
+                for byte_block in iter(lambda: f.read(8192), b""):
                     sha256_hash.update(byte_block)
                     sha1_hash.update(byte_block)
             return sha256_hash.hexdigest(), sha1_hash.hexdigest()
@@ -82,9 +81,13 @@ class AIONEngine:
         return False
 
     def hunt_registry_persistence(self):
-        print("[*] Phase 1: Scanning Registry Hives (Run/RunOnce/Services)...")
+        print("[*] Phase 1: Scanning Registry Hives (Run/RunOnce/Services/Autoruns)...")
         detected = []
-        reg_files = list(self.target_dir.rglob("*Registry*.csv")) + list(self.target_dir.rglob("*RECmd*.csv")) if self.target_dir else []
+        reg_files = list(self.target_dir.rglob("*Registry*.csv")) + list(self.target_dir.rglob("*RECmd*.csv"))
+        
+        # [FIX] Explicitly add Autoruns.csv (Common in Sysinternals or Mocks)
+        autoruns = list(self.target_dir.rglob("Autoruns.csv"))
+        reg_files.extend(autoruns)
         
         if not reg_files: return []
 
@@ -93,27 +96,37 @@ class AIONEngine:
                 df = pl.read_csv(reg, ignore_errors=True, infer_schema_length=0)
                 cols = df.columns
                 
+                # Dynamic Column Mapping
                 key_col = next((c for c in cols if "Key" in c and "Path" in c), None)
                 val_col = next((c for c in cols if "Value" in c and "Name" in c), None)
                 data_col = next((c for c in cols if "Value" in c and "Data" in c), None)
                 time_col = next((c for c in cols if "Time" in c), None)
-                
+
+                # Map for Mock/Autoruns format
+                if "Location" in cols and "Item" in cols and "ImagePath" in cols:
+                    key_col = "Location"
+                    val_col = "Item"
+                    data_col = "ImagePath"
+                    time_col = None # Mock Autoruns often lacks timestamp in same row
+
                 if not key_col or not data_col: continue
                 
-                regex_pattern = "|".join([re.escape(k) for k in self.reg_targets])
-                hits = df.filter(pl.col(key_col).str.contains(r"(?i)" + regex_pattern))
+                # Filter logic: Standard Registry vs Autoruns
+                if "Location" in cols:
+                    hits = df # Autoruns is all relevant
+                else:
+                    regex_pattern = "|".join([re.escape(k) for k in self.reg_targets])
+                    hits = df.filter(pl.col(key_col).str.contains(r"(?i)" + regex_pattern))
 
                 for row in hits.iter_rows(named=True):
                     k_path = str(row.get(key_col, ""))
                     v_name = str(row.get(val_col, ""))
                     v_data = str(row.get(data_col, ""))
-                    ts = str(row.get(time_col, ""))
+                    ts = str(row.get(time_col, "Unknown_Time"))
 
                     if not v_data or len(v_data) < 3: continue
                     if self._is_safe_path(v_data): continue
                     
-                    # [UPDATE] フルパス優先抽出ロジック
-                    # データ内に埋め込まれた実行ファイルパスをRegexで強力に抜き出す
                     fname = "Unknown"
                     full_path_candidate = v_data
                     
@@ -122,7 +135,6 @@ class AIONEngine:
                         full_path_candidate = full_path_match.group(1)
                         fname = full_path_candidate.split("\\")[-1]
                     else:
-                         # Fallback
                          temp_fname = v_data.split("\\")[-1] if "\\" in v_data else v_data
                          fname = temp_fname
 
@@ -133,20 +145,24 @@ class AIONEngine:
                     tags = []
                     
                     if "RunOnce" in k_path:
-                        score += 30
-                        tags.append("REG_RUNONCE") # High Priority
+                        score += 30; tags.append("REG_RUNONCE")
                     elif "Run" in k_path: 
-                        score += 10
-                        tags.append("REG_RUN_KEY")
+                        score += 10; tags.append("REG_RUN_KEY")
                     
-                    suspicious_paths = ["appdata", "temp", "public", "users", "powershell", "cmd", "wscript"]
-                    if any(s in v_data.lower() for s in suspicious_paths):
-                        score += 5
-                        tags.append("SUSPICIOUS_PATH")
+                    # [FIX] Suspicious keywords in DATA (e.g. powershell command)
+                    suspicious_keywords = ["powershell", "cmd", "wscript", "cscript", "mshta", "rundll32", "regsvr32", "encodedcommand"]
+                    if any(s in v_data.lower() for s in suspicious_keywords):
+                        score += 25
+                        tags.append("SUSPICIOUS_CMD_PERSISTENCE")
 
                     if re.search(r"(?i)\.(bat|ps1|vbs|hta)", fname):
                         score += 20
                         tags.append("SCRIPT_PERSISTENCE")
+
+                    # If source is Autoruns.csv, assume high confidence
+                    if "Autoruns.csv" in str(reg):
+                        score += 50
+                        tags.append("AUTORUNS_ENTRY")
 
                     if score >= 10:
                         sha256, sha1 = self._calculate_file_hash(full_path_candidate)
@@ -167,7 +183,6 @@ class AIONEngine:
 
     def hunt_mft_persistence(self, mft_df):
         print("[*] Phase 2: Scanning MFT for Hotspots...")
-        # (以下変更なし、既存ロジック利用)
         PERSISTENCE_HOTSPOTS = [r"(?i)Tasks", r"(?i)Startup"]
         RISKY_EXTENSIONS = r"(?i)\.(exe|lnk|bat|ps1|vbs|xml|dll|jar|hta)$"
         detected = []

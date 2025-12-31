@@ -102,7 +102,14 @@ class HeliosCommander:
         success = False
         
         try:
-            func(args)
+            # モジュールの main() が引数を取るかチェックして呼び分け
+            import inspect
+            sig = inspect.signature(func)
+            if len(sig.parameters) > 0:
+                func(args)
+            else:
+                func() # 引数なしの main() に対応
+            
             success = True
         except Exception as e:
             print(f"[!] {key.upper()} Stage Failed: {e}")
@@ -114,6 +121,8 @@ class HeliosCommander:
             self.stats["Modules"][key] = round(elapsed, 4)
             status_str = "DONE" if success else "FAILED"
             print(f">>> [{status_str}] {key.upper()} finished in {elapsed:.4f}s")
+        
+        return success
         
         return success
 

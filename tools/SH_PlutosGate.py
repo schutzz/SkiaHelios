@@ -7,9 +7,9 @@ import re
 import ipaddress
 
 # ============================================================
-#  SH_PlutosGate v2.5 [Thermodynamics Update]
+#  SH_PlutosGate v2.6 [Fix: Port Export]
 #  Mission: Detect Internal Exfiltration & Lateral Movement
-#  Base: v2.4 (Input Handling) + v2.5 (Heat Logic)
+#  Update: Explicitly export 'Remote_Port' for Lachesis IOC handling.
 # ============================================================
 
 def print_logo():
@@ -19,14 +19,14 @@ def print_logo():
       \ \  _-/ \ \ \____\ \ \_\ \\/_/\ \/\ \ \/\ \\ \___  \  
        \ \_\    \ \_____\ \_____\  \ \_\ \ \_____\\/\_____\ 
       
-      [ SH_PlutosGate v2.5 ]
+      [ SH_PlutosGate v2.6 ]
       "The Heat of the Evidence burns away the Lies."
     """)
 
 class PlutosGate:
     """
     [Plutos: The Wealth Giver (of Evidence)]
-    v2.5: ネットワークログ、SRUM、ファイアウォールログを解析し、
+    v2.6: ネットワークログ、SRUM、ファイアウォールログを解析し、
     外部通信(C2)と内部横展開(Lateral)を熱量(Heat Score)で判定する。
     """
     def __init__(self, kape_dir, pandora_csv=None, start_time=None, end_time=None):
@@ -157,11 +157,7 @@ class PlutosGate:
                     "chrome.exe": 10, "msedge.exe": 10
                 }
                 
-                # SRUMは集計が必要な場合が多いが、ここでは簡易的に高熱量なレコードを抽出
-                # (本来はTimestampごとのAggregationが望ましいが、KAPEのCSVは既にレコード化されている前提)
-                
                 # Polarsでの処理（高速化のため式で処理）
-                # 文字列カラムを数値に変換
                 df_srum = df_srum.with_columns([
                     pl.col(sent_col).cast(pl.Float64, strict=False).fill_null(0).alias("_sent"),
                     pl.col(recv_col).cast(pl.Float64, strict=False).fill_null(0).alias("_recv"),
@@ -169,10 +165,7 @@ class PlutosGate:
                 ])
                 
                 # フィルタリング: バースト または 危険なプロセス
-                # 1. Burst Traffic
                 burst_mask = (pl.col("_sent") > BURST_THRESHOLD) | (pl.col("_recv") > BURST_THRESHOLD)
-                
-                # 2. Dangerous Process
                 proc_pattern = "|".join([re.escape(p) for p in HIGH_HEAT_PROCESSES.keys()])
                 proc_mask = pl.col("_app_lower").str.contains(proc_pattern)
                 
@@ -250,7 +243,7 @@ class PlutosGate:
                         proc = str(row.get(img_col, "")).lower()
                         proc_name = proc.split("\\")[-1]
                         
-                        heat_score = 0 # EVTXの場合はHeat Scoreを簡易計算
+                        heat_score = 0
                         tags = []
                         
                         is_internal = self._is_internal_ip(ip)
@@ -277,10 +270,12 @@ class PlutosGate:
                         # Verdict
                         if heat_score >= 60:
                             verdict = "LATERAL_MOVEMENT" if is_internal else "C2_COMMUNICATION"
+                            # [Fix] Remote_Port を明示的に含める
                             evtx_hits.append({
                                 "Timestamp": row.get(time_col),
                                 "Process": proc,
                                 "Remote_IP": ip,
+                                "Remote_Port": row.get(dst_port_col),
                                 "Plutos_Verdict": verdict,
                                 "Tags": ", ".join(tags),
                                 "Heat_Score": heat_score,
@@ -318,8 +313,6 @@ def main(argv=None):
     
     if df_srum is not None and df_srum.height > 0:
         print(f"[!] SRUM HIGH HEAT EVENTS: {df_srum.height} records.")
-        # Append or Write separate? SRUM usually differs in schema, keep separate or merge smart.
-        # Here we write to dedicated SRUM log for Atropos
         df_srum.write_csv(args.out.replace(".csv", "_srum.csv"))
 
     if df_evtx is not None and df_evtx.height > 0:

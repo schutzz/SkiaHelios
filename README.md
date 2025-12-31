@@ -1,150 +1,163 @@
-# SkiaHelios v1.9 - God Mode (Internal Scout Edition)
+# SkiaHelios v1.9 - God Mode (The Chimera Edition)
 
-> *"Order restored. Truth revealed. The borders are internal."*
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
+![Polars](https://img.shields.io/badge/Engine-Polars_0.20%2B-orange?logo=polars)
+![Status](https://img.shields.io/badge/Status-Battle_Tested-green)
+![License](https://img.shields.io/badge/License-MIT-lightgrey)
 
-**SkiaHelios** is an advanced, automated DFIR (Digital Forensics & Incident Response) framework designed for high-resolution artifact correlation. It weaves together disparate logs into a single, cohesive narrative of the attack.
+> *"From Shadows to Sun. Order restored. Truth revealed."*
 
-**Current Version:** v1.9 (Internal Scout / Triad Refactor)
+**SkiaHelios** is a high-resolution, modular DFIR (Digital Forensics & Incident Response) framework built for **speed** and **causality**. Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** to deconstruct artifacts, trace physical execution chains, and weave a cohesive narrative across multiple hosts.
+
+**Current Version:** v1.9 (Chimera Fusion / Lateral Movement Aware)
 
 ---
 
-## 🏛️ Architecture & Workflow (The Triad)
+## ⚡ Key Features (Why SkiaHelios?)
 
-SkiaHelios operates on the **"Seed & Hunt"** architecture. It doesn't just parse logs; it traces the *physical causality* of an attack across the file system, network, and execution artifacts.
+* **🚀 Hyperspeed Ingestion:** Powered by **Polars (Rust-based DataFrame library)** to handle massive CSV timelines (KAPE/Plaso) instantly.
+* **🦁 Operation Chimera (Multi-Host):** **New in v1.9!** Seamlessly integrates timelines from multiple compromised hosts (`SH_ChimeraFusion`) to visualize Lateral Movement chains.
+* **🔮 Physics-Based Detection:**
+    * **Chronos:** Detects NTFS Timestomping via `$SI < $FN` logic (ms precision).
+    * **Plutos:** Analyzes "Network Thermodynamics" (Heat Score) to find data exfiltration and internal lateral movement.
+    * **Atropos:** Correlates "Execution" with "File Drops" to prove causality (not just existence).
+* **🛡️ Noise Cancellation:** Aggressive "Iron Curtain" filtering logic to remove OS noise (WinSxS, .NET, Updates) and focus on the 1% of critical anomalies.
+
+---
+
+## 🧪 Validation & Benchmarks (Proven Capability)
+
+SkiaHelios is not just a concept. It is validated against complex attack scenarios.
+
+### 🏆 Operation "TwinSnakes" (Lateral Movement Scenario)
+**Status:** ✅ **PASSED (S-Rank)**
+* **Scenario:** Phishing Entry (Host A) → Persistence → Lateral Movement (PsExec) → Target Access (Host B) → Timestomping & Exfiltration.
+* **Result:**
+    * Detected **100%** of attack phases.
+    * **Automatic Correlation:** Identified the attack flow across 2 distinct hosts without manual timeline merging.
+    * **Verdict:** Correctly flagged `[LATERAL_MOVEMENT_CONFIRMED]` and pinpointed `Conf.7z` (Timestomped Archive).
+
+### ⚔️ Atomic Red Team (Infect28 / SunShadow)
+**Status:** ✅ **PASSED**
+* **Vectors Detected:**
+    * PowerShell Obfuscation (Base64/XOR) via `SH_Sphinx`.
+    * Persistence (Registry RunKeys, Scheduled Tasks) via `SH_AION`.
+    * Data Exfiltration (OneDrive/Bitsadmin) via `SH_Plutos`.
+
+---
+
+## 🏛️ Architecture (The Triad)
+
+SkiaHelios separates concerns into three divine roles to ensure modularity and logic isolation.
 
 ```mermaid
 graph TD
-    %% Define Styles
-    classDef evidence fill:#e1f5fe,stroke:#01579b,stroke-width:2px;
-    classDef ingest fill:#fff9c4,stroke:#fbc02d,stroke-width:2px;
-    classDef logic fill:#ffebee,stroke:#c62828,stroke-width:2px;
-    classDef validator fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px;
-    classDef output fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px;
+    %% Input
+    Evidence[Raw Artifacts / KAPE CSVs] --> Clotho
 
-    %% Input Data
-    subgraph Evidence [Physical Evidence]
-        EVTX[WinEventLogs]:::evidence
-        MFT[MFT / USN]:::evidence
-        SRUM[SRUM / NetLogs]:::evidence
-        PF[Prefetch / Amcache]:::evidence
+    %% Phase 1: Ingest
+    subgraph "Phase 1: Clotho (The Spinner)"
+        Clotho[SH_ClothoReader] -->|Normalize & Enrich| DataFrame[(Polars DataFrame)]
+        Modules[Plutos / Pandora / AION / Hercules] -.-> Clotho
     end
 
-    %% Ingestion Layer (Clotho)
-    subgraph Ingest [Phase 1: The Spinner]
-        Clotho(SH_ClothoReader):::ingest
-        Plutos(SH_PlutosGate v2.4):::ingest
-        Pandora(SH_PandorasLink):::ingest
-        Hercules(SH_HerculesReferee):::ingest
+    %% Phase 2: Logic
+    subgraph "Phase 2: Atropos (The Thinker)"
+        DataFrame --> Atropos[SH_AtroposThinker]
+        Atropos --> Nemesis{Nemesis Engine}
+        Atropos --> Chronos{Chronos Time Lord}
+        Atropos --> InternalScout{Lateral Scout}
     end
 
-    %% Logic Layer (Atropos)
-    subgraph Logic [Phase 2: The Thinker]
-        Atropos(SH_AtroposThinker):::logic
-        Nemesis{Nemesis Tracer}:::logic
-        InternalScout{Internal Scout}:::logic
+    %% Phase 3: Output
+    subgraph "Phase 3: Lachesis (The Allotter)"
+        Atropos --> Lachesis[SH_LachesisWriter]
+        Lachesis --> Report[Grimoire Report (.md)]
+        Lachesis --> JSON[Grimoire Data (.json)]
     end
 
-    %% Validation Layer (Siren)
-    subgraph Validate [Phase 3: The Validator]
-        Siren(SH_Sirenhunt):::validator
+    %% Phase 4: Fusion
+    subgraph "Phase 4: Chimera (The Beast)"
+        JSON --> Chimera[SH_ChimeraFusion]
+        Chimera --> CampaignReport[Campaign Report (.md)]
     end
-
-    %% Output Layer (Lachesis)
-    subgraph Output [Phase 4: The Allotter]
-        Lachesis(SH_LachesisWriter):::output
-        Report[Grimoire Report]:::output
-        Chimera[Chimera Campaign View]:::output
-    end
-
-    %% Connections
-    EVTX --> Hercules
-    EVTX --> Plutos
-    SRUM --> Plutos
-    MFT --> Pandora
-    PF --> Siren
-
-    Hercules --> Clotho
-    Plutos --> Clotho
-    Pandora --> Clotho
-    
-    Clotho --> Atropos
-    
-    Atropos <--> Nemesis
-    Atropos <--> InternalScout
-    
-    %% Siren Validation Loop (FIXED)
-    Atropos -- "Query Suspects" --> Siren
-    Siren -- "Execution Proof (God Mode)" --> Atropos
-    
-    %% Final Write
-    Atropos --> Lachesis
-    Lachesis --> Report
-    Lachesis -.-> Chimera
 ```
----
-
-## ⚡ Key Features (v1.9 Updates)
-
-### 1. Internal Scout & Lateral Movement Detection
-The Gatekeeper (**Plutos**) has turned its eyes inward.
-* **RFC1918 Patrol:** Automatically identifies internal IPs (10.x, 172.16.x, 192.168.x) and differentiates them from external C2.
-* **Admin Share Watch:** Detects lateral tool drops into `\\*\C$`, `\\*\ADMIN$`, or `\\*\IPC$`.
-* **SRUM Burst Scout:** Flags "Internal Burst Transfers" (>50MB) even without IP logs, exposing data staging via SMB/WMI.
-* **Lateral Scoring:** Complex scoring engine for RDP, WMI, PsExec, and WinRM usage patterns.
-
-### 2. The Hekate Triad (Modular Core)
-The monolithic correlation engine (`HekateWeaver`) has been refactored into three goddesses for maximum scalability:
-* **🧶 Clotho (The Reader):** Normalizes and ingests all artifact streams.
-* **✂️ Atropos (The Thinker):** The brain. Handles correlation, `Nemesis` tracing, and `Siren` validation integration.
-* **✍️ Lachesis (The Writer):** Weaves the final verdict into a SANS-style markdown report.
-
-### 3. God Mode Validation (Siren Integration)
-* **Execution Proof:** Cross-references file system events with **Prefetch** and **Amcache** via `SH_Sirenhunt`.
-* **Anti-False Positive:** Only flags artifacts that *actually executed*, reducing analyst fatigue.
 
 ---
 
-## 🛠️ Modules Overview
+## 🛠️ Installation
 
-| Module | Role | Key Function |
-| :--- | :--- | :--- |
-| **SH_PlutosGate** | Network Hunter | **(v2.4)** Internal Scout, C2 detection, Lateral Movement scoring. |
-| **SH_HerculesReferee** | EventLog Sniper | **(v3.6)** Identity tracking, Script block analysis, Hostname extraction. |
-| **SH_PandorasLink** | File System Tracer | USN/MFT analysis for file drops and deletions (Timestomping detection). |
-| **SH_ChronosSift** | Time Anomaly | `$SI < $FN` timestamp comparison for NTFS timestomping. |
-| **SH_Sirenhunt** | Validator | Verifies execution using Prefetch/Amcache ("Did it run?"). |
-| **SH_HekateWeaver** | Orchestrator | **(v16.0)** The Triad controller. Merges all above into the `Grimoire`. |
+```bash
+# Clone the repository
+git clone [https://github.com/schutzz/SkiaHelios.git](https://github.com/schutzz/SkiaHelios.git)
+cd SkiaHelios
+
+# Install dependencies (Polars is the only heavy requirement)
+pip install -r requirements.txt
+```
 
 ---
 
 ## 🚀 Usage
 
-### Standard Analysis (Single Host)
+### 1. Full Auto Scan (Single Host)
+The `SH_HeliosConsole.py` acts as the commander, running all modules in sequence.
+
 ```bash
-# Run the Triad Controller (Hekate)
+python SH_HeliosConsole.py \
+  --dir "C:\Case\KAPE_Output\HostA" \
+  --case "Incident_Alpha_HostA" \
+  --out "Helios_Output"
+```
+
+### 2. Manual Triad Execution (Granular Control)
+For advanced analysts who want to debug specific logic steps.
+
+```bash
+# Step 1: Run specialized detectors
+python tools/SH_AIONDetector.py --dir "KAPE/" --out "Persistence.csv"
+python tools/SH_PlutosGate.py --dir "KAPE/" --out "Network.csv"
+
+# Step 2: Weave the Grimoire (Report)
 python tools/SH_HekateWeaver.py \
-  --input "KAPE/Timeline.csv" \
-  --plutos "KAPE/Plutos_Report.csv" \
-  --pandora "KAPE/Pandora_Ghosts.csv" \
-  --siren "KAPE/Siren_Hunt.json" \
-  --out "Reports/Grimoire_HostA.md" \
-  --case "Operation Chimera"
+  -i "KAPE/Timeline.csv" \
+  -o "Reports/HostA_Grimoire.md" \
+  --aion "Persistence.csv" \
+  --plutos "Network.csv" \
+  --case "Manual_Analysis"
 ```
 
-### Network & Lateral Hunting (Plutos Standalone)
+### 3. Operation Chimera (Multi-Host Fusion)
+Combine reports from multiple hosts to visualize the entire campaign.
+
 ```bash
-# Scan for Lateral Movement & Internal Exfiltration
-python tools/SH_PlutosGate.py \
-  --dir "KAPE_Output/" \
-  --pandora "KAPE/Pandora_Ghosts.csv" \
-  --out "Lateral_Report.csv"
+# Point to the directory containing multiple Grimoire_*.json files
+python tools/SH_ChimeraFusion.py \
+  -d "Helios_Output/" \
+  -o "Helios_Output/Campaign_Master_Report.md"
 ```
 
 ---
 
-## 🔮 Roadmap: Project Chimera
-* **SH_ChimeraFusion:** Multi-host report integration (Coming Soon).
-* **Attack Graph:** Visualizing lateral movement paths across the network.
+## 🧩 Module Breakdown
+
+| Module | Role | Functionality |
+| :--- | :--- | :--- |
+| **Hercules** | The Referee | Event Log analysis, Identity tracking (SID resolution), and initial triage. |
+| **Plutos** | Gatekeeper | Network & SRUM analysis. Detects C2, Lateral Movement, and Data Exfiltration using "Heat Scores". |
+| **Pandora** | The Link | NTFS/USN analysis. Recovers deleted file history ("Ghosts") and anti-forensics traces. |
+| **Chronos** | Time Lord | Detects **Timestomping** by comparing `$SI` and `$FN` attributes with ms-level precision. |
+| **AION** | The Eye | Persistence hunting (Registry, Tasks, Services). Calculates SHA256 for evidence. |
+| **Sphinx** | Decipherer | Decodes obfuscated command lines (Base64, PowerShell) and extracts IOCs. |
+| **Siren** | Validator | Cross-validates file events with **Prefetch** & **Amcache** to confirm execution. |
 
 ---
-*Powered by Python, Polars, and Paranoia.*
+
+## 🔮 Roadmap
+* [x] **v1.9:** Internal Scout & Lateral Movement Logic (Completed)
+* [x] **v1.9:** Chimera Fusion (Multi-Host Reporting) (Completed)
+* [ ] **v2.0:** GUI / Web Dashboard (React based)
+* [ ] **v2.1:** SIGMA Rule Integration
+
+---
+*Created by the SkiaHelios Team. Powered by Polars.*

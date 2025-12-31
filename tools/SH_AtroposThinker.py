@@ -5,14 +5,12 @@ from pathlib import Path
 from collections import defaultdict, Counter
 
 # ============================================================
-#  SH_AtroposThinker v1.9.2 [Privilege Hunter]
+#  SH_AtroposThinker v1.9.4 [Verdict Fixed]
 #  Mission: Analyze correlations, deduce verdicts, cut noise.
-#  Update: Added Privilege Escalation Detection logic.
+#  Fix: Properly add LATERAL_MOVEMENT flag to Verdicts.
 # ============================================================
 
 class NemesisTracer:
-    # (v1.9.1 のコードを維持 - 省略なしで記述が必要なら展開するっス)
-    # ここでは既存のNemesisTracerクラス定義をそのまま使用
     def __init__(self, df_mft, df_usn, noise_validator=None):
         self.df_mft = df_mft
         self.df_usn = df_usn
@@ -218,11 +216,6 @@ class NemesisTracer:
 
 
 class AtroposThinker:
-    """
-    [Atropos: The Cutter]
-    不可避な結論を導き出し、ノイズを断ち切る。
-    Clothoから渡されたデータに対して、相関分析・判定ロジックを実行する。
-    """
     def __init__(self, dfs, siren_data, hostname):
         self.dfs = dfs
         self.siren_data = siren_data
@@ -233,73 +226,40 @@ class AtroposThinker:
         self.lateral_summary = ""
         self.compromised_users = Counter()
         self.flow_steps = []
-        
-        # [Optimization] Pre-compile Regex
         self.re_ip = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b')
         self.re_filename = re.compile(r'([\w\-\.]+\.(?:exe|ps1|bat|dll))', re.IGNORECASE)
 
     def _parse_strict_time(self, t_str):
-        """
-        [Optimized Physics]
-        文字列の特徴からフォーマットを推論し、高速にパースする。
-        総当たりによるオーバーヘッドを回避。
-        """
         if not t_str: return None
         s = str(t_str).strip()
         if not s or s.lower() in ("none", "nan", ""): return None
-        
-        # 1. ISO Format (Fastest Check)
-        # 'T' が含まれていれば ISO 8601 の可能性大
         if 'T' in s:
             try:
-                # Z除去などは最低限に
                 if s.endswith('Z'): s = s[:-1] + '+00:00'
                 return datetime.datetime.fromisoformat(s)
             except: pass
-
-        # 2. Heuristic Parsing based on Delimiters
-        # 区切り文字で分岐して試行回数を減らす
         if '-' in s:
-            # YYYY-MM-DD 系
-            if '.' in s: # ミリ秒あり
+            if '.' in s:
                 try: return datetime.datetime.strptime(s, "%Y-%m-%d %H:%M:%S.%f")
                 except: pass
-            else: # 秒まで、または分まで
+            else:
                 try: return datetime.datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
                 except:
                     try: return datetime.datetime.strptime(s, "%Y-%m-%d %H:%M")
                     except: pass
         elif '/' in s:
-            # MM/DD/YYYY or YYYY/MM/DD 系
-            # スラッシュの数や位置でさらに分岐も可能だが、ここはリストを絞る
-            formats = [
-                "%m/%d/%Y %H:%M:%S",
-                "%Y/%m/%d %H:%M:%S",
-                "%m/%d/%Y %H:%M",
-                "%Y/%m/%d %H:%M"
-            ]
+            formats = ["%m/%d/%Y %H:%M:%S", "%Y/%m/%d %H:%M:%S", "%m/%d/%Y %H:%M", "%Y/%m/%d %H:%M"]
             for fmt in formats:
                 try: return datetime.datetime.strptime(s, fmt)
                 except: pass
-        
-        # 3. Fallback (Last Resort)
-        # それでもダメなら汎用的に試す（が、ここまで来るケースは稀にしたい）
         try: return datetime.datetime.fromisoformat(s.replace(' ', 'T'))
         except: pass
-            
         return None
 
     def contemplate(self):
-        """
-        メインの思考プロセス。
-        収集 -> Nemesis追跡 -> ソート(物理時間) -> コンテキスト分析 -> 判定 -> 横展開検知
-        """
         print("[*] Atropos is contemplating the fate of artifacts...")
-        
-        # 1. Collect Events
         raw_events = self._collect_and_filter_events()
         
-        # 2. Nemesis Seeding & Tracing
         seeds = self._harvest_seeds(raw_events)
         nemesis = NemesisTracer(self.dfs.get('Chronos'), self.dfs.get('Pandora'), self._is_known_noise)
         
@@ -311,7 +271,6 @@ class AtroposThinker:
                 if (ne['Summary'] + str(ne['Time'])) not in current_sigs:
                     raw_events.append(ne)
 
-        # 3. Execution Tracing (Physical Proof)
         execution_events = self._filter_execution_events(raw_events)
         for ev in execution_events:
              if not ev.get('dt_obj'): ev['dt_obj'] = self._parse_strict_time(ev.get('Time'))
@@ -323,40 +282,27 @@ class AtroposThinker:
                 if (pe['Summary'] + str(pe['Time'])) not in current_sigs:
                     raw_events.append(pe)
 
-        # 4. Ghost Merge (Nemesis vs Pandora)
         for ev in raw_events:
             if not ev.get('dt_obj'): ev['dt_obj'] = self._parse_strict_time(ev.get('Time'))
         self._merge_ghosts(raw_events)
-
-        # 5. Inferred Execution
         self._infer_execution_drops(raw_events)
-        
-        # [NEW] 5.5. Privilege Escalation Detection
-        # ここで「ユーザーセッション中のSYSTEM実行」を炙り出す
         self._detect_privilege_escalation(raw_events)
 
-        # 6. Time Sort (Strict Physics)
         for ev in raw_events:
             if not ev.get('dt_obj'):
                 ev['dt_obj'] = self._parse_strict_time(ev.get('Time'))
         raw_events.sort(key=lambda x: x.get('dt_obj') or datetime.datetime.max)
 
-        # 7. Origin Analysis & Context
         self.origin_stories = self._analyze_origin_context(raw_events)
-
-        # 8. Verdict (God Mode + Siren)
         self._judge_fate(raw_events)
-
-        # 9. Lateral Movement Detection (v1.9)
+        
+        # [Fix] Lateral Logic
         self.lateral_summary = self._detect_lateral_movement(raw_events)
+        self._measure_heat_correlation(raw_events)
 
-        # 10. Attack Flow Extraction
         self._extract_attack_flow(raw_events)
-
-        # 11. Final Validation
         self.valid_events = raw_events
         
-        # Extract compromised users
         for ev in raw_events:
             if ev.get('User') and "System" not in str(ev['User']) and "N/A" not in str(ev['User']):
                 self.compromised_users[ev['User']] += 1
@@ -373,78 +319,42 @@ class AtroposThinker:
             "flow_steps": self.flow_steps
         }
 
-    # --- Core Logic Methods ---
-
     def _detect_privilege_escalation(self, events):
-        """
-        [v1.9.2 New Logic]
-        Herculesのセッション情報(Login/Logout)と照合し、
-        「一般ユーザーのセッション中」に発生した「SYSTEM権限でのクリティカルな活動」を検知する。
-        これにより、ExploitやUAC Bypassによる権限昇格の瞬間を特定する。
-        """
         df_sessions = self.dfs.get('Sessions')
-        if df_sessions is None or df_sessions.is_empty():
-            return # セッション情報がない場合はスキップ
-
-        # セッションリストの準備
+        if df_sessions is None or df_sessions.is_empty(): return
         user_sessions = []
         try:
             for row in df_sessions.iter_rows(named=True):
-                # SYSTEMセッション自体は無視
                 sid = str(row.get('SID', ''))
                 if "S-1-5-18" in sid: continue
-                
-                # 時刻パース
                 start_t = self._parse_strict_time(row.get('Start'))
                 end_raw = row.get('End')
                 end_t = datetime.datetime.max if str(end_raw) == "ACTIVE" else self._parse_strict_time(end_raw)
-                
                 if start_t and end_t:
-                    user_sessions.append({
-                        "SID": sid, "Start": start_t, "End": end_t, 
-                        "User": "Unknown" # Session map doesn't always have username, relying on SID
-                    })
+                    user_sessions.append({"SID": sid, "Start": start_t, "End": end_t})
         except: return
 
         if not user_sessions: return
-        print(f"   -> Analyzing {len(user_sessions)} user sessions for Privilege Escalation...")
-
         count = 0
         for ev in events:
-            # ターゲット: SYSTEM権限での実行・永続化・痕跡隠滅
             user = str(ev.get('User', '')).lower()
-            if "system" not in user and "s-1-5-18" not in str(ev.get('Owner_SID', '')).lower():
-                continue # SYSTEM以外は興味なし
-            
+            if "system" not in user and "s-1-5-18" not in str(ev.get('Owner_SID', '')).lower(): continue
             cat = ev.get('Category', '')
-            if cat not in ['EXEC', 'PERSIST', 'ANTI', 'DROP']:
-                continue # クリティカルでないカテゴリは無視
-            
+            if cat not in ['EXEC', 'PERSIST', 'ANTI', 'DROP']: continue
             ev_time = ev.get('dt_obj')
             if not ev_time: continue
 
-            # 重なりチェック: いずれかのUserセッション中に発生したか？
             is_overlap = False
-            victim_sid = None
-            
             for sess in user_sessions:
                 if sess['Start'] <= ev_time <= sess['End']:
-                    is_overlap = True
-                    victim_sid = sess['SID']
-                    break
-            
+                    is_overlap = True; break
             if is_overlap:
-                # 権限昇格疑いあり！
                 ev['Criticality'] = 100
                 ev['Summary'] = "[PRIVILEGE_ESCALATION] " + ev['Summary']
-                ev['Detail'] += f"\n[!] ALERT: SYSTEM Activity detected during active User Session (SID: {victim_sid}). Potential Exploit/UAC Bypass."
                 self.verdict_flags.add("[PRIVILEGE_ESCALATION]")
                 count += 1
+        if count > 0: print(f"   [!] DETECTED: {count} Potential Privilege Escalation events.")
 
-        if count > 0:
-            print(f"   [!] DETECTED: {count} Potential Privilege Escalation events.")
-
-    # (以降、既存のメソッド群: _harvest_seeds, _filter_execution_events などは変更なし)
     def _harvest_seeds(self, events):
         seeds = set()
         for ev in events:
@@ -452,7 +362,6 @@ class AtroposThinker:
             kws = ev.get('Keywords', [])
             if not kws: continue
             if isinstance(kws, str): kws = [kws]
-            
             for k in kws:
                 full_path = str(k).strip()
                 if not full_path: continue
@@ -484,34 +393,25 @@ class AtroposThinker:
     def _merge_ghosts(self, events):
         indices_to_remove = set()
         nemesis_deaths = [ev for ev in events if "Nemesis" in str(ev.get('Source', '')) and ("DELETE" in str(ev.get('Reason', '')).upper())]
-        
         for n_ev in nemesis_deaths:
             if "[CONFIRMED DELETION]" not in n_ev['Summary']: 
                 n_ev['Summary'] = "[CONFIRMED DELETION] " + n_ev['Summary']
             n_time = n_ev.get('dt_obj')
             if not n_time: continue
-            
-            # Find matching Pandora ghost
             for i, p_ev in enumerate(events):
                 if i in indices_to_remove: continue
                 if "Pandora" not in str(p_ev.get('Source', '')) and "ANTI" not in str(p_ev.get('Category', '')): continue
                 p_time = p_ev.get('dt_obj')
                 if not p_time: continue
-                
-                # Time correlation window (Strict 5 sec)
                 if abs((n_time - p_time).total_seconds()) > 5: continue
-                
                 n_names = set(str(k).lower().split("\\")[-1] for k in n_ev.get('Keywords', []))
                 p_names = set(str(k).lower().split("\\")[-1] for k in p_ev.get('Keywords', []))
-                
                 if n_names.intersection(p_names):
                     n_ev['Summary'] += f" <br>(Matches Pandora Ghost: {p_ev['Summary']})"
                     indices_to_remove.add(i)
-        
         if indices_to_remove:
             kept = [ev for i, ev in enumerate(events) if i not in indices_to_remove]
-            events.clear()
-            events.extend(kept)
+            events.clear(); events.extend(kept)
 
     def _infer_execution_drops(self, events):
         executed_files = {} 
@@ -524,14 +424,11 @@ class AtroposThinker:
                 kws = ev.get('Keywords')
                 if kws:
                     fname = str(kws[0]).lower()
-                    if not self._is_known_noise(fname):
-                        executed_files[fname] = ev 
-        
+                    if not self._is_known_noise(fname): executed_files[fname] = ev 
         new_events = []
         for fname, exec_ev in executed_files.items():
             if self._is_known_noise(fname): continue
             if exec_ev.get('Criticality', 0) < 80: continue 
-
             if fname not in dropped_files and "unknown" not in fname:
                 exec_dt = exec_ev.get('dt_obj')
                 if exec_dt:
@@ -542,53 +439,36 @@ class AtroposThinker:
                         "User": exec_ev['User'],
                         "Summary": f"File Creation (Inferred): {fname}",
                         "Detail": f"Executed without prior drop record. Likely malicious.",
-                        "Criticality": 85, 
-                        "Category": "DROP", 
-                        "Keywords": [fname], 
-                        "dt_obj": inferred_dt
+                        "Criticality": 85, "Category": "DROP", 
+                        "Keywords": [fname], "dt_obj": inferred_dt
                     })
         events.extend(new_events)
 
     def _analyze_origin_context(self, events):
         origin_stories = []
         drops = [e for e in events if e['Category'] == 'DROP' and e.get('Criticality', 0) >= 70]
-        
         for drop in drops:
             drop_dt = drop.get('dt_obj')
             if not drop_dt: continue
             kws = drop.get('Keywords', [])
             fname = str(kws[0]).lower() if kws else ""
             if not fname: continue
-
-            story = {
-                "File": fname,
-                "Drop_Time": drop_dt,
-                "Web_Correlation": None,
-                "Path_Indicator": None,
-                "Execution_Link": None
-            }
-
-            # A. Path Indicator
+            story = {"File": fname, "Drop_Time": drop_dt, "Web_Correlation": None, "Path_Indicator": None, "Execution_Link": None}
             detail = str(drop.get('Detail', '')).lower()
             if "content.outlook" in detail: story['Path_Indicator'] = "Outlook添付ファイル (Content.Outlook)"
             elif "inetcache" in detail: story['Path_Indicator'] = "ブラウザキャッシュ (Drive-by Download)"
             elif "downloads" in detail: story['Path_Indicator'] = "ダウンロードフォルダ"
-
-            # C. Execution Link
             execs = [e for e in events if e['Category'] in ['EXEC', 'INIT'] and e.get('dt_obj') and e['dt_obj'] >= drop_dt]
             for ex in execs:
                 ex_kws = [str(k).lower() for k in ex.get('Keywords', [])]
                 if fname in ex_kws:
                     story['Execution_Link'] = f"Executed at {ex['Time']} (Source: {ex['Source']})"
                     break
-            
             if story['Path_Indicator'] or story['Web_Correlation'] or story['Execution_Link']:
                 origin_stories.append(story)
-        
         return origin_stories
 
     def _judge_fate(self, events):
-        # 1. Integrate Siren Data
         if self.siren_data:
             for story in self.origin_stories:
                 f_lower = str(story['File']).lower()
@@ -598,22 +478,17 @@ class AtroposThinker:
                         if not story['Path_Indicator']:
                             full_p = str(target.get('Full_Path', ''))
                             if "outlook" in full_p.lower(): story['Path_Indicator'] = "Outlook添付ファイル"
-
-        # 2. Verdict Flags
         if self.siren_data:
             for target in self.siren_data:
                 if target.get('Siren_Score', 0) >= 50 and target.get('Executed'):
                     full_p = str(target.get('Full_Path', '')).lower()
                     if "outlook" in full_p: self.verdict_flags.add("[PHISHING_ATTACHMENT_EXEC]")
                     elif "download" in full_p: self.verdict_flags.add("[DRIVE_BY_DOWNLOAD_EXEC]")
-
         for story in self.origin_stories:
             if "outlook" in str(story.get('Path_Indicator', '')).lower() and story.get('Execution_Link'):
                 self.verdict_flags.add("[PHISHING_ATTACHMENT_EXEC]")
-        
         if not self.verdict_flags:
             for ev in events:
-                kws = str(ev.get('Keywords', '')).lower()
                 detail = str(ev.get('Detail', '')).lower()
                 if "content.outlook" in detail and ev.get('Criticality', 0) >= 60:
                      self.verdict_flags.add("[PHISHING_ATTACHMENT_EXEC]")
@@ -640,59 +515,46 @@ class AtroposThinker:
                 
                 lateral_lines.append(f"- **[{direction}]** {ev['Summary']}")
 
-    def _measure_heat_correlation(self, events):
-        """
-        [v1.9.3] Heat Correlation
-        Plutosが検知した「High Heat Activity」周辺のタイムラインを調査し、
-        関連する実行痕跡があれば「状況証拠による確定（High Confidence Verdict）」を下す。
-        """
-        heat_events = [e for e in events if "Plutos" in str(e.get('Source')) and "HEAT" in str(e.get('Summary', '')).upper()]
-        
-        if not heat_events: return
-
-        print(f"   -> Measuring Heat Correlation for {len(heat_events)} burst events...")
-
-        for h_ev in heat_events:
-            burst_time = h_ev.get('dt_obj')
-            if not burst_time: continue
-            
-            # Window: +/- 5 minutes
-            start_w = burst_time - datetime.timedelta(minutes=5)
-            end_w = burst_time + datetime.timedelta(minutes=5)
-
-            correlated = False
-            
-            # Search for related execution in window
-            for ev in events:
-                if ev == h_ev: continue
-                ev_time = ev.get('dt_obj')
-                if not ev_time: continue
-                
-                if start_w <= ev_time <= end_w:
-                    cat = ev.get('Category', '')
-                    summary = str(ev.get('Summary', '')).lower()
-                    
-                    # Check for archivers, lateral tools, etc.
-                    if cat in ['EXEC', 'DROP'] or "service" in summary:
-                        kws = str(ev.get('Keywords', '')).lower()
-                        if any(x in kws for x in ['7z', 'rar', 'psexec', 'curl', 'wget', 'copy']):
-                            h_ev['Summary'] += " [CORRELATED_WITH_EXECUTION]"
-                            h_ev['Detail'] += f"\n[!] CORRELATION: Coincides with {ev['Summary']} at {ev['Time']}"
-                            h_ev['Criticality'] = 100 # Boost to MAX
-                            ev['Criticality'] = 100   # Boost the execution event too
-                            self.verdict_flags.add("[DATA_EXFIL_CONFIRMED]")
-                            correlated = True
-            
-            if correlated:
-                print(f"      [!] Heat Burst at {burst_time} confirmed as malicious activity.")
-
         if has_lateral:
+            # [FIX] 明示的にフラグを立てる！
+            self.verdict_flags.add("[LATERAL_MOVEMENT_CONFIRMED]")
+            
             block = ["\n### 🚨 Lateral Movement & Internal Exfiltration Detected\n"]
             block.append("本端末において、横展開または内部データ持ち出しの痕跡が確認されました。\n")
             block.extend(lateral_lines)
             block.append("\n**[LATERAL_MOVEMENT_CONFIRMED]**\n")
             return "".join(block)
+        
         return ""
+
+    def _measure_heat_correlation(self, events):
+        heat_events = [e for e in events if "Plutos" in str(e.get('Source')) and "HEAT" in str(e.get('Summary', '')).upper()]
+        if not heat_events: return
+        print(f"   -> Measuring Heat Correlation for {len(heat_events)} burst events...")
+        for h_ev in heat_events:
+            burst_time = h_ev.get('dt_obj')
+            if not burst_time: continue
+            start_w = burst_time - datetime.timedelta(minutes=5)
+            end_w = burst_time + datetime.timedelta(minutes=5)
+            correlated = False
+            for ev in events:
+                if ev == h_ev: continue
+                ev_time = ev.get('dt_obj')
+                if not ev_time: continue
+                if start_w <= ev_time <= end_w:
+                    cat = ev.get('Category', '')
+                    summary = str(ev.get('Summary', '')).lower()
+                    if cat in ['EXEC', 'DROP'] or "service" in summary:
+                        kws = str(ev.get('Keywords', '')).lower()
+                        if any(x in kws for x in ['7z', 'rar', 'psexec', 'curl', 'wget', 'copy']):
+                            h_ev['Summary'] += " [CORRELATED_WITH_EXECUTION]"
+                            h_ev['Detail'] += f"\n[!] CORRELATION: Coincides with {ev['Summary']} at {ev['Time']}"
+                            h_ev['Criticality'] = 100
+                            ev['Criticality'] = 100
+                            self.verdict_flags.add("[DATA_EXFIL_CONFIRMED]")
+                            correlated = True
+            if correlated:
+                print(f"      [!] Heat Burst at {burst_time} confirmed as malicious activity.")
 
     def _extract_attack_flow(self, events):
         seen_steps = set()
@@ -700,7 +562,6 @@ class AtroposThinker:
             if ev.get('Criticality', 0) >= 80:
                 kw = ""
                 if ev.get('Keywords'): kw = f" ({ev['Keywords'][0]})"
-                
                 cat = ev['Category']
                 step = ""
                 if cat == "INIT": step = f"初期侵入/不正スクリプト実行{kw}"
@@ -709,7 +570,6 @@ class AtroposThinker:
                 elif cat == "PERSIST": step = f"永続化設定{kw}"
                 elif cat == "ANTI": step = f"痕跡隠滅{kw}"
                 elif cat == "EXEC": step = f"不正プログラム実行{kw}"
-                
                 if step and step not in seen_steps:
                     self.flow_steps.append(step)
                     seen_steps.add(step)
@@ -722,12 +582,10 @@ class AtroposThinker:
             prev_time = events[i-1].get('dt_obj')
             curr_time = events[i].get('dt_obj')
             if not prev_time or not curr_time:
-                current_phase.append(events[i])
-                continue
+                current_phase.append(events[i]); continue
             delta = (curr_time - prev_time).total_seconds() / 3600
             if delta > gap_threshold_hours:
-                phases.append(current_phase)
-                current_phase = []
+                phases.append(current_phase); current_phase = []
             current_phase.append(events[i])
         phases.append(current_phase)
         return phases
@@ -742,14 +600,10 @@ class AtroposThinker:
                 for row in df.iter_rows(named=True):
                     fname = str(row[name_col])
                     if self._is_known_noise(fname): continue
-                    run_count = row.get("RunCount", 1)
-                    try: run_count = int(run_count)
-                    except: run_count = 1
-                    if run_count > 0:
-                        events.append(self._create_event(
-                            row[time_col], "Prefetch (PECmd)", "System", f"Process Execution: {fname}", 
-                            f"Run Count: {run_count}", 100, "EXEC", [fname]
-                        ))
+                    events.append(self._create_event(
+                        row[time_col], "Prefetch (PECmd)", "System", f"Process Execution: {fname}", 
+                        f"Run Count: {row.get('RunCount', 1)}", 100, "EXEC", [fname]
+                    ))
 
         if self.dfs.get('Sphinx') is not None:
             df = self.dfs['Sphinx']
@@ -778,19 +632,13 @@ class AtroposThinker:
                  heat = 0
                  try: heat = int(row.get('Heat_Score', 0))
                  except: pass
-                 
                  summary = f"{row.get('Plutos_Verdict')}: {row.get('Remote_IP')}"
                  crit = 90
-                 
                  if heat >= 80:
-                     summary = f"[HIGH HEAT] {summary}"
-                     crit = 95 # Atropos will boost to 100 if correlated
-
+                     summary = f"[HIGH HEAT] {summary}"; crit = 95
                  events.append(self._create_event(
                      row.get('Timestamp'), "Plutos Gate", "Network",
-                     summary,
-                     f"Process: {row.get('Process')}\nTags: {row.get('Tags')}\nHeat: {heat}",
-                     crit, "C2", [row.get('Process')]
+                     summary, f"Process: {row.get('Process')}\nTags: {row.get('Tags')}", crit, "C2", [row.get('Process')]
                  ))
         
         if self.dfs.get('Pandora') is not None:
@@ -810,21 +658,26 @@ class AtroposThinker:
                      try: score = int(float(row.get('Chronos_Score', 0)))
                      except: pass
                      if "TIMESTOMP" in str(row.get('Anomaly_Time', '')):
-                         events.append(self._create_event(
-                             row.get('si_mod_dt'), "Chronos", "System", f"Timestomp: {fname}", "", 50, "ANTI", [fname]
-                         ))
+                         events.append(self._create_event(row.get('si_mod_dt'), "Chronos", "System", f"Timestomp: {fname}", "", 50, "ANTI", [fname]))
                      elif score >= 150:
-                         events.append(self._create_event(
-                             row.get('si_dt'), "Chronos", "System", f"File Creation: {fname}", "", 70, "DROP", [fname]
-                         ))
+                         events.append(self._create_event(row.get('si_dt'), "Chronos", "System", f"File Creation: {fname}", "", 70, "DROP", [fname]))
+
+        if self.dfs.get('AION') is not None:
+            for row in self.dfs['AION'].iter_rows(named=True):
+                fname = row.get('Target_FileName', 'Unknown')
+                score = 0
+                try: score = int(row.get('AION_Score', 0))
+                except: pass
+                if score >= 10:
+                    events.append(self._create_event(
+                        row.get('Last_Executed_Time'), "AION (Persistence)", "System",
+                        f"Persistence: {fname}", f"Location: {row.get('Entry_Location')}", 95, "PERSIST", [fname]
+                    ))
 
         return events
 
     def _create_event(self, time, src, user, summary, detail, crit, cat, kws):
-        return {
-            "Time": time, "Source": src, "User": user, "Summary": summary,
-            "Detail": detail, "Criticality": crit, "Category": cat, "Keywords": kws
-        }
+        return {"Time": time, "Source": src, "User": user, "Summary": summary, "Detail": detail, "Criticality": crit, "Category": cat, "Keywords": kws}
 
     def _is_known_noise(self, fpath):
         fp = str(fpath).lower()

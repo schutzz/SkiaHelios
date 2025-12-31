@@ -6,16 +6,15 @@ import re
 from pathlib import Path
 
 # ============================================================
-#  SH_ChronosSift v12.0 [Noise Killer Edition]
+#  SH_ChronosSift v12.2 [Robust Mock Edition]
 #  Mission: Detect Time Anomalies (Timestomping).
-#  Fix: Aggressive filtering of OS artifacts (WinSxS, .NET)
-#       that cause false positive timestomp alerts.
+#  Fix: Fallback to CreationTime if ModificationTime is missing.
 # ============================================================
 
 def print_logo():
     print(r"""
        _______                   _____  _  ______
-      / ____/hronos   [ Time Lord v12.0 ]   / /
+      / ____/hronos   [ Time Lord v12.2 ]   / /
      / /             "Anomaly Detected."   / /
      \____/                               \/
     """)
@@ -37,22 +36,17 @@ class ChronosEngine:
         ]
 
     def filter_noise(self, df):
-        # 1. SANCTUARY DEFINITION (Keep specific user areas)
         sanctuary_mask = (
             pl.col("ParentPath").str.to_lowercase().str.contains("users") |
             pl.col("ParentPath").str.to_lowercase().str.contains(r"tasks\\[^m]") | 
             pl.col("ParentPath").str.to_lowercase().str.contains("startup")
         )
-        
-        # 2. TARGET DEFINITION (Always keep these)
-        WANTED_FILES = ["Secret_Project.pdf", "Windows_Security_Audit", "win_optimizer.lnk", "SunShadow", "Trigger", "UpdateService.exe", "Project_Chaos"]
+        WANTED_FILES = ["Secret_Project.pdf", "Windows_Security_Audit", "win_optimizer.lnk", "SunShadow", "Trigger", "UpdateService.exe", "Project_Chaos", "Conf.7z"]
         wanted_mask = pl.col("FileName").str.contains(r"(?i)(" + "|".join(WANTED_FILES) + ")")
 
-        # Initial Split
         kept_df = df.filter(sanctuary_mask | wanted_mask)
         others_df = df.filter(~(sanctuary_mask | wanted_mask))
         
-        # 3. BROAD NOISE PATTERNS (For non-sanctuary paths)
         NOISE_PATTERNS = [
             r"(?i)PathUnknown", r"(?i)\\Windows\\", r"(?i)\\Program Files", 
             r"(?i)\\ProgramData", r"(?i)\\$Extend",
@@ -63,27 +57,18 @@ class ChronosEngine:
         for pattern in NOISE_PATTERNS:
             others_df = others_df.filter(~pl.col("ParentPath").str.contains(pattern))
         
-        # Recombine
         final_df = pl.concat([kept_df, others_df]).unique()
         
-        # 4. HARD KILL LIST (Applied to EVERYTHING, including Sanctuary)
-        # These are paths/files that are NEVER valid timestomp indicators in this context.
         HARD_KILL_PATTERNS = [
-            r"(?i)Speech Recognition", # Edge noise in Users
-            r"(?i)Microsoft\.CognitiveServices",
-            r"(?i)Microsoft\.Build",
-            r"(?i)GAC_MSIL",
-            r"(?i)\\WinSxS\\",
-            r"(?i)\\Servicing\\",
-            r"(?i)AppxAllUserStore",
-            r"(?i)CoreUIComponents"
+            r"(?i)Speech Recognition", r"(?i)Microsoft\.CognitiveServices",
+            r"(?i)Microsoft\.Build", r"(?i)GAC_MSIL",
+            r"(?i)\\WinSxS\\", r"(?i)\\Servicing\\",
+            r"(?i)AppxAllUserStore", r"(?i)CoreUIComponents"
         ]
-        
         for pattern in HARD_KILL_PATTERNS:
             final_df = final_df.filter(~pl.col("ParentPath").str.contains(pattern))
             final_df = final_df.filter(~pl.col("FileName").str.contains(pattern))
 
-        # 5. SPECIFIC FP BINARIES
         FP_BLACKLIST = ["sbservicetrigger", "servicetrigger", "wkstriggers", "jobtrigger", "fvecpl.dll"]
         fp_mask = pl.col("FileName").str.to_lowercase().str.contains("|".join(FP_BLACKLIST))
         sys_mask = pl.col("ParentPath").str.to_lowercase().str.contains("windows")
@@ -91,7 +76,7 @@ class ChronosEngine:
         return final_df.filter(~(fp_mask & sys_mask))
 
     def analyze(self, args):
-        print(f"[*] Chronos v12.0 awakening... Targeting: {Path(args.file).name}")
+        print(f"[*] Chronos v12.2 awakening... Targeting: {Path(args.file).name}")
         try:
             lf = pl.scan_csv(args.file, ignore_errors=True)
             
@@ -109,16 +94,29 @@ class ChronosEngine:
             lf = lf.filter(~pl.col("FileName").is_in(SYSTEM_WHITELIST))
 
             if args.targets_only:
-                target_exts = [".exe", ".dll", ".sys", ".ps1", ".bat", ".vbs", ".cmd", ".scr", ".pif", ".pdf"]
+                target_exts = [".exe", ".dll", ".sys", ".ps1", ".bat", ".vbs", ".cmd", ".scr", ".pif", ".pdf", ".7z", ".zip"]
                 target_pat = f"(?i)({'|'.join([re.escape(e) for e in target_exts])})$"
                 lf = lf.filter(pl.col("FileName").str.contains(target_pat))
 
+            # --- Fix for Mock Data & Missing Columns ---
             cols = lf.collect_schema().names()
-            si_cr = "Created0x10" if "Created0x10" in cols else "StandardInfoCreationTime"
-            fn_cr = "Created0x30" if "Created0x30" in cols else "FileNameCreationTime"
-            si_mod = "LastModified0x10" if "LastModified0x10" in cols else "StandardInfoLastModified"
-            has_ads_col = "HasAds" if "HasAds" in cols else None
+            
+            si_cr = "si_dt" if "si_dt" in cols else ("Created0x10" if "Created0x10" in cols else "StandardInfoCreationTime")
+            fn_cr = "fn_dt" if "fn_dt" in cols else ("Created0x30" if "Created0x30" in cols else "FileNameCreationTime")
+            
+            # Modification Time Detection (with Safety Fallback)
+            possible_mod_cols = ["si_mod_dt", "LastModified0x10", "StandardInfoLastModified"]
+            si_mod = next((c for c in possible_mod_cols if c in cols), None)
 
+            if not si_mod:
+                print(f"[!] Warning: Modification Time column not found. Falling back to Creation Time ({si_cr}).")
+                si_mod = si_cr
+
+            # Handle ISO Format (Replace 'T' with space)
+            for col_name in [si_cr, fn_cr, si_mod]:
+                if col_name in cols:
+                     lf = lf.with_columns(pl.col(col_name).str.replace("T", " "))
+            
             lf = lf.with_columns([
                 pl.col(si_cr).str.to_datetime(format="%Y-%m-%d %H:%M:%S%.f", strict=False).alias("si_dt"),
                 pl.col(fn_cr).str.to_datetime(format="%Y-%m-%d %H:%M:%S%.f", strict=False).alias("fn_dt"),
@@ -127,12 +125,11 @@ class ChronosEngine:
 
             lf = lf.with_columns((pl.col("si_dt") - pl.col("fn_dt")).dt.total_seconds().alias("diff_sec"))
 
-            crit_exts = [".exe", ".dll", ".ps1", ".bat", ".sys", ".cmd", ".vbs", ".scr", ".pdf"]
+            crit_exts = [".exe", ".dll", ".ps1", ".bat", ".sys", ".cmd", ".vbs", ".scr", ".pdf", ".7z"]
             crit_pattern = f"(?i)({'|'.join([re.escape(e) for e in crit_exts])})$"
-            WANTED_FILES = ["Secret_Project.pdf", "Windows_Security_Audit", "win_optimizer.lnk", "SunShadow", "Trigger", "UpdateService.exe", "Project_Chaos"]
+            WANTED_FILES = ["Secret_Project.pdf", "Windows_Security_Audit", "win_optimizer.lnk", "SunShadow", "Trigger", "UpdateService.exe", "Project_Chaos", "Conf.7z"]
             wanted_pattern = r"(?i)(" + "|".join(WANTED_FILES) + ")"
             
-            # Logic: Only flag critical extensions OR Wanted files OR huge diffs
             lf = lf.filter(
                 pl.col("FileName").str.contains(crit_pattern) | 
                 (pl.col("diff_sec").abs() > 3600) |
@@ -140,8 +137,8 @@ class ChronosEngine:
             )
 
             ads_check = pl.lit(False)
-            if has_ads_col:
-                ads_check = pl.col(has_ads_col)
+            if "HasAds" in cols:
+                ads_check = pl.col("HasAds")
 
             lf = lf.with_columns([
                 pl.when(pl.col("FileName").str.contains(wanted_pattern)).then(pl.lit("CRITICAL_ARTIFACT"))
@@ -187,6 +184,8 @@ class ChronosEngine:
 
         except Exception as e:
             print(f"[!] Critical Error: {e}")
+            import traceback
+            traceback.print_exc()
 
 def main(argv=None):
     print_logo()
