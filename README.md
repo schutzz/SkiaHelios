@@ -1,168 +1,75 @@
-# SkiaHelios v1.9 - God Mode (The Chimera Edition)
+# SkiaHelios v2.2 - God Mode (Visual & Legacy Edition)
 
+![SkiaHelios CI](https://github.com/schutzz/SkiaHelios/actions/workflows/test.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
 ![Polars](https://img.shields.io/badge/Engine-Polars_0.20%2B-orange?logo=polars)
+![Mermaid](https://img.shields.io/badge/Report-Mermaid_Visuals-ff69b4?logo=mermaid)
 ![Status](https://img.shields.io/badge/Status-Battle_Tested-green)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey)
-![SkiaHelios CI](https://github.com/schutzz/SkiaHelios/actions/workflows/test.yml/badge.svg)
 
-> *"From Shadows to Sun. Order restored. Truth revealed."*
+> *"From Shadows to Sun. Order restored. Truth visualized."*
 
-**SkiaHelios** is a high-resolution, modular DFIR (Digital Forensics & Incident Response) framework built for **speed** and **causality**. Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** to deconstruct artifacts, trace physical execution chains, and weave a cohesive narrative across multiple hosts.
+**SkiaHelios** is a high-resolution, modular DFIR (Digital Forensics & Incident Response) framework built for **speed**, **causality**, and **visual narrative**.
 
-**Current Version:** v1.9 (Chimera Fusion / Lateral Movement Aware)
+Unlike traditional monolithic tools that dump raw text, SkiaHelios uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** to deconstruct artifacts, trace physical execution chains, and weave a cohesive narrative across multiple hosts.
 
----
-
-## ⚡ Key Features (Why SkiaHelios?)
-
-* **🚀 Hyperspeed Ingestion:** Powered by **Polars (Rust-based DataFrame library)** to handle massive CSV timelines (KAPE/Plaso) instantly.
-* **🦁 Operation Chimera (Multi-Host):** **New in v1.9!** Seamlessly integrates timelines from multiple compromised hosts (`SH_ChimeraFusion`) to visualize Lateral Movement chains.
-* **🔮 Physics-Based Detection:**
-    * **Chronos:** Detects NTFS Timestomping via `$SI < $FN` logic (ms precision).
-    * **Plutos:** Analyzes "Network Thermodynamics" (Heat Score) to find data exfiltration and internal lateral movement.
-    * **Atropos:** Correlates "Execution" with "File Drops" to prove causality (not just existence).
-* **🛡️ Noise Cancellation:** Aggressive "Iron Curtain" filtering logic to remove OS noise (WinSxS, .NET, Updates) and focus on the 1% of critical anomalies.
+**Current Version:** v2.2 (Visual Reporting / Legacy OS Support / Interactive Mode / Chimera Fusion)
 
 ---
 
-## 🧪 Validation & Benchmarks (Proven Capability)
+## ⚡ Key Features (v2.2 Updates)
 
-SkiaHelios is not just a concept. It is validated against complex attack scenarios.
-
-### 🏆 Operation "TwinSnakes" (Lateral Movement Scenario)
-**Status:** ✅ **PASSED (S-Rank)**
-* **Scenario:** Phishing Entry (Host A) → Persistence → Lateral Movement (PsExec) → Target Access (Host B) → Timestomping & Exfiltration.
-* **Result:**
-    * Detected **100%** of attack phases.
-    * **Automatic Correlation:** Identified the attack flow across 2 distinct hosts without manual timeline merging.
-    * **Verdict:** Correctly flagged `[LATERAL_MOVEMENT_CONFIRMED]` and pinpointed `Conf.7z` (Timestomped Archive).
-
-### ⚔️ Atomic Red Team (Infect28 / SunShadow)
-**Status:** ✅ **PASSED**
-* **Vectors Detected:**
-    * PowerShell Obfuscation (Base64/XOR) via `SH_Sphinx`.
-    * Persistence (Registry RunKeys, Scheduled Tasks) via `SH_AION`.
-    * Data Exfiltration (OneDrive/Bitsadmin) via `SH_Plutos`.
+* **🏹 Visual Attack Flow:** Automatically generates **Mermaid diagrams** visualizing the attack chain (Initial Access -> Execution -> Persistence).
+* **🕰️ Hybrid Time Logic:** Specialized **`--legacy` mode** for older OS environments (XP/Vista/2008) to eliminate install-time noise vs. Modern OS optimization.
+* **👻 Ghost Hunting & Threat Intel:** Recovers deleted files (`$UsnJrnl` vs `$MFT`) and detects **WebShells (c99, r57)**, **Rootkits**, and **C2 IP traces** with heavy weighting.
+* **💎 High-Value IOCs:** Aggregates scattered indicators into a clean, actionable table at the top of the report.
+* **🦁 Interactive Wizard:** No command memorization needed. Just run and follow the prompts.
+* **🔥 Chimera Fusion:** Correlates Lateral Movement across multiple hosts to visualize the entire campaign.
 
 ---
 
-## 🏛️ Architecture (The Triad)
+## ⚡ Quick Start (30 Seconds)
 
-SkiaHelios separates concerns into three divine roles to ensure modularity and logic isolation.
+Get started immediately. No complex databases, just pure Python & Polars power.
 
-```mermaid
-graph TD
-    %% Style Definitions
-    classDef inputClass fill:#2D1B3A,stroke:#E0B0FF,stroke-width:2px,color:#E0B0FF;
-    classDef phaseClass fill:#1E0B2A,stroke:#B19CD9,stroke-width:3px,color:#FFFFFF,rx:15,ry:15;
-    classDef coreClass fill:#3A1B4F,stroke:#D8BFD8,stroke-width:2px,color:#FFFFFF;
-    classDef moduleClass fill:#4A2B5F,stroke:#9370DB,stroke-width:2px,color:#E6E6FA;
-    classDef outputClass fill:#2F1B3A,stroke:#BA55D3,stroke-width:2px,color:#DDA0DD;
-    classDef fusionClass fill:#1A0033,stroke:#FF69B4,stroke-width:3px,color:#FFB6C1;
-
-    %% Title
-    title[("⚡️ SkiaHelios v1.9 Triad Architecture ⚡️\nFrom Shadows to Sun")]:::inputClass
-
-    %% Input
-    Evidence[📂 Raw Artifacts<br/>KAPE CSVs / EVTX / MFT / Prefetch]:::inputClass
-
-    %% Phase 1: Clotho
-    subgraph Phase1 ["🧶 Phase 1: Clotho (The Spinner) - Ingestion & Enrichment"]
-        direction TB
-        Clotho[SH_ClothoReader<br/>Universal Ingestion<br/>5W1H Enrichment<br/>Session Awareness]:::coreClass
-        Hunters[🐍 Specialized Hunters<br/>• PlutosGate • HerculesReferee<br/>• Pandora • ChronosSift<br/>• Sirenhunt • Sphinx • AION]:::moduleClass
-    end
-
-    %% Phase 2: Atropos
-    subgraph Phase2 ["✂️ Phase 2: Atropos (The Thinker) - Correlation & Judgment"]
-        direction TB
-        Atropos[SH_AtroposThinker<br/>Physics Time Sort<br/>Heat Correlation<br/>Privilege Escalation Detection]:::coreClass
-        Nemesis[Nemesis Tracing<br/>File Lifecycle Reconstruction]:::moduleClass
-        Chronos[Chronos Time Lord<br/>Timestomp Detection]:::moduleClass
-        Scout[Internal Scout<br/>Lateral Movement Analysis<br/>RFC1918 Patrol]:::moduleClass
-    end
-
-    %% Phase 3: Lachesis
-    subgraph Phase3 ["✍️ Phase 3: Lachesis (The Allotter) - Reporting"]
-        direction TB
-        Lachesis[SH_LachesisWriter<br/>Grimoire Generation<br/>IOC Extraction]:::coreClass
-        Report[📜 Grimoire Report<br/>SANS-Style Markdown]:::outputClass
-        JSONData[📊 Structured JSON Dump<br/>Machine-Readable Evidence]:::outputClass
-    end
-
-    %% Phase 4: Chimera
-    subgraph Phase4 ["🦁 Phase 4: Chimera (The Beast) - Multi-Host Fusion"]
-        direction TB
-        Chimera[SH_ChimeraFusion v1.9<br/>Campaign-Level Integration<br/>Lateral Chain Visualization]:::fusionClass
-        Campaign[🏛️ Campaign Report<br/>Cross-Host Attack Narrative]:::outputClass
-    end
-
-    %% Flow
-    Evidence --> Clotho
-    Hunters -.->|Feed Seeds & Insights| Clotho
-    Clotho -->|Enriched Polars DataFrame| Atropos
-    Atropos --> Nemesis
-    Atropos --> Chronos
-    Atropos --> Scout
-    Atropos --> Lachesis
-    Lachesis --> Report
-    Lachesis --> JSONData
-    JSONData --> Chimera
-    Chimera --> Campaign
-
-    %% Overall Layout
-    Phase1 --> Phase2 --> Phase3 --> Phase4
-
-    %% Footer
-    footer[("Powered by Python • Polars • Pure Logic\n© schutzz - God Mode Final Achieved")]:::inputClass
-```
-
----
-
-## 🛠️ Installation
-
+### 1. Installation
 ```bash
 # Clone the repository
 git clone [https://github.com/schutzz/SkiaHelios.git](https://github.com/schutzz/SkiaHelios.git)
 cd SkiaHelios
 
-# Install dependencies (Polars is the only heavy requirement)
+# Install dependencies (Polars, Pandas, etc.)
 pip install -r requirements.txt
 ```
 
----
+### 2. Interactive Mode (Wizard) 🆕
+Simply run the script without arguments. It will guide you through directory selection and mode toggling.
 
-## 🚀 Usage
+```bash
+python SH_HeliosConsole.py
+# Follow the prompts to select Input Dir, Output Dir, and Legacy Mode.
+```
 
-### 1. Full Auto Scan (Single Host)
-The `SH_HeliosConsole.py` acts as the commander, running all modules in sequence.
+### 3. Command Line Mode (Automation)
+Ideal for CI/CD pipelines or scripted analysis.
 
+**Standard Scan (Modern OS - Win10/11/Server 2016+):**
 ```bash
 python SH_HeliosConsole.py \
-  --dir "C:\Case\KAPE_Output\HostA" \
-  --case "Incident_Alpha_HostA" \
-  --out "Helios_Output"
+  --dir "C:\Cases\Case_001\KAPE_Output" \
+  --case "Ransomware_Investigation"
 ```
 
-### 2. Manual Triad Execution (Granular Control)
-For advanced analysts who want to debug specific logic steps.
-
+**Legacy Scan (Old OS - XP/Vista/2008/2012 or High Noise):**
+*Use this flag to ignore System32/Program Files timestamps and focus on User/Web spaces.*
 ```bash
-# Step 1: Run specialized detectors
-python tools/SH_AIONDetector.py --dir "KAPE/" --out "Persistence.csv"
-python tools/SH_PlutosGate.py --dir "KAPE/" --out "Network.csv"
-
-# Step 2: Weave the Grimoire (Report)
-python tools/SH_HekateWeaver.py \
-  -i "KAPE/Timeline.csv" \
-  -o "Reports/HostA_Grimoire.md" \
-  --aion "Persistence.csv" \
-  --plutos "Network.csv" \
-  --case "Manual_Analysis"
+python SH_HeliosConsole.py \
+  --dir "C:\Cases\GrrCON_2014\KAPE_Output" \
+  --case "Legacy_Breach" \
+  --legacy
 ```
 
-### 3. Operation Chimera (Multi-Host Fusion)
+### 4. Operation Chimera (Multi-Host Fusion)
 Combine reports from multiple hosts to visualize the entire campaign.
 
 ```bash
@@ -174,25 +81,61 @@ python tools/SH_ChimeraFusion.py \
 
 ---
 
-## 🧩 Module Breakdown
+## 🧩 The Triad Architecture
 
-| Module | Role | Functionality |
-| :--- | :--- | :--- |
-| **Hercules** | The Referee | Event Log analysis, Identity tracking (SID resolution), and initial triage. |
-| **Plutos** | Gatekeeper | Network & SRUM analysis. Detects C2, Lateral Movement, and Data Exfiltration using "Heat Scores". |
-| **Pandora** | The Link | NTFS/USN analysis. Recovers deleted file history ("Ghosts") and anti-forensics traces. |
-| **Chronos** | Time Lord | Detects **Timestomping** by comparing `$SI` and `$FN` attributes with ms-level precision. |
-| **AION** | The Eye | Persistence hunting (Registry, Tasks, Services). Calculates SHA256 for evidence. |
-| **Sphinx** | Decipherer | Decodes obfuscated command lines (Base64, PowerShell) and extracts IOCs. |
-| **Siren** | Validator | Cross-validates file events with **Prefetch** & **Amcache** to confirm execution. |
+SkiaHelios operates on three distinct layers of abstraction:
+
+### 🧵 1. Clotho (The Spinner)
+*Parses raw artifacts into structured DataFrames.*
+* **Clio:** Browser History & Cache parser.
+* **Pandora:** **[UPDATED]** NTFS/USN analysis. Recovers deleted file history ("Ghosts") and applies Threat Intelligence (WebShell/Rootkit detection).
+
+### 📐 2. Atropos (The Judge)
+*Measures, filters, and correlates events.*
+* **Chronos:** **[UPDATED]** Hybrid Time Logic. Detects **Timestomping** ($SI < $FN) with ms-level precision. Adapts to Legacy OS.
+* **Hercules:** Event Log analysis, Identity tracking (SID resolution), and initial triage.
+* **Plutos:** Network & SRUM analysis. Detects C2, Lateral Movement, and Data Exfiltration using "Heat Scores".
+* **AION:** Persistence hunting (Registry, Tasks, Services). Calculates SHA256 for evidence.
+* **Siren:** Cross-validates file events with **Prefetch** & **Amcache** to confirm execution.
+
+### 🧶 3. Lachesis (The Weaver)
+*Weaves the verdict into a human-readable narrative.*
+* **Lachesis Engine:** **[UPDATED]** Generates **Visual Reports** with Mermaid charts, IOC tables, and noise folding (`<details>`).
+* **Sphinx:** Decodes obfuscated command lines (Base64, PowerShell) and extracts IOCs.
+
+---
+
+## 📊 Report Sample (Grimoire)
+
+SkiaHelios generates a `Grimoire_[CaseName]_jp.md` that renders beautifully in VS Code or GitHub.
+
+```mermaid
+graph TD
+    %% Nodes Definition
+    Attacker((🦁 Attacker)) -->|Exploit/Access| Initial{Initial Access}
+    Initial -->|File Upload| WS_12345["c99.php<br/>(WebShell)"]
+    WS_12345 -->|Command Exec| Cmd_9999((OS Shell))
+    Cmd_9999 -->|Persistence| RK_5555["mxdwdui.BUD<br/>(Rootkit)"]
+    
+    %% Styles
+    classDef threat fill:#ffcccc,stroke:#ff0000,stroke-width:2px,color:#000;
+    class Attacker,Initial threat;
+```
 
 ---
 
 ## 🔮 Roadmap
-* [x] **v1.9:** Internal Scout & Lateral Movement Logic (Completed)
-* [x] **v1.9:** Chimera Fusion (Multi-Host Reporting) (Completed)
-* [ ] **v2.0:** GUI / Web Dashboard (React based)
-* [ ] **v2.1:** SIGMA Rule Integration
+
+* [x] **v1.0:** Core Logic (Clotho/Atropos/Lachesis)
+* [x] **v1.9:** Internal Scout & Lateral Movement Logic (Chimera)
+* [x] **v2.0:** **Visual Reporting (Mermaid Integration)**
+* [x] **v2.1:** **Legacy OS Support & Threat Intelligence**
+* [x] **v2.2:** **Interactive Mode & Syntax Guards**
+* [ ] **v2.5:** Volatility 3 Integration (Memory Forensics)
+* [ ] **v3.0:** AI-Driven Narrative Generation (LLM Integration)
 
 ---
-*Created by the SkiaHelios Team. Powered by Polars.*
+
+## 🛡️ License
+
+MIT License - Built for the Defenders.

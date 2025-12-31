@@ -4,27 +4,34 @@ import traceback
 
 # Import The Triad
 try:
-    from SH_ClothoReader import ClothoReader
-    from SH_AtroposThinker import AtroposThinker
-    from SH_LachesisWriter import LachesisWriter
-except ImportError as e:
-    print(f"[!] Hekate Import Error: {e}")
-    print("Ensure SH_ClothoReader.py, SH_AtroposThinker.py, and SH_LachesisWriter.py are in the same directory.")
-    sys.exit(1)
+    from tools.SH_ClothoReader import ClothoReader
+    from tools.SH_AtroposThinker import AtroposThinker
+    from tools.SH_LachesisWriter import LachesisWriter
+except ImportError:
+    # パスが通っていない場合のフォールバック（直接実行時など）
+    try:
+        from SH_ClothoReader import ClothoReader
+        from SH_AtroposThinker import AtroposThinker
+        from SH_LachesisWriter import LachesisWriter
+    except ImportError as e:
+        print(f"[!] Hekate Import Error: {e}")
+        sys.exit(1)
 
 # ============================================================
-#  SH_HekateWeaver v16.0 [The Triad Controller]
+#  SH_HekateWeaver v16.1 [Fix: Argument Passing]
 #  Mission: Orchestrate Clotho, Atropos, and Lachesis.
+#  Update: Accepted 'argv' for HeliosConsole integration.
 # ============================================================
 
 def print_logo():
     print(r"""
       | | | | | |
-    -- HEKATE  --   [ The Triad v16.0 ]
+    -- HEKATE  --   [ The Triad v16.1 ]
       | | | | | |   "Clotho reads, Atropos thinks, Lachesis writes."
     """)
 
-def main():
+# [FIX] 引数 argv=None を受け取れるように変更っス！
+def main(argv=None):
     print_logo()
     
     parser = argparse.ArgumentParser(description="SkiaHelios Hekate Weaver (Triad Edition)")
@@ -48,7 +55,8 @@ def main():
     parser.add_argument("--case", default="Investigation", help="Case Name")
     parser.add_argument("--lang", default="jp", help="Report Language (jp/en)")
     
-    args = parser.parse_args()
+    # [FIX] 受け取った argv をパースするように変更っス！
+    args = parser.parse_args(argv)
 
     try:
         # ----------------------------------------------------

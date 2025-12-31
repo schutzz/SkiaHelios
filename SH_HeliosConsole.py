@@ -8,11 +8,12 @@ import json
 from datetime import datetime
 
 # ============================================================
-#  SH_HeliosConsole v4.1 [Timekeeper & Benchmark]
+#  SH_HeliosConsole v4.5 [Legacy & Interactive Merged]
 #  Mission: Coordinate all modules & Measure Performance.
 #  Updates:
-#    - Merged v4.0 logic (Cerberus Pipeline) with v1.9 Benchmarking.
-#    - Auto-generates 'execution_stats.json'.
+#    - Merged v4.1 Benchmarking logic.
+#    - Added v4.4 Interactive Legacy Mode prompt.
+#    - Added '--legacy' flag support for Chronos v17.1.
 # ============================================================
 
 def print_logo():
@@ -22,7 +23,7 @@ def print_logo():
       , '   _ _ _ _   ' ,
      ,     |_______|      ,
     ,       _______        ,  < SKIA HELIOS >
-   ,       |_______|        ,  v4.1 - Timekeeper
+   ,       |_______|        ,  v4.5 - Legacy Ready
    ,       _______          ,
     ,      |_______|       ,
      ,                    ,
@@ -48,7 +49,6 @@ class BenchmarkTimer:
     def __exit__(self, exc_type, exc_val, exc_tb):
         elapsed = time.perf_counter() - self.start_time
         self.stats[self.name] = round(elapsed, 4)
-        # エラー時は記録しない、またはエラーとして記録するロジックも可
 
 class HeliosCommander:
     def __init__(self):
@@ -123,12 +123,18 @@ class HeliosCommander:
             print(f">>> [{status_str}] {key.upper()} finished in {elapsed:.4f}s")
         
         return success
-        
-        return success
 
-    def full_auto_scan(self, csv_dir, raw_dir, out_dir, case_name, start_date=None, end_date=None, mount_point=None):
+    # [UPDATE] legacy_mode 引数を追加
+    def full_auto_scan(self, csv_dir, raw_dir, out_dir, case_name, start_date=None, end_date=None, mount_point=None, legacy_mode=False):
         print_logo()
         print(f"[*] --- INITIATING CERBERUS PIPELINE: {case_name} ---")
+        
+        # [UPDATE] モード表示
+        if legacy_mode:
+            print("[*] MODE: LEGACY OS DETECTED (Aggressive Noise Filtering ON)")
+        else:
+            print("[*] MODE: STANDARD (Modern OS Optimized)")
+
         if start_date: print(f"[*] Time Filter: {start_date} -> {end_date}")
         
         pipeline_start = time.perf_counter()
@@ -172,7 +178,12 @@ class HeliosCommander:
         chronos_out = case_dir / "Time_Anomalies.csv"
         if mft_raw:
             # Chronos supports Time
-            self.run_module("chronos", ["-f", str(mft_raw), "-o", str(chronos_out), "--targets-only"] + time_args)
+            # [UPDATE] Legacy Mode Flag Passing
+            chronos_args = ["-f", str(mft_raw), "-o", str(chronos_out), "--targets-only"] + time_args
+            if legacy_mode:
+                chronos_args.append("--legacy")
+            
+            self.run_module("chronos", chronos_args)
         
         aion_out = case_dir / "Persistence_Report.csv"
         aion_args = ["--dir", csv_dir, "--mft", str(mft_raw if mft_raw else timeline_target), "-o", str(aion_out)]
@@ -220,7 +231,8 @@ class HeliosCommander:
                 "--sphinx", str(sphinx_out), 
                 "--chronos", str(chronos_out),
                 "--pandora", str(pandora_out),
-                "--siren", str(siren_json)
+                "--siren", str(siren_json),
+                "--case", case_name # [FIX] Case引数を追加 (レポートタイトル用)
             ])
 
         # Finalize Pipeline Stats
@@ -242,36 +254,52 @@ class HeliosCommander:
             print(f"[!] Failed to save stats: {e}")
 
 def main():
-    parser = argparse.ArgumentParser(description="SH_HeliosConsole v4.1 [Timekeeper]")
-    parser.add_argument("--dir", required=True, help="Parsed CSV Directory (KAPE Modules)")
-    parser.add_argument("--raw", help="Raw Artifact Directory (Optional)")
-    parser.add_argument("--mft", help="MFT Path (Optional, auto-detected if in dir)")
-    parser.add_argument("--mount", help="Mount Point (e.g. E:\\) for AION hashing")
-    parser.add_argument("--start", help="Start Date (YYYY-MM-DD)")
-    parser.add_argument("--end", help="End Date (YYYY-MM-DD)")
-    parser.add_argument("--case", default="Investigation", help="Case Name")
-    parser.add_argument("-o", "--out", default="Helios_Output", help="Output Directory")
-    
+    # 引数が渡されているかチェック
     if len(sys.argv) > 1:
+        # Command Line Mode
+        parser = argparse.ArgumentParser(description="SH_HeliosConsole v4.5 [Legacy Ready]")
+        parser.add_argument("--dir", required=True, help="Parsed CSV Directory (KAPE Modules)")
+        parser.add_argument("--raw", help="Raw Artifact Directory (Optional)")
+        parser.add_argument("--mft", help="MFT Path (Optional, auto-detected if in dir)")
+        parser.add_argument("--mount", help="Mount Point (e.g. E:\\) for AION hashing")
+        parser.add_argument("--start", help="Start Date (YYYY-MM-DD)")
+        parser.add_argument("--end", help="End Date (YYYY-MM-DD)")
+        parser.add_argument("--case", default="Investigation", help="Case Name")
+        parser.add_argument("-o", "--out", default="Helios_Output", help="Output Directory")
+        # [UPDATE] Legacy Arg
+        parser.add_argument("--legacy", action="store_true", help="Enable Legacy Mode (Aggressive Filter for Old OS)")
+        
         args = parser.parse_args()
         commander = HeliosCommander()
         raw_target = args.raw if args.raw else args.dir
-        commander.full_auto_scan(args.dir, raw_target, args.out, args.case, args.start, args.end, args.mount)
+        commander.full_auto_scan(args.dir, raw_target, args.out, args.case, args.start, args.end, args.mount, args.legacy)
     else:
+        # Interactive Mode
         print_logo()
         commander = HeliosCommander()
         try:
+            print("[*] Entering Interactive Mode...")
             csv_dir = input("1. Parsed CSV Directory (KAPE Modules): ").strip().strip('"').strip("'")
+            if not csv_dir:
+                print("[!] Error: CSV Directory required.")
+                return
+
             raw_dir = input("2. Raw Artifact Directory (KAPE Targets) [Enter for same]: ").strip().strip('"').strip("'")
             if not raw_dir: raw_dir = csv_dir
+            
             mount_point = input("3. Mount Point (Optional) [e.g. E:\]: ").strip().strip('"').strip("'")
-            case = input("Case Name [Default: Investigation]: ").strip() or "Investigation"
+            case_name = input("Case Name [Default: Investigation]: ").strip() or "Investigation"
+            
+            # [UPDATE] Interactive Legacy Prompt
+            legacy_input = input("4. Enable Legacy Mode (Older OS / High Noise)? [y/N]: ").strip().lower()
+            legacy_mode = legacy_input in ['y', 'yes']
+            
             print("\n[Optional] Time Range (YYYY-MM-DD)")
             start_date = input("Start Date: ").strip()
             end_date = input("End Date: ").strip()
             
             if os.path.exists(csv_dir):
-                commander.full_auto_scan(csv_dir, raw_dir, "Helios_Output", case, start_date, end_date, mount_point)
+                commander.full_auto_scan(csv_dir, raw_dir, "Helios_Output", case_name, start_date, end_date, mount_point, legacy_mode)
             else:
                 print("[!] Error: CSV Directory not found.")
         except KeyboardInterrupt:

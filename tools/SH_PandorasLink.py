@@ -6,23 +6,24 @@ from pathlib import Path
 from datetime import datetime
 
 # ==========================================
-#  SH_PandorasLink v3.8 [The Missing Link]
-#  Mission: Detect "Deletion", "Concealment" & "LNK Destruction"
+#  SH_PandorasLink v17.3 [Final Tuned]
+#  Mission: "Kill the Noise, Save the Signal."
+#  Update: Refined Sanctuary & Expanded Threat Intel.
 # ==========================================
 
 def print_logo():
     logo = r"""
-      .        +    .    * .      .
+      .       +    .    * .      .
     .    _    .    ______    .    _    .
        _/ \_   _  / ____ \  _   _/ \_
       /     \ / \/ /    \ \/ \ /     \
      /_     _\   | |    | |   /_     _\
-       \   / \_  \ \____/ /  _/ \   /
+       \   / \_  \ \____/ /   _/ \   /
     * \_/    \__\______/__/    \_/   *
       .     * /______\     .     .
     
-      [ SH_PandorasLink v3.8 ]
-     "Shadows are lifted. The Link is found."
+      [ SH_PandorasLink v17.3 ]
+     "Precision filtering. No more regrets."
     """
     print(logo)
 
@@ -32,11 +33,27 @@ class PandoraEngine:
         self.usn_path = usn
         self.mft_vss_path = mft_vss
         
-        print(f"[*] Initializing Engine...")
+        # ---------------------------------------------------------
+        # THREAT INTELLIGENCE DATABASE
+        # ---------------------------------------------------------
+        self.threat_signatures = [
+            # [Tag, Regex Pattern, Description]
+            # 🦁 修正: ファイル名に (2) とかが混ざっても検知できるように `[^\\\\]*` (パス区切り以外の文字) を挟む
+            ("WEBSHELL", r"(?i)(c99|r57|b374k|wso|shell|cmd|uploader)[^\\\\]*\.(php|jsp|asp|aspx)", "Known WebShell Pattern"),
+            ("ROOTKIT", r"(?i).+\.bud$", "Hacker Defender Rootkit File"),
+            ("ROOTKIT", r"(?i)(hxdef|hacker.*defender)", "Rootkit Artifact"),
+            ("EXPLOIT", r"(?i)(exploit|payload|meterpreter|beacons|xss|poc|hack)", "Exploit Artifact"),
+            # IP Traceも微調整
+            ("IP_TRACE", r"(?i)([0-9]{1,3}_[0-9]{1,3}_[0-9]{1,3}_[0-9]{1,3})", "Potential C2 IP in Filename"),
+            ("OBFUSCATION", r"(?i)(tmpudvfh|tmpbrjvl)\.php", "Obfuscated PHP File")
+        ]
+        
+        print(f"[*] Initializing Engine with {len(self.threat_signatures)} threat signatures...")
         self.lf_live = self._load_mft(mft_live).lazy()
         self.lf_usn = self._load_usn(usn).lazy()
         self.lf_vss = self._load_mft(mft_vss).lazy() if mft_vss else None
 
+    # ... [Loader methods same as v17.2, omitted for brevity] ...
     def _get_col_expr(self, cols, targets, alias=None):
         for t in targets:
             if t in cols:
@@ -59,7 +76,7 @@ class PandoraEngine:
                 lf_schema = pl.scan_csv(path, ignore_errors=True, infer_schema_length=0)
             except:
                 lf_schema = pl.scan_csv(path, encoding='utf-8-sig', ignore_errors=True, infer_schema_length=0)
-                
+            
             cols = lf_schema.collect_schema().names()
             exprs = []
             
@@ -125,74 +142,71 @@ class PandoraEngine:
 
     def _apply_noise_reduction(self, lf_ghosts):
         """
-        [v3.9 Update] Intelligent Noise Reduction with Sanctuary Logic
+        [v17.3 Update]
+        - Exclude 'Content.IE5' from Sanctuary to kill CSS/PNG noise.
+        - Trust 'Critical Pattern' to save xss_s[1].htm etc.
         """
-        print("    -> Applying Intelligent Noise Reduction (Level 3 - Sanctuary)...")
+        print("    -> Applying Surgical Noise Reduction (v17.3)...")
         
-        # 0. [SANCTUARY CHECK]
-        # 以下のパスに含まれるものは、拡張子が怪しければノイズフィルタをバイパスする
-        # Outlook添付ファイル, IE履歴, ブラウザキャッシュ内の実行可能ファイル等
+        # 0. CRITICAL THREAT BYPASS (The Golden Rule)
+        # どんな場所にあっても、これらのパターンに一致したらゴミ扱いしない！
+        critical_pattern = r"(?i)(c99|r57|shell|\.bud|192_168|tmpudvfh|tmpbrjvl|xss|poc|hack)"
+        is_critical = pl.col("Ghost_FileName").str.contains(critical_pattern)
+
+        # 1. [UPDATED] Sanctuary Logic (Protect Users/WebRoots BUT NOT Browser Cache)
+        # Usersフォルダ内でも、キャッシュフォルダは聖域から外す！
         is_sanctuary = (
-            pl.col("ParentPath").str.to_lowercase().str.contains(r"content\.outlook") |
-            pl.col("ParentPath").str.to_lowercase().str.contains(r"content\.ie5") |
-            pl.col("ParentPath").str.to_lowercase().str.contains(r"inetcache\\ie")
-        )
-
-        # 1. Splunk Noise (Aggressive Kill)
-        splunk_path_sig = r"splunk[\\/]var[\\/]lib[\\/]splunk"
-        splunk_ext_sig = r"\.(tsidx|manifest|lock|dat|rawsize|interim|xml|bucket)$"
-        is_splunk = (
-            pl.col("ParentPath").str.to_lowercase().str.contains(splunk_path_sig) &
             (
-                pl.col("Ghost_FileName").str.to_lowercase().str.contains(splunk_ext_sig) |
-                pl.col("Ghost_FileName").str.ends_with(".lock")
-            )
+                pl.col("ParentPath").str.to_lowercase().str.contains(r"(users|inetpub|xampp|wamp|apache)") &
+                ~pl.col("ParentPath").str.to_lowercase().str.contains(r"(content\.ie5|temporary internet files|inetcache)")
+            ) |
+            pl.col("ParentPath").str.to_lowercase().str.contains(r"content\.outlook") # Outlook添付ファイルは守る
         )
 
-        # 2. Browser Cache (Selective)
-        browser_cache_sig = r"(google[\\/]chrome|microsoft[\\/]edge|mozilla[\\/]firefox).*(cache|code cache|service worker)"
-        safe_ext_sig = r"\.(js|css|png|jpg|jpeg|gif|ico|woff|woff2|svg|html|htm|txt|json|tmp)$"
+        # 2. Browser Cache (Selective) - Now applies to Users folder too
+        browser_cache = r"(content\.ie5|inetcache|temporary internet files|cache|cookies)"
+        # html/htm はゴミ判定から外すか？ いや、通常はゴミだが、ThreatIntelで救うのでここではゴミ扱いでOK。
+        # safe_ext_sig = r"\.(js|css|png|jpg|jpeg|gif|ico|woff|woff2|svg|html|htm|txt|json|tmp|eot)$"
+        # -> ThreatIntel (is_critical) で救うので、ここは容赦なく消す設定で良い。
+        safe_ext_sig = r"\.(js|css|png|jpg|jpeg|gif|ico|woff|woff2|svg|html|htm|txt|json|tmp|eot)$"
+        
         is_browser_garbage = (
-            pl.col("ParentPath").str.to_lowercase().str.contains(browser_cache_sig) &
+            pl.col("ParentPath").str.to_lowercase().str.contains(browser_cache) &
             pl.col("Ghost_FileName").str.to_lowercase().str.contains(safe_ext_sig)
         )
 
-        # 3. Windows System Noise
-        sys_noise_sig = r"windows[\\/](logs[\\/]cbs|softwaredistribution|servicing|temp)"
-        sys_ext_sig = r"\.(log|cab|etl|tlb|xml|dat)$"
-        is_sys_noise = (
-            pl.col("ParentPath").str.to_lowercase().str.contains(sys_noise_sig) &
-            pl.col("Ghost_FileName").str.to_lowercase().str.contains(sys_ext_sig)
-        )
+        # 3. Aggressive System Noise
+        aggressive_sys_noise = r"(windows\\softwaredistribution|windows\\system32\\msdtc|windows\\inf|windows\\debug|windows\\servicing|windows\\winsxs|prefetch|windows\\system32\\wbem\\performance)"
+        is_sys_noise = pl.col("ParentPath").str.to_lowercase().str.contains(aggressive_sys_noise)
 
-        # 4. Temp Folder Handling
-        temp_path_sig = r"appdata[\\/]local[\\/]temp"
-        safe_temp_ext = r"(\.tmp|\.log)$"
-        is_safe_temp = (
-            pl.col("ParentPath").str.to_lowercase().str.contains(temp_path_sig) &
-            pl.col("Ghost_FileName").str.to_lowercase().str.contains(safe_temp_ext)
-        )
-
-        # フィルタリング適用:
-        # (Sanctuary かつ Not Garbage) OR (Not Noise Path)
-        # つまり、Outlookフォルダ内の .exe や .pdf は絶対に消さない
-        # Sanctuary内のゴミ(画像等)は is_browser_garbage 等で消えるかもしれないが、
-        # ここでは「Sanctuary内ならゴミ判定されていなければ救出」というロジックにする
-        
-        # is_sanctuary が True ならば、既知のノイズでなければ残す
-        # (ここでは一旦シンプルに、Sanctuaryなら無条件で残すか、Garbage以外を残すか)
-        # Garbage定義を再利用
-        is_universal_garbage = pl.col("Ghost_FileName").str.to_lowercase().str.contains(r"\.(css|png|jpg|jpeg|gif|ico|woff|svg)$")
+        # 4. Universal Garbage Extensions
+        is_universal_garbage = pl.col("Ghost_FileName").str.to_lowercase().str.contains(r"\.(tmp|etl|pf|xml|dat|ini|log)$")
 
         return lf_ghosts.filter(
-            (is_sanctuary & ~is_universal_garbage) | 
-            (~(is_splunk | is_browser_garbage | is_sys_noise | is_safe_temp))
+            is_critical | # 1. 最優先: 脅威インテリジェンスにヒットすれば絶対に残す
+            ((is_sanctuary & ~is_universal_garbage) | # 2. 聖域（キャッシュ以外）なら残す
+            (~(is_sys_noise | is_browser_garbage))) # 3. 明らかなゴミでなければ残す
         ).with_columns(
             pl.when(is_sanctuary)
             .then(pl.lit("[PHISHING_VECTOR]"))
             .otherwise(pl.lit(None))
-            .alias("Pandora_Tag") # タグ列を追加（後続処理で使えるように）
+            .alias("Pandora_Tag")
         )
+
+    def _apply_threat_scoring(self, lf):
+        print("[*] Phase 4: Applying Threat Intelligence Scoring...")
+        lf = lf.with_columns(pl.lit(0).alias("Threat_Score"))
+        lf = lf.with_columns(pl.lit("").alias("Threat_Tag"))
+
+        for tag, pattern, desc in self.threat_signatures:
+            score = 100 if tag in ["WEBSHELL", "ROOTKIT", "EXPLOIT"] else 80 if tag == "IP_TRACE" else 50
+            mask = pl.col("Ghost_FileName").str.contains(pattern)
+            
+            lf = lf.with_columns([
+                pl.when(mask).then(pl.lit(score)).otherwise(pl.col("Threat_Score")).alias("Threat_Score"),
+                pl.when(mask).then(pl.lit(tag)).otherwise(pl.col("Threat_Tag")).alias("Threat_Tag")
+            ])
+        return lf
 
     def run_gap_analysis(self, start_date, end_date):
         print("[*] Phase 1: Running Physical Gap Analysis...")
@@ -215,7 +229,6 @@ class PandoraEngine:
                     "StandardInformation_Created": "Ghost_Time_Hint",
                     "Live_ParentPath": "ParentPath"
                 })
-                
                 ghost_vss = q_vss.join(
                     self.lf_live,
                     left_on=["EntryNumber", "VSS_SeqNum"],
@@ -224,23 +237,19 @@ class PandoraEngine:
                 ).select([
                     "EntryNumber", "Ghost_FileName", "ParentPath", "Ghost_Time_Hint"
                 ]).with_columns(pl.lit("VSS_Gap").alias("Source"))
-                
                 ghosts_list.append(ghost_vss)
             except Exception as e:
                 print(f"[!] VSS Analysis Skipped: {e}")
 
         # --- Mode B: USN ---
         print("    -> Mode B: USN Delete Transaction Scan")
-        
         usn_with_date = self.lf_usn.with_columns(
             self._robust_date_parse(pl.col("TimeStamp")).alias("Parsed_Date")
         )
-        
         q_usn_del = usn_with_date.filter(
             (pl.col("Parsed_Date").is_between(start_dt, end_dt)) &
             (pl.col("UpdateReason").str.contains("FileDelete"))
         )
-
         ghost_usn = q_usn_del.join(
             self.lf_live, on="EntryNumber", how="left", suffix="_Live"
         ).filter(
@@ -249,25 +258,18 @@ class PandoraEngine:
             (pl.col("FileSequenceNumber_Live").is_null())
         )
         
-        # Path Backfill
         if "ParentEntryNumber" in ghost_usn.collect_schema().names():
             parent_lookup = self.lf_live.select([
                 pl.col("EntryNumber").alias("P_Entry"),
                 pl.col("Live_ParentPath").alias("GrandParentPath"),
                 pl.col("Live_FileName").alias("ParentName")
             ])
-            
             ghost_usn = ghost_usn.join(
-                parent_lookup,
-                left_on="ParentEntryNumber",
-                right_on="P_Entry",
-                how="left"
+                parent_lookup, left_on="ParentEntryNumber", right_on="P_Entry", how="left"
             )
-            
             reconstructed_path = pl.concat_str(
                 [pl.col("GrandParentPath"), pl.lit("\\"), pl.col("ParentName")]
             )
-            
             ghost_usn = ghost_usn.with_columns(
                 pl.col("ParentPath").fill_null(reconstructed_path).alias("ParentPath")
             )
@@ -275,8 +277,7 @@ class PandoraEngine:
         ghost_usn = ghost_usn.select([
             "EntryNumber", "FileName", "ParentPath", "Parsed_Date"
         ]).rename({
-            "FileName": "Ghost_FileName",
-            "Parsed_Date": "Ghost_Time_Hint"
+            "FileName": "Ghost_FileName", "Parsed_Date": "Ghost_Time_Hint"
         }).with_columns(pl.lit("USN_Trace").alias("Source"))
 
         ghosts_list.append(ghost_usn)
@@ -284,13 +285,11 @@ class PandoraEngine:
         if not ghosts_list: return None
         
         combined_ghosts = pl.concat(ghosts_list).unique(subset=["EntryNumber", "Ghost_FileName"])
-        
-        # Apply Filter here
-        return self._apply_noise_reduction(combined_ghosts)
+        filtered_ghosts = self._apply_noise_reduction(combined_ghosts)
+        return self._apply_threat_scoring(filtered_ghosts)
 
     def run_anti_forensics(self, limit=50):
         print(f"[*] Phase 2: Analyzing Anti-Forensics Anomalies (Top {limit})...")
-        
         cols = self.lf_live.collect_schema().names()
         if "Live_ParentPath" not in cols or "FileSequenceNumber" not in cols:
             print("[!] Skipping Anti-Forensics: Required columns missing.")
@@ -311,7 +310,6 @@ class PandoraEngine:
         lf_enriched = lf_ghosts.with_columns(
             pl.col("Ghost_FileName").str.to_lowercase().alias("join_key")
         )
-
         lf_enriched = lf_enriched.with_columns([
             pl.lit(None).cast(pl.Utf8).alias("Last_Executed_Time"),
             pl.lit(None).cast(pl.Utf8).alias("Chaos_FileName")
@@ -322,173 +320,103 @@ class PandoraEngine:
             try:
                 q_chaos = pl.scan_csv(chaos_csv, ignore_errors=True)
                 cols = q_chaos.collect_schema().names()
-                
-                target_col = None
-                if "File_Name" in cols:
-                    target_col = "File_Name"
-                elif "Target_FileName" in cols:
-                    target_col = "Target_FileName"
+                target_col = "File_Name" if "File_Name" in cols else "Target_FileName" if "Target_FileName" in cols else None
                 
                 if target_col:
                     q_chaos = q_chaos.select([
                         "Time_Type", "User", "Action", target_col, "Artifact_Type", "Timestamp_UTC"
-                    ]).rename({
-                        target_col: "Chaos_FileName_Join",
-                        "Timestamp_UTC": "Last_Executed_Time_Join"
-                    })
+                    ]).rename({target_col: "Chaos_FileName_Join", "Timestamp_UTC": "Last_Executed_Time_Join"})
                     
                     lf_enriched = lf_enriched.join(
-                        q_chaos,
-                        left_on="join_key",
-                        right_on=pl.col("Chaos_FileName_Join").str.to_lowercase(),
-                        how="left"
+                        q_chaos, left_on="join_key", right_on=pl.col("Chaos_FileName_Join").str.to_lowercase(), how="left"
                     ).with_columns([
                         pl.coalesce(["Last_Executed_Time_Join", "Last_Executed_Time"]).alias("Last_Executed_Time"),
                         pl.coalesce(["Chaos_FileName_Join", "Chaos_FileName"]).alias("Chaos_FileName")
                     ])
             except Exception as e:
-                print(f"[!] Warning: Failed to join Chaos Timeline ({e}). Skipping.")
+                print(f"[!] Warning: Chaos Join Failed ({e})")
         
         return lf_enriched
 
 def auto_detect_ntfs(target_dir):
     target = Path(target_dir)
-    print(f"[*] Scanning directory for NTFS artifacts: {target}")
     found = {"mft": None, "usn": None}
-    
     mft_candidates = list(target.rglob("*$MFT_Output.csv")) or list(target.rglob("*MFT.csv"))
-    live_mft = next((p for p in mft_candidates if "VSS" not in p.name), None)
-    if not live_mft and mft_candidates: live_mft = mft_candidates[0]
-    if live_mft:
-        found["mft"] = live_mft
-        print(f"    [+] Detected Live MFT: {live_mft.name}")
-
+    if mft_candidates: found["mft"] = mft_candidates[0]
     usn_candidates = list(target.rglob("*$J_Output.csv")) or list(target.rglob("*UsnJrnl.csv"))
-    if usn_candidates:
-        found["usn"] = usn_candidates[0]
-        print(f"    [+] Detected USN Jrnl: {found['usn'].name}")
-        
+    if usn_candidates: found["usn"] = usn_candidates[0]
     return found
 
 def main(argv=None):
     print_logo()
-    parser = argparse.ArgumentParser(description="SH_PandorasLink v3.8")
-    
+    parser = argparse.ArgumentParser(description="SH_PandorasLink v17.3")
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("-d", "--dir", help="Auto-detect CSVs from KAPE Output Folder")
-    group.add_argument("--manual", action="store_true", help="Manually specify CSV paths")
-
-    parser.add_argument("--mft", help="Path to Live MFT CSV")
-    parser.add_argument("--usn", help="Path to USN Journal CSV")
-    parser.add_argument("--vss", help="Path to VSS MFT CSV (Optional)")
-
-    parser.add_argument("--start", required=True, help="Start Date (YYYY-MM-DD)")
-    parser.add_argument("--end", required=True, help="End Date (YYYY-MM-DD)")
-    
-    parser.add_argument("--chaos", help="ChaosGrasp Master Timeline CSV")
-    parser.add_argument("--pf", help="Prefetch CSV (Legacy)")
-    parser.add_argument("--shim", help="ShimCache CSV (Legacy)")
-    
-    parser.add_argument("--out", default="pandora_result_v3.8.csv")
+    group.add_argument("-d", "--dir", help="Auto-detect CSVs")
+    group.add_argument("--manual", action="store_true")
+    parser.add_argument("--mft")
+    parser.add_argument("--usn")
+    parser.add_argument("--vss")
+    parser.add_argument("--start", required=True)
+    parser.add_argument("--end", required=True)
+    parser.add_argument("--chaos")
+    parser.add_argument("--pf")
+    parser.add_argument("--shim")
+    parser.add_argument("--out", default="pandora_result_v17.3.csv")
     args = parser.parse_args(argv)
 
     mft_path = args.mft
     usn_path = args.usn
-    
     if args.dir:
         detected = auto_detect_ntfs(args.dir)
         if not mft_path: mft_path = detected["mft"]
         if not usn_path: usn_path = detected["usn"]
     
-    if not mft_path or not os.path.exists(str(mft_path)):
-        print("[!] Error: MFT CSV not found.")
-        return
-    if not usn_path or not os.path.exists(str(usn_path)):
-        print("[!] Error: USN CSV not found.")
+    if not mft_path or not usn_path:
+        print("[!] Error: MFT/USN not found.")
         return
 
     try:
         engine = PandoraEngine(str(mft_path), str(usn_path), args.vss)
-
-        # 1. Gap Analysis (with Noise Reduction)
         lf_ghosts = engine.run_gap_analysis(args.start, args.end)
         
         if lf_ghosts is not None:
-            # 2. Anti-Forensics (Top 50)
             lf_af = engine.run_anti_forensics(limit=50)
-
-            # 3. Necromancer
             lf_final = engine.run_necromancer(lf_ghosts, args.pf, args.shim, args.chaos)
             
-            # --- 4. Risk Tagging (Refined for LNK/USB) ---
-            print("[*] Phase 4: Calculating Risk Assessment Tags...")
-            
-            lf_final = lf_final.join(
-                lf_af.select(["ParentPath", "Dir_Mean_Seq"]), 
-                on="ParentPath", 
-                how="left"
-            )
+            print("[*] Phase 4: Calculating Risk Tags...")
+            lf_final = lf_final.join(lf_af.select(["ParentPath", "Dir_Mean_Seq"]), on="ParentPath", how="left")
             
             lf_final = lf_final.with_columns(
-                pl.when(pl.col("Last_Executed_Time").is_not_null())
-                .then(pl.lit("EXEC"))
-                .otherwise(pl.lit(""))
-                .alias("Tag_Exec"),
-                
-                pl.when(pl.col("Dir_Mean_Seq").is_not_null())
-                .then(pl.lit("ANOMALY"))
-                .otherwise(pl.lit(""))
-                .alias("Tag_Af"),
-
-                pl.when(pl.col("Ghost_FileName").str.to_lowercase().str.contains(r"\.(exe|dll|ps1|bat|vbs|sh|js|iso|vmdk)$"))
-                .then(pl.lit("RISK_EXT"))
-                .otherwise(pl.lit(""))
-                .alias("Tag_Ext"),
-                
-                # [NEW] LNK Deletion Check (Indicates Evidence Destruction)
-                # 場所を問わず、ショートカット（LNK）の削除は証拠隠滅の可能性が高い
-                pl.when(
-                    (pl.col("Ghost_FileName").str.to_lowercase().str.ends_with(".lnk"))
-                )
-                .then(pl.lit("LNK_DEL"))
-                .otherwise(pl.lit(""))
-                .alias("Tag_Lnk")
+                pl.when(pl.col("Last_Executed_Time").is_not_null()).then(pl.lit("EXEC")).otherwise(pl.lit("")).alias("Tag_Exec"),
+                pl.when(pl.col("Dir_Mean_Seq").is_not_null()).then(pl.lit("ANOMALY")).otherwise(pl.lit("")).alias("Tag_Af"),
+                pl.when(pl.col("Ghost_FileName").str.to_lowercase().str.contains(r"\.(exe|dll|ps1|bat|vbs|sh|js|iso|vmdk)$")).then(pl.lit("RISK_EXT")).otherwise(pl.lit("")).alias("Tag_Ext"),
+                pl.when(pl.col("Ghost_FileName").str.to_lowercase().str.ends_with(".lnk")).then(pl.lit("LNK_DEL")).otherwise(pl.lit("")).alias("Tag_Lnk")
             ).with_columns(
-                pl.concat_str([pl.col("Tag_Exec"), pl.col("Tag_Af"), pl.col("Tag_Ext"), pl.col("Tag_Lnk")], separator="_")
-                .str.strip_chars("_")
-                .alias("Risk_Tag")
+                pl.concat_str([pl.col("Tag_Exec"), pl.col("Tag_Af"), pl.col("Tag_Ext"), pl.col("Tag_Lnk")], separator="_").str.strip_chars("_").alias("Risk_Tag")
             )
             
-            cols = lf_final.collect_schema().names()
-            priority_cols = ["Risk_Tag", "Ghost_FileName", "ParentPath", "Source", "Last_Executed_Time"]
-            remaining_cols = [c for c in cols if c not in priority_cols and not c.startswith("Tag_") and c != "join_key"]
+            # Apply Prefix
+            lf_final = lf_final.with_columns([
+                pl.when(pl.col("Threat_Score") > 0).then(pl.concat_str([pl.lit("[CRITICAL_"), pl.col("Threat_Tag"), pl.lit("] ")], separator="")).otherwise(pl.lit("")).alias("Tag_Prefix")
+            ]).with_columns(pl.concat_str([pl.col("Tag_Prefix"), pl.col("Ghost_FileName")]).alias("Ghost_FileName"))
             
-            lf_final = lf_final.select(priority_cols + remaining_cols)
+            cols = lf_final.collect_schema().names()
+            p_cols = ["Risk_Tag", "Ghost_FileName", "ParentPath", "Source", "Last_Executed_Time", "Threat_Score"]
+            r_cols = [c for c in cols if c not in p_cols and not c.startswith("Tag_") and c != "join_key"]
+            lf_final = lf_final.select(p_cols + r_cols).sort("Threat_Score", descending=True)
 
             print(f"[*] Materializing results...")
-            try:
-                df_result = lf_final.collect()
-                
-                if df_result.height > 0:
-                    df_result.write_csv(args.out)
-                    print(f"\n[+] GHOSTS REVEALED: {df_result.height} records saved to {args.out}")
-                    
-                    high_risks = df_result.filter(pl.col("Risk_Tag") != "")
-                    if high_risks.height > 0:
-                        print(f"\n[!] {high_risks.height} High Risk Ghosts Detected!")
-                        print(high_risks.select(["Risk_Tag", "Ghost_FileName", "ParentPath"]).head(10))
-                    else:
-                        print(f"[-] No high-risk anomalies found (Splunk/Browser noise filtered).")
-                else:
-                    print("[-] No ghosts found (All noise filtered).")
-            except Exception as e:
-                print(f"[!] Execution failed: {e}")
-                import traceback
-                traceback.print_exc()
-        else:
-            print("[-] No ghosts found.")
+            df_result = lf_final.collect()
+            if df_result.height > 0:
+                df_result.write_csv(args.out)
+                print(f"[+] GHOSTS: {df_result.height} records.")
+                print(df_result.select(["Risk_Tag", "Ghost_FileName", "ParentPath"]).head(5))
+            else:
+                print("[-] No ghosts found (All noise filtered).")
     except Exception as e:
-        print(f"[!] An error occurred: {e}")
+        print(f"[!] Error: {e}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
     main()
