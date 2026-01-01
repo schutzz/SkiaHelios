@@ -4,59 +4,57 @@ import sys
 import os
 import re
 from pathlib import Path
+from tools.SH_ThemisLoader import ThemisLoader  # ⚖️ Themis召喚
 
 # ============================================================
-#  SH_ChronosSift v17.1 [Hybrid Edition]
+#  SH_ChronosSift v18.0 [Themis Integrated]
 #  Mission: Detect Time Anomalies (Timestomping).
-#  Base: v12.2 + Legacy/Standard Mode Switch
+#  Update: Externalized Rules via ThemisLoader.
 # ============================================================
 
 def print_logo():
     print(r"""
        (   )
       (  :  )   < CHRONOS SIFT >
-       (   )     v17.1 - Hybrid
-        " "      "Adaptive Time Logic."
+       (   )     v18.0 - Themis
+        " "      "Time bows to the Law."
     """)
 
 class ChronosEngine:
     def __init__(self, tolerance=10.0):
         self.tolerance = tolerance
-        # [MERGED] Extended Noise Extensions from v16.4/v17.1
-        self.noise_exts = [
-            ".admx", ".adml", ".mum", ".cat", ".png", ".svg", ".js", ".json", 
-            ".xml", ".etl", ".log", ".tmp", ".db", ".dat", ".mui", ".inf",
-            ".ico", ".css", ".html", ".pf", ".ini", ".lnk", ".manifest", ".resx",
-            ".nlp", ".pnf", ".cdf-ms", ".nls", ".tlb", ".xrm-ms"
-        ]
-        self.path_whitelist = [
-            r"(?i)\\Tools\\", r"(?i)\\ghidra", r"(?i)\\sleuthkit", 
-            r"(?i)\\FTK Imager", r"(?i)\\exiftool", r"(?i)\\Autoruns",
-            r"(?i)\\LogFileParser", r"(?i)\\YaraRules", r"(?i)\\Strings",
-            r"(?i)\\Program Files\\Splunk"
-        ]
+        # ハードコーディングされていたリストは全廃っス！
+        # ThemisLoaderがYAMLからロードしてくれるっス。
 
     def analyze(self, args):
         mode_str = "LEGACY (Aggressive Filter)" if args.legacy else "STANDARD (Balanced)"
-        print(f"[*] Chronos v17.1 awakening... Mode: {mode_str}")
+        print(f"[*] Chronos v18.0 awakening... Mode: {mode_str}")
         print(f"    Targeting: {Path(args.file).name}")
         
         try:
-            lf = pl.scan_csv(args.file, ignore_errors=True)
+            # Themisの初期化（ルールロード）
+            loader = ThemisLoader()
+
+            lf = pl.scan_csv(args.file, ignore_errors=True, infer_schema_length=0)
             
             # ---------------------------------------------------------
-            # 0. Pre-Filter (Global Whitelist)
+            # 0. Themis Noise Filtering (Global Clean-up)
             # ---------------------------------------------------------
-            for pattern in self.path_whitelist:
-                lf = lf.filter(~pl.col("ParentPath").str.contains(pattern))
+            print("    -> Applying Themis Noise Filters...")
+            available_cols = lf.collect_schema().names()
+            noise_expr = loader.get_noise_filter_expr(available_cols)
+            
+            # YAMLで定義されたノイズ（旧 path_whitelist や noise_exts 等）を一括除去
+            lf = lf.filter(~noise_expr)
 
             # ---------------------------------------------------------
-            # 1. Scope Definition (Legacy vs Standard)
+            # 1. Scope Definition (Legacy vs Standard Structural Filter)
             # ---------------------------------------------------------
+            # ※ ここは「OSの構造的仕様」に関するロジックなので、YAMLではなくコードに残すのが安全っス
             if args.legacy:
                 # --- [LEGACY MODE] ---
                 # 古いOS用。Windowsフォルダ等は「仕様」で矛盾するため全無視。
-                print("    -> Applying Legacy Filters (Ignoring System/Program Files)...")
+                print("    -> Applying Legacy Structure Filters (Ignoring System/Program Files)...")
                 target_scope = r"(users|inetpub|xampp|wamp|apache|nginx|temp|perflogs|recycler)"
                 ignore_scope = r"(windows|program files|programdata\\microsoft)"
                 
@@ -66,9 +64,9 @@ class ChronosEngine:
                 )
             else:
                 # --- [STANDARD MODE] ---
-                # 現代OS用。OSノイズは消すが、System32への攻撃は検知したい。
+                # 現代OS用。Sanctuary(聖域)を守りつつ、構造的なノイズを弾く
                 
-                # Sanctuary (守るべき場所)
+                # Sanctuary (守るべき場所) - これもYAML化検討可能だが、ロジック根幹に近いので一旦維持
                 sanctuary_mask = (
                     pl.col("ParentPath").str.to_lowercase().str.contains("users") |
                     pl.col("ParentPath").str.to_lowercase().str.contains(r"tasks\\[^m]") | 
@@ -78,43 +76,27 @@ class ChronosEngine:
                     pl.col("ParentPath").str.to_lowercase().str.contains("wamp")
                 )
                 
-                # Noise Patterns (OS Garbage)
-                NOISE_PATTERNS = [
-                    r"(?i)PathUnknown", 
-                    r"(?i)\\Windows\\Servicing", r"(?i)\\Windows\\WinSxS",
-                    r"(?i)\\Windows\\System32\\DriverStore",
-                    r"(?i)\\ProgramData\\Microsoft", 
-                    r"(?i)\\$Extend", r"(?i)\\Microsoft\.NET", r"(?i)\\assembly",
-                    r"(?i)\\SoftwareDistribution", r"(?i)GAC_MSIL"
-                ]
-                
-                noise_mask = pl.lit(False)
-                for pattern in NOISE_PATTERNS:
-                    noise_mask = noise_mask | pl.col("ParentPath").str.contains(pattern)
-                
-                # Root Garbage (autoexec etc.)
+                # Root Garbage (autoexec etc.) - これも構造的ノイズとして維持
                 root_garbage_files = ["autoexec.bat", "config.sys", "msdos.sys", "io.sys", "boot.ini", "ntldr"]
                 root_garbage_mask = (
                     pl.col("FileName").str.to_lowercase().str.contains(r"install\.res\..+\.dll") |
                     pl.col("FileName").str.to_lowercase().is_in(root_garbage_files)
                 )
-
-                lf = lf.filter(sanctuary_mask | (~noise_mask & ~root_garbage_mask))
+                
+                # OSノイズ（旧 NOISE_PATTERNS）はYAML側に移譲したので、ここでは「聖域 or ゴミじゃない」で判定
+                # ※ YAMLのノイズフィルタは既に適用済みなので、ここでは構造的な判断のみ行う
+                lf = lf.filter(sanctuary_mask | ~root_garbage_mask)
 
                 # Standard Windows Binaries (FP reduction)
+                # これもYAMLに移譲すべきだが、一旦ここに残っているロジック
                 windows_fp_binaries = ["write.exe", "winhlp32.exe", "regedit.exe", "explorer.exe", "notepad.exe", "calc.exe"]
                 lf = lf.filter(~pl.col("FileName").str.to_lowercase().is_in(windows_fp_binaries))
 
             # ---------------------------------------------------------
-            # 2. Wanted Files (Always Capture)
+            # 2. Threat Identification (WANTED_FILES Replacement)
             # ---------------------------------------------------------
-            # [MERGED] Added GrrCON Artifacts
-            WANTED_FILES = [
-                "Secret_Project.pdf", "Windows_Security_Audit", "win_optimizer.lnk", 
-                "SunShadow", "Trigger", "UpdateService.exe", "Project_Chaos", 
-                "Conf.7z", "c99.php", "mxdwdui.BUD", "tmpudvfh.php"
-            ]
-            wanted_mask = pl.col("FileName").str.contains(r"(?i)(" + "|".join([re.escape(f) for f in WANTED_FILES]) + ")")
+            print("    -> Applying Themis Threat Scoring (Target Identification)...")
+            lf = loader.apply_threat_scoring(lf)
             
             # ---------------------------------------------------------
             # 3. Time Logic & Calculation
@@ -141,13 +123,16 @@ class ChronosEngine:
             lf = lf.with_columns((pl.col("fn_dt") - pl.col("si_dt")).dt.total_seconds().alias("diff_sec"))
 
             # ---------------------------------------------------------
-            # 4. Scoring & Tagging
+            # 4. Scoring & Tagging (Integrated with Themis)
             # ---------------------------------------------------------
             crit_exts = [".exe", ".dll", ".ps1", ".bat", ".sys", ".php", ".asp", ".jsp"]
             crit_pattern = f"(?i)({'|'.join([re.escape(e) for e in crit_exts])})$"
             
+            # Themisのスコアが0より大きい＝WANTED_FILESや重要ターゲットにヒットしている
+            
             lf = lf.with_columns([
-                pl.when(pl.col("FileName").str.contains(r"(?i)(" + "|".join(WANTED_FILES) + ")"))
+                # Themisで脅威判定されたものは CRITICAL_ARTIFACT 扱い
+                pl.when(pl.col("Threat_Score") > 0)
                   .then(pl.lit("CRITICAL_ARTIFACT"))
                   
                 .when(pl.col("diff_sec") < -60)
@@ -175,17 +160,22 @@ class ChronosEngine:
             )
 
             # Final Filter
+            # スコア0のものを除外
             df = lf.filter(pl.col("Chronos_Score") > 0).collect()
             
             if df.height > 0:
                 df = df.sort("Chronos_Score", descending=True)
                 df.write_csv(args.out)
                 print(f"[+] Anomalies detected: {df.height}")
-                print(df.select(["Chronos_Score", "Anomaly_Time", "FileName", "ParentPath"]).head(10))
+                # カラムがあればThreat_Tagも表示
+                disp_cols = ["Chronos_Score", "Anomaly_Time", "FileName", "ParentPath"]
+                if "Threat_Tag" in df.columns: disp_cols.append("Threat_Tag")
+                print(df.select([c for c in disp_cols if c in df.columns]).head(10))
             else:
                 print("\n[*] Clean: No significant anomalies found.")
-                # 空のCSVを生成して後続のエラー防止
-                pl.DataFrame(schema={"Chronos_Score": pl.Int64, "Anomaly_Time": pl.Utf8, "FileName": pl.Utf8, "ParentPath": pl.Utf8}).write_csv(args.out)
+                # 空CSV出力
+                schema = {"Chronos_Score": pl.Int64, "Anomaly_Time": pl.Utf8, "FileName": pl.Utf8, "ParentPath": pl.Utf8}
+                pl.DataFrame(schema=schema).write_csv(args.out)
 
         except Exception as e:
             print(f"[!] Critical Error: {e}")
@@ -198,10 +188,7 @@ def main(argv=None):
     parser.add_argument("-f", "--file", required=True)
     parser.add_argument("-o", "--out", default="Chronos_Results.csv")
     parser.add_argument("-t", "--tolerance", type=float, default=10.0)
-    
-    # [MERGED] Added --legacy flag
-    parser.add_argument("--legacy", action="store_true", help="Enable Legacy Mode (Ignore System/Program Files)")
-    
+    parser.add_argument("--legacy", action="store_true", help="Enable Legacy Mode")
     parser.add_argument("--targets-only", action="store_true")
     parser.add_argument("--all", action="store_true")
     parser.add_argument("--start", help="Ignored")

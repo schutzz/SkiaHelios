@@ -8,12 +8,11 @@ import json
 from datetime import datetime
 
 # ============================================================
-#  SH_HeliosConsole v4.5 [Legacy & Interactive Merged]
+#  SH_HeliosConsole v4.6 [Tools First Edition]
 #  Mission: Coordinate all modules & Measure Performance.
 #  Updates:
-#    - Merged v4.1 Benchmarking logic.
-#    - Added v4.4 Interactive Legacy Mode prompt.
-#    - Added '--legacy' flag support for Chronos v17.1.
+#    - Prioritize 'tools.*' imports to ensure latest modules are used.
+#    - Fixed logic to avoid loading legacy scripts from root.
 # ============================================================
 
 def print_logo():
@@ -23,7 +22,7 @@ def print_logo():
       , '   _ _ _ _   ' ,
      ,     |_______|      ,
     ,       _______        ,  < SKIA HELIOS >
-   ,       |_______|        ,  v4.5 - Legacy Ready
+   ,       |_______|        ,  v4.6 - Tools First
    ,       _______          ,
     ,      |_______|       ,
      ,                    ,
@@ -62,11 +61,16 @@ class HeliosCommander:
         self._load_modules()
 
     def _import_dynamic(self, script_name):
-        search_paths = [script_name, f"tools.{script_name}"]
+        # [FIX] toolsパッケージを優先的に検索する順序に変更っス！
+        # これでルートに古いファイルがあっても、必ず tools/ 内の最新版が読まれるっス。
+        search_paths = [f"tools.{script_name}", script_name]
+        
         for path in search_paths:
             try:
                 mod = importlib.import_module(path)
                 if hasattr(mod, 'main'):
+                    # 読み込み成功したパスをデバッグ表示（確認用）
+                    # print(f"[debug] Loaded {script_name} from {path}")
                     return mod.main
             except (ImportError, ModuleNotFoundError):
                 continue
@@ -124,12 +128,10 @@ class HeliosCommander:
         
         return success
 
-    # [UPDATE] legacy_mode 引数を追加
     def full_auto_scan(self, csv_dir, raw_dir, out_dir, case_name, start_date=None, end_date=None, mount_point=None, legacy_mode=False):
         print_logo()
         print(f"[*] --- INITIATING CERBERUS PIPELINE: {case_name} ---")
         
-        # [UPDATE] モード表示
         if legacy_mode:
             print("[*] MODE: LEGACY OS DETECTED (Aggressive Noise Filtering ON)")
         else:
@@ -257,7 +259,7 @@ def main():
     # 引数が渡されているかチェック
     if len(sys.argv) > 1:
         # Command Line Mode
-        parser = argparse.ArgumentParser(description="SH_HeliosConsole v4.5 [Legacy Ready]")
+        parser = argparse.ArgumentParser(description="SH_HeliosConsole v4.6 [Tools First]")
         parser.add_argument("--dir", required=True, help="Parsed CSV Directory (KAPE Modules)")
         parser.add_argument("--raw", help="Raw Artifact Directory (Optional)")
         parser.add_argument("--mft", help="MFT Path (Optional, auto-detected if in dir)")
@@ -266,7 +268,6 @@ def main():
         parser.add_argument("--end", help="End Date (YYYY-MM-DD)")
         parser.add_argument("--case", default="Investigation", help="Case Name")
         parser.add_argument("-o", "--out", default="Helios_Output", help="Output Directory")
-        # [UPDATE] Legacy Arg
         parser.add_argument("--legacy", action="store_true", help="Enable Legacy Mode (Aggressive Filter for Old OS)")
         
         args = parser.parse_args()

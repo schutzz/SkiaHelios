@@ -4,11 +4,12 @@ from datetime import datetime
 import os
 from pathlib import Path
 import json
+import re
 
 # ============================================================
-#  SH_LachesisWriter v2.2 [Syntax Guard]
-#  Mission: Weave the Grimoire with Mermaid Charts, IOC Tables.
-#  Fix: Escaped Mermaid node labels & Safe ID generation.
+#  SH_LachesisWriter v2.5 [Omni-Visual]
+#  Mission: Weave the Grimoire with Full Context Diagrams.
+#  Update: Extracts Network IPs from Atropos Events for Mermaid.
 # ============================================================
 
 TEXT_RES = {
@@ -47,7 +48,7 @@ class LachesisWriter:
         self.visual_iocs = [] # For Mermaid & Top Table
 
     def weave_report(self, analysis_result, output_path, dfs_for_ioc):
-        print(f"[*] Lachesis v2.2 is weaving the report into {output_path}...")
+        print(f"[*] Lachesis v2.5 is weaving the report into {output_path}...")
         
         valid_events = analysis_result["events"]
         phases = analysis_result["phases"]
@@ -62,8 +63,10 @@ class LachesisWriter:
             top_user = compromised_users.most_common(1)
             if top_user: primary_user = top_user[0][0]
 
-        # 1. Extract Visual IOCs (High Confidence only for Top Section)
-        self._extract_visual_iocs(dfs_for_ioc)
+        # 1. Extract Visual IOCs (From Pandora AND Atropos Events)
+        self.visual_iocs = [] # Reset
+        self._extract_visual_iocs_from_pandora(dfs_for_ioc)
+        self._extract_visual_iocs_from_events(valid_events)
 
         out_file = Path(output_path)
         if not out_file.parent.exists(): out_file.parent.mkdir(parents=True, exist_ok=True)
@@ -79,74 +82,94 @@ class LachesisWriter:
             
             self._write_technical_findings(f, phases)
             self._write_ioc_appendix(f, dfs_for_ioc)
-            f.write(f"\n---\n*Report woven by SkiaHelios (The Triad v2.2)* 🦁")
+            f.write(f"\n---\n*Report woven by SkiaHelios (The Triad v2.5)* 🦁")
         
         json_path = out_file.with_suffix('.json')
         self._export_json_grimoire(analysis_result, dfs_for_ioc, json_path, primary_user)
 
-    def _extract_visual_iocs(self, dfs):
-        """
-        [Visual] Extract High-Confidence IOCs specifically for Mermaid & Top Table.
-        Targeting Pandora's Threat Tags.
-        """
+    def _extract_visual_iocs_from_pandora(self, dfs):
+        """[Visual] Extract File Artifacts from Pandora"""
         if dfs.get('Pandora') is not None:
             df = dfs['Pandora']
             if "Threat_Score" in df.columns:
                 try:
-                    # Cast to Int64 to avoid string comparison errors
                     threats = df.filter(pl.col("Threat_Score").cast(pl.Int64, strict=False) > 0).unique(subset=["Ghost_FileName"])
-                    
                     for row in threats.iter_rows(named=True):
-                        ioc_type = row.get("Threat_Tag", "UNKNOWN")
+                        ioc_type = row.get("Threat_Tag", "SUSPICIOUS")
                         raw_name = row.get("Ghost_FileName", "")
-                        path = row.get("ParentPath", "")
+                        clean_name = raw_name.split("] ")[-1] if "] " in raw_name else raw_name
                         
-                        # Remove [CRITICAL_TAG] prefix for display
-                        clean_name = raw_name
-                        if "] " in raw_name:
-                            clean_name = raw_name.split("] ")[-1]
-                        
-                        self.visual_iocs.append({
-                            "Type": ioc_type,
-                            "Value": clean_name,
-                            "Path": path,
-                            "Note": "Recovered from Deletion Log (High Risk)"
+                        self._add_unique_visual_ioc({
+                            "Type": ioc_type, "Value": clean_name,
+                            "Path": row.get("ParentPath", ""), "Note": "File Artifact (Pandora)"
                         })
-                except Exception as e:
-                    print(f"[!] Warning: Failed to extract visual IOCs from Pandora: {e}")
+                except: pass
+
+    def _extract_visual_iocs_from_events(self, events):
+        """[Visual] Extract Network/Execution Artifacts from Atropos Events"""
+        # IPアドレス抽出用Regex
+        re_ip = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b')
+        
+        for ev in events:
+            # 1. IP Addresses (Network / Lateral)
+            # サマリーと詳細の両方からIPを探す
+            content = ev['Summary'] + " " + str(ev.get('Detail', ''))
+            ips = re_ip.findall(content)
+            for ip in ips:
+                if not ip.startswith("127.") and ip != "0.0.0.0" and ip != "::1":
+                    # IPが見つかったら即IOCリストに追加
+                    self._add_unique_visual_ioc({
+                        "Type": "IP_TRACE", "Value": ip,
+                        "Path": "Network", "Note": f"Detected in {ev['Source']}"
+                    })
+            
+            # 2. Critical Executions (Chronos/Prefetch)
+            if ev['Criticality'] >= 90 and ev['Category'] == 'EXEC':
+                kws = ev.get('Keywords', [])
+                if kws:
+                    self._add_unique_visual_ioc({
+                        "Type": "EXECUTION", "Value": kws[0],
+                        "Path": "Process", "Note": f"High Crit Execution ({ev['Source']})"
+                    })
+
+    def _add_unique_visual_ioc(self, ioc_dict):
+        # 重複排除ロジック
+        for existing in self.visual_iocs:
+            if existing["Value"] == ioc_dict["Value"] and existing["Type"] == ioc_dict["Type"]:
+                return
+        self.visual_iocs.append(ioc_dict)
 
     def _generate_mermaid(self):
-        """[Visual] 構文エラーを回避する安全なMermaid図解生成"""
         if not self.visual_iocs: return ""
         
         chart = "\n```mermaid\ngraph TD\n"
         chart += "    %% Nodes Definition\n"
-        # ノードのラベルは " " で囲むことでカッコ問題を回避
         chart += "    Attacker((🦁 Attacker)) -->|Exploit/Access| Initial{Initial Access}\n"
         
-        web_shells = [i["Value"] for i in self.visual_iocs if i["Type"] in ["WEBSHELL", "OBFUSCATION"]]
-        rootkits = [i["Value"] for i in self.visual_iocs if i["Type"] == "ROOTKIT"]
-        exploits = [i["Value"] for i in self.visual_iocs if i["Type"] == "EXPLOIT"]
-        ips = [i["Value"] for i in self.visual_iocs if i["Type"] == "IP_TRACE"]
+        # Group IOCs
+        webshells = [i["Value"] for i in self.visual_iocs if "WEBSHELL" in i["Type"] or "OBFUSCATION" in i["Type"]]
+        rootkits = [i["Value"] for i in self.visual_iocs if "ROOTKIT" in i["Type"]]
+        ips = [i["Value"] for i in self.visual_iocs if "IP_TRACE" in i["Type"]]
+        execs = [i["Value"] for i in self.visual_iocs if "EXECUTION" in i["Type"]]
 
-        if exploits:
-            for ex in exploits[:3]:
-                # abs(hash()) で安全なID生成 + " " でラベル保護
-                chart += f"    Initial -->|Detected Exploit| Ex_{abs(hash(ex))}[\"{ex}\"]\n"
+        # Nodes
+        if webshells:
+            for ws in webshells[:3]:
+                chart += f"    Initial -->|Drop/Upload| WS_{abs(hash(ws))}[\"{ws}\"]\n"
+                chart += f"    WS_{abs(hash(ws))} -->|Exec| Cmd_{abs(hash(ws))}((Shell))\n"
         
-        if web_shells:
-            for ws in web_shells[:3]:
-                chart += f"    Initial -->|File Upload| WS_{abs(hash(ws))}[\"{ws}<br/>(WebShell)\"]\n"
-                chart += f"    WS_{abs(hash(ws))} -->|Command Exec| Cmd{abs(hash(ws))}((OS Shell))\n"
-
         if rootkits:
-            for rk in rootkits:
-                parent = f"Cmd{abs(hash(web_shells[0]))}" if web_shells else "Initial"
+            parent = f"Cmd_{abs(hash(webshells[0]))}" if webshells else "Initial"
+            for rk in rootkits[:3]:
                 chart += f"    {parent} -->|Persistence| RK_{abs(hash(rk))}[\"{rk}<br/>(Rootkit)\"]\n"
 
         if ips:
-            for ip in ips:
-                chart += f"    Attacker -.->|Remote Trace| IP_{abs(hash(ip))}(\"{ip}\")\n"
+            for ip in ips[:5]:
+                chart += f"    Attacker -.->|C2/Lateral| IP_{abs(hash(ip))}(\"{ip}\")\n"
+
+        if execs and not webshells: # WebShellがない場合の実行フロー補完
+            for ex in execs[:3]:
+                chart += f"    Initial -->|Execute| EX_{abs(hash(ex))}[[\"{ex}\"]]\n"
 
         chart += "\n    %% Styles\n"
         chart += "    classDef threat fill:#ffcccc,stroke:#ff0000,stroke-width:2px,color:#000;\n"

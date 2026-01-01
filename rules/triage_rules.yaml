@@ -1,0 +1,150 @@
+# rules/triage_rules.yaml [Themis Law v2.1]
+# Update: Tuned for Windows Internal Artifacts (RAC, WMI, RegBack)
+
+noise_filters:
+  # --- [System Internals Noise] ---
+  - name: "Reliability Analysis Component (RAC)"
+    target: "ParentPath"
+    condition: "regex"
+    pattern: "(?i)ServiceProfiles\\\\LocalService\\\\AppData\\\\Local\\\\Temp\\\\RACD"
+
+  - name: "Registry Backups (RegBack)"
+    target: "ParentPath"
+    condition: "contains"
+    pattern: "config\\RegBack"
+
+  - name: "WMI Performance Adapter"
+    target: "ParentPath"
+    condition: "contains"
+    pattern: "Windows\\inf\\WmiApRpl"
+
+  - name: "WMI Repository & Logs"
+    target: "ParentPath"
+    condition: "regex"
+    pattern: "(?i)Windows\\\\System32\\\\wbem\\\\(Repository|Performance|Logs)"
+
+  - name: "System Debug & Temp Logs"
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)^(ChkAcc\\.bak|WRITABLE\\.TST|SCM\\.EVM.*|.*\\.OLD|.*\\.toc|.*\\.cmf|ResCache\\.dir|rc[0-9]+|ielock.*|HardAdmin.*)$"
+
+  # --- [Existing Filters (Kept)] ---
+  - name: "Browser Cache (IE/Edge)"
+    target: "ParentPath"
+    condition: "contains"
+    pattern: "Content.IE5"
+
+  - name: "Browser Cache (General)"
+    target: "ParentPath"
+    condition: "regex"
+    pattern: "(?i)[/\\\\](INetCache|History|Cookies|Recovery|Temporary Internet Files)[/\\\\]"
+
+  - name: "Windows Installer & Updates"
+    target: "ParentPath"
+    condition: "regex"
+    pattern: "(?i)\\\\(Windows\\\\(SoftwareDistribution|Installer|Servicing|WinSxS|assembly)|\\$Windows\\.~BT|System Volume Information)\\\\"
+
+  - name: "Anti-Virus & System Logs"
+    target: "ParentPath"
+    condition: "regex"
+    pattern: "(?i)\\\\(ProgramData\\\\(Microsoft\\\\Windows Defender|McAfee|Symantec)|Windows\\\\System32\\\\(Msdtc|wbem\\\\Performance|LogFiles)|Windows\\\\Debug)\\\\"
+
+  - name: "XAMPP/Database Noise"
+    target: "ParentPath"
+    condition: "regex"
+    pattern: "(?i)xampp[/\\\\]mysql[/\\\\]data"
+
+  - name: "Forensic Tools"
+    target: "ParentPath"
+    condition: "regex"
+    pattern: "(?i)[/\\\\](Tools|ghidra|sleuthkit|FTK Imager|exiftool|Autoruns|LogFileParser|YaraRules|Strings|Splunk)[/\\\\]"
+
+  - name: "Trusted System Paths"
+    target: "ParentPath"
+    condition: "regex"
+    pattern: "(?i)^(?:[a-z]:)?\\\\(Windows\\\\System32|Program Files|Program Files \\(x86\\))"
+
+  # --- [Extension Noise] ---
+  - name: "Garbage Extensions"
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)\\.(admx|adml|mum|cat|png|svg|js|json|xml|etl|evtx|log|tmp|db|dat|mui|inf|ico|css|html|htm|pf|ini|lnk|manifest|resx|nlp|pnf|cdf-ms|nls|tlb|xrm-ms|chk|trans-ms|blf|regtrans-ms|frm|ibd|opt|eot|txt)$"
+
+  # --- [Process/File Noise] ---
+  - name: "Standard Windows Processes"
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)^(svchost\\.exe|explorer\\.exe|searchui\\.exe|taskhostw\\.exe|sihost\\.exe|conhost\\.exe|dllhost\\.exe|lsass\\.exe|winlogon\\.exe|services\\.exe|spoolsv\\.exe)$"
+
+  - name: "Browser Processes"
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)^(chrome\\.exe|msedge\\.exe|firefox\\.exe|iexplore\\.exe)$"
+
+# ==========================================
+# 🦁 THREAT SIGNATURES (No Changes Needed)
+# ==========================================
+threat_signatures:
+  # ... (以前と同じ内容でOKっス！) ...
+  - name: "WebShell (Generic Names)"
+    tag: "WEBSHELL"
+    score: 100
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)^(c99|r57|b374k|wso|shell|cmd|uploader|minishell|phpspy)[^\\.]*\\.(php|jsp|asp|aspx|cer|pl|cgi)$"
+
+  - name: "WebShell (Broad Match)"
+    tag: "WEBSHELL"
+    score: 80
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)(c99|r57|wso|shell|cmd|uploader)[^\\\\]*\\.(php|jsp|asp|aspx)"
+
+  - name: "Rootkit (Hacker Defender)"
+    tag: "ROOTKIT"
+    score: 100
+    target: "FileName"
+    condition: "ends_with"
+    pattern: ".bud"
+
+  - name: "Suspicious Obfuscated Script"
+    tag: "OBFUSCATION"
+    score: 80
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)(tmpudvfh|tmpbrjvl|^[a-z]{8})\\.(php|aspx)$"
+
+  - name: "Suspicious IP Trace"
+    tag: "IP_TRACE"
+    score: 80
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)([0-9]{1,3}_[0-9]{1,3}_[0-9]{1,3}_[0-9]{1,3})"
+
+  - name: "Script in Uploads/Temp"
+    tag: "SUSPICIOUS_LOC"
+    score: 80
+    target: "ParentPath"
+    condition: "regex"
+    pattern: "(?i)\\\\(upload|temp|tmp|images|css|js)\\\\"
+
+  - name: "Chronos High Value Targets"
+    tag: "TARGET_INTEL"
+    score: 100
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)(Secret_Project\\.pdf|Windows_Security_Audit|win_optimizer\\.lnk|SunShadow|Trigger|UpdateService\\.exe|Project_Chaos|Conf\\.7z)"
+
+  - name: "Container Apps (LOLBINs)"
+    tag: "CONTAINER"
+    score: 50
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)^(cmd\\.exe|powershell\\.exe|pwsh\\.exe|wscript\\.exe|cscript\\.exe|mshta\\.exe|rundll32\\.exe|regsvr32\\.exe|bitsadmin\\.exe|certutil\\.exe|installutil\\.exe|psexec\\.exe|wmiprvse\\.exe|scrcons\\.exe|sh\\.exe|bash\\.exe)$"
+
+  - name: "Suspicious Parent (Office)"
+    tag: "SUSP_PARENT"
+    score: 80
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)^(winword\\.exe|excel\\.exe|powerpnt\\.exe|outlook\\.exe)$"

@@ -1,2 +1,3 @@
 ﻿polars>=0.20.0
 pytest
+PyYAML

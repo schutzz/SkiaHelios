@@ -1,40 +1,58 @@
 import argparse
 import sys
 import traceback
-
-# Import The Triad
-try:
-    from tools.SH_ClothoReader import ClothoReader
-    from tools.SH_AtroposThinker import AtroposThinker
-    from tools.SH_LachesisWriter import LachesisWriter
-except ImportError:
-    # パスが通っていない場合のフォールバック（直接実行時など）
-    try:
-        from SH_ClothoReader import ClothoReader
-        from SH_AtroposThinker import AtroposThinker
-        from SH_LachesisWriter import LachesisWriter
-    except ImportError as e:
-        print(f"[!] Hekate Import Error: {e}")
-        sys.exit(1)
+import os
+from pathlib import Path
 
 # ============================================================
-#  SH_HekateWeaver v16.1 [Fix: Argument Passing]
+#  [PATH FIX] Force add 'tools' directory to sys.path
+#  これにより、どこから実行しても隣のモジュールが見えるようになるッス
+# ============================================================
+current_dir = Path(__file__).resolve().parent
+if str(current_dir) not in sys.path:
+    sys.path.append(str(current_dir))
+
+# 親ディレクトリ(ルート)も念のため追加
+parent_dir = current_dir.parent
+if str(parent_dir) not in sys.path:
+    sys.path.append(str(parent_dir))
+
+# ============================================================
+#  Import The Triad
+# ============================================================
+try:
+    # パスを通したので、ファイル名だけでimportできるはずッス
+    from SH_ClothoReader import ClothoReader
+    from SH_AtroposThinker import AtroposThinker
+    from SH_LachesisWriter import LachesisWriter
+    # ThemisLoaderも同様
+    from SH_ThemisLoader import ThemisLoader
+except ImportError as e:
+    # 万が一これでもダメな場合のデバッグ表示
+    print(f"[!] Hekate Import Critical Error: {e}")
+    print(f"[*] Debug: sys.path is {sys.path}")
+    print(f"[*] Debug: Current dir is {current_dir}")
+    print(f"[*] Hint: Ensure SH_ClothoReader.py exists in {current_dir}")
+    sys.exit(1)
+
+
+# ============================================================
+#  SH_HekateWeaver v17.2 [Pathfinder Edition]
 #  Mission: Orchestrate Clotho, Atropos, and Lachesis.
-#  Update: Accepted 'argv' for HeliosConsole integration.
+#  Update: Resolved stubborn ImportError via sys.path injection.
 # ============================================================
 
 def print_logo():
     print(r"""
       | | | | | |
-    -- HEKATE  --   [ The Triad v16.1 ]
-      | | | | | |   "Clotho reads, Atropos thinks, Lachesis writes."
+    -- HEKATE  --   [ The Triad v17.2 ]
+      | | | | | |   "Themis defines the law, Hekate weaves the fate."
     """)
 
-# [FIX] 引数 argv=None を受け取れるように変更っス！
 def main(argv=None):
     print_logo()
     
-    parser = argparse.ArgumentParser(description="SkiaHelios Hekate Weaver (Triad Edition)")
+    parser = argparse.ArgumentParser(description="SkiaHelios Hekate Weaver (Themis Edition)")
     
     # Input / Output
     parser.add_argument("-i", "--input", required=True, help="Primary Timeline CSV (Hercules)")
@@ -54,26 +72,30 @@ def main(argv=None):
     # Config
     parser.add_argument("--case", default="Investigation", help="Case Name")
     parser.add_argument("--lang", default="jp", help="Report Language (jp/en)")
+    parser.add_argument("--rules", default="rules/triage_rules.yaml", help="Path to YAML rules (Loaded by Atropos)")
     
-    # [FIX] 受け取った argv をパースするように変更っス！
     args = parser.parse_args(argv)
 
     try:
         # ----------------------------------------------------
         # 1. Clotho: Spin the Thread (Load Data)
         # ----------------------------------------------------
+        print("\n[*] Phase 1: Clotho is spinning the threads...")
         clotho = ClothoReader(args)
         dfs, siren_data, hostname = clotho.spin_thread()
 
         # ----------------------------------------------------
         # 2. Atropos: Measure & Cut (Analyze Logic)
         # ----------------------------------------------------
+        # Themisのルール適用はAtropos内部で行われるッス
+        print("\n[*] Phase 2: Atropos is judging with Themis...")
         atropos = AtroposThinker(dfs, siren_data, hostname)
         analysis_result = atropos.contemplate()
 
         # ----------------------------------------------------
         # 3. Lachesis: Allot the Fate (Write Report)
         # ----------------------------------------------------
+        print("\n[*] Phase 3: Lachesis is writing the fate...")
         lachesis = LachesisWriter(lang=args.lang, hostname=hostname, case_name=args.case)
         lachesis.weave_report(analysis_result, args.out, dfs)
 
