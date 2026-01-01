@@ -146,7 +146,7 @@ graph TD
         direction TB
         Midas[SH_MidasTouch<br/>Docx Converter & Evidence Packager]:::goldClass
         GoldReport[🏆 Golden Docx Report]:::goldClass
-        SyncPack[📦 Team Sync Zip<br/>(Hash Verified)]:::goldClass
+        SyncPack["📦 Team Sync Zip<br/>(Hash Verified)"]:::goldClass
     end
 
     %% Flow
