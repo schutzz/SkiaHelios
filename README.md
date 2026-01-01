@@ -1,4 +1,4 @@
-# SkiaHelios v2.2 - God Mode (Visual & Legacy Edition)
+# SkiaHelios v2.5 - God Mode (Visual & Modular Edition)
 
 ![SkiaHelios CI](https://github.com/schutzz/SkiaHelios/actions/workflows/test.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
@@ -13,16 +13,17 @@
 
 Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** to deconstruct artifacts, trace physical execution chains, and weave a cohesive narrative across multiple hosts.
 
-**Current Version:** v2.2 (Visual Reporting / Legacy OS Support / Interactive Mode / Chimera Fusion)
+**Current Version:** v2.5 (Omni-Visual Reporting / Modular Architecture / Themis Rule Engine / Legacy Support)
 
 ---
 
-## ⚡ Key Features (v2.2 Updates)
+## ⚡ Key Features (v2.5 Updates)
 
-* **🏹 Visual Attack Flow:** [NEW] Automatically generates **Mermaid diagrams** visualizing the attack chain (Initial Access -> Execution -> Persistence) in the report.
-* **🕰️ Hybrid Time Logic:** [NEW] Specialized **`--legacy` mode** for older OS environments (XP/Vista/2008) to eliminate install-time noise vs. Modern OS optimization.
-* **🦁 Interactive Wizard:** [NEW] No command memorization needed. Just run `SH_HeliosConsole.py` and follow the prompts.
-* **👻 Ghost Hunting & Threat Intel:** Recovers deleted files (`$UsnJrnl` vs `$MFT`) and detects **WebShells (c99, r57)**, **Rootkits**, and **C2 IP traces** with heavy weighting.
+* **🏹 Omni-Visual Attack Flow:** [NEW] Lachesis now generates **Mermaid diagrams** that visualize not just files, but **Network IPs** and **Critical Executions** extracted by Atropos.
+* **⚖️ Themis Rule Engine:** [NEW] Logic is now externalized in `rules/triage_rules.yaml`. Customize **Threat Signatures** and **Noise Filters** without touching the code.
+* **🛡️ Golden Rule Logic:** [NEW] Implemented "Threat > Noise" logic. Critical artifacts (e.g., WebShells in Cache) pierce through noise filters.
+* **✂️ Nemesis Tracer:** [NEW] Modularized logic to aggressively deduplicate USN/MFT events and trace artifact lifecycles with sub-second precision.
+* **🕰️ Hybrid Time Logic:** Specialized **`--legacy` mode** for older OS environments to eliminate install-time noise.
 * **🔥 Chimera Fusion:** Correlates Lateral Movement across multiple hosts to visualize the entire campaign.
 
 ---
@@ -37,7 +38,7 @@ Get started immediately. No complex databases, just pure Python & Polars power.
 git clone [https://github.com/schutzz/SkiaHelios.git](https://github.com/schutzz/SkiaHelios.git)
 cd SkiaHelios
 
-# Install dependencies (Polars, Pandas, etc.)
+# Install dependencies (Polars, Pandas, PyYAML, etc.)
 pip install -r requirements.txt
 ```
 
@@ -80,9 +81,9 @@ python tools/SH_ChimeraFusion.py \
 
 ---
 
-## 🏛️ Architecture (The Triad)
+## 🏛️ Architecture (The Triad v2.5)
 
-SkiaHelios separates concerns into three divine roles to ensure modularity and logic isolation.
+SkiaHelios separates concerns into divine roles to ensure modularity and logic isolation.
 
 ```mermaid
 graph TD
@@ -93,33 +94,34 @@ graph TD
     classDef moduleClass fill:#4A2B5F,stroke:#9370DB,stroke-width:2px,color:#E6E6FA;
     classDef outputClass fill:#2F1B3A,stroke:#BA55D3,stroke-width:2px,color:#DDA0DD;
     classDef fusionClass fill:#1A0033,stroke:#FF69B4,stroke-width:3px,color:#FFB6C1;
+    classDef ruleClass fill:#4B0082,stroke:#FFD700,stroke-width:2px,color:#FFFFFF,stroke-dasharray: 5 5;
 
     %% Title
-    title[("⚡️ SkiaHelios v2.2 Triad Architecture ⚡️\nFrom Shadows to Sun")]:::inputClass
+    title[("⚡️ SkiaHelios v2.5 Triad Architecture ⚡️\nGod Mode: Modular & Visual")]:::inputClass
 
     %% Input
     Evidence[📂 Raw Artifacts<br/>KAPE CSVs / EVTX / MFT / Prefetch]:::inputClass
+    ThemisFile[📜 triage_rules.yaml<br/>(External Logic)]:::ruleClass
 
     %% Phase 1: Clotho
     subgraph Phase1 ["🧶 Phase 1: Clotho (The Spinner) - Ingestion & Enrichment"]
         direction TB
-        Clotho[SH_ClothoReader<br/>Universal Ingestion<br/>5W1H Enrichment<br/>Session Awareness]:::coreClass
+        Clotho[SH_ClothoReader<br/>Universal Ingestion<br/>5W1H Enrichment]:::coreClass
         Hunters[🐍 Specialized Hunters<br/>• PlutosGate • HerculesReferee<br/>• Pandora • ChronosSift<br/>• Sirenhunt • Sphinx • AION]:::moduleClass
     end
 
     %% Phase 2: Atropos
     subgraph Phase2 ["✂️ Phase 2: Atropos (The Thinker) - Correlation & Judgment"]
         direction TB
-        Atropos[SH_AtroposThinker<br/>Physics Time Sort<br/>Heat Correlation<br/>Privilege Escalation Detection]:::coreClass
-        Nemesis[Nemesis Tracing<br/>File Lifecycle Reconstruction]:::moduleClass
-        Chronos[Chronos Time Lord<br/>Timestomp & Legacy Hybrid Logic]:::moduleClass
-        Scout[Internal Scout<br/>Lateral Movement Analysis<br/>RFC1918 Patrol]:::moduleClass
+        Atropos[SH_AtroposThinker<br/>Physics Time Sort<br/>Heat Correlation]:::coreClass
+        Nemesis[Nemesis Tracer (Standalone)<br/>Deep Lifecycle & Dedup]:::moduleClass
+        Themis[⚖️ Themis Loader<br/>Rule Application & Scoring]:::moduleClass
     end
 
     %% Phase 3: Lachesis
     subgraph Phase3 ["✍️ Phase 3: Lachesis (The Allotter) - Reporting"]
         direction TB
-        Lachesis[SH_LachesisWriter<br/>Grimoire Generation<br/>Visual Mermaid Charts<br/>IOC Folding]:::coreClass
+        Lachesis[SH_LachesisWriter<br/>Omni-Visual Reporting<br/>Mermaid & JSON Generation]:::coreClass
         Report[📜 Grimoire Report<br/>Visual Markdown]:::outputClass
         JSONData[📊 Structured JSON Dump<br/>Machine-Readable Evidence]:::outputClass
     end
@@ -127,28 +129,27 @@ graph TD
     %% Phase 4: Chimera
     subgraph Phase4 ["🦁 Phase 4: Chimera (The Beast) - Multi-Host Fusion"]
         direction TB
-        Chimera[SH_ChimeraFusion v1.9<br/>Campaign-Level Integration<br/>Lateral Chain Visualization]:::fusionClass
+        Chimera[SH_ChimeraFusion<br/>Campaign-Level Integration]:::fusionClass
         Campaign[🏛️ Campaign Report<br/>Cross-Host Attack Narrative]:::outputClass
     end
 
     %% Flow
     Evidence --> Clotho
-    Hunters -.->|Feed Seeds & Insights| Clotho
-    Clotho -->|Enriched Polars DataFrame| Atropos
+    ThemisFile -.->|Inject Rules| Themis
+    Themis -.->|Filter & Score| Pandora
+    Themis -.->|Filter & Score| Atropos
+    
+    Hunters -.->|Feed Seeds| Clotho
+    Clotho -->|Enriched Data| Atropos
     Atropos --> Nemesis
-    Atropos --> Chronos
-    Atropos --> Scout
     Atropos --> Lachesis
     Lachesis --> Report
     Lachesis --> JSONData
     JSONData --> Chimera
     Chimera --> Campaign
 
-    %% Overall Layout
-    Phase1 --> Phase2 --> Phase3 --> Phase4
-
     %% Footer
-    footer[("Powered by Python • Polars • Pure Logic\n© schutzz - God Mode Final Achieved")]:::inputClass
+    footer[("Powered by Python • Polars • Pure Logic\n© schutzz - v2.5 Complete")]:::inputClass
 ```
 
 ---
@@ -157,14 +158,15 @@ graph TD
 
 | Module | Role | Functionality |
 | :--- | :--- | :--- |
-| **Lachesis** | The Weaver | **[UPDATED]** Generates **Visual Reports** with Mermaid charts, IOC tables, and noise folding (`<details>`). |
-| **Pandora** | The Link | **[UPDATED]** Threat Intel integration (WebShell/Rootkit detection) & Surgical Noise Reduction. Recovers deleted "Ghosts". |
-| **Chronos** | Time Lord | **[UPDATED]** Hybrid Logic. Detects **Timestomping** ($SI < $FN) with ms-level precision. Adapts to Legacy OS with `--legacy`. |
+| **Themis** | The Law | **[NEW]** Loads `triage_rules.yaml` to define Noise Filters and Threat Signatures dynamically. |
+| **Lachesis** | The Weaver | **[UPDATED]** Omni-Visual reporting. Now visualizes IP addresses, critical executions, and file drops in Mermaid diagrams. |
+| **Atropos** | The Thinker | **[UPDATED]** "Golden Rule" logic (Threat > Noise). Aggressive deduplication of USN/MFT events. |
+| **Nemesis** | The Tracer | **[NEW]** Standalone module for tracing artifact lifecycles (Birth -> Rename -> Death) and command-line seeds. |
+| **Pandora** | The Link | **[UPDATED]** Recovers deleted "Ghosts" with Threat Intel scoring. Implements the "Golden Rule" to save critical evidence from noise filters. |
+| **Chronos** | Time Lord | Hybrid Logic. Detects **Timestomping** ($SI < $FN) with ms-level precision. |
 | **Hercules** | The Referee | Event Log analysis, Identity tracking (SID resolution), and initial triage. |
-| **Plutos** | Gatekeeper | Network & SRUM analysis. Detects C2, Lateral Movement, and Data Exfiltration using "Heat Scores". |
-| **AION** | The Eye | Persistence hunting (Registry, Tasks, Services). Calculates SHA256 for evidence. |
+| **Plutos** | Gatekeeper | Network & SRUM analysis. Detects C2 and Lateral Movement using "Heat Scores". |
 | **Sphinx** | Decipherer | Decodes obfuscated command lines (Base64, PowerShell) and extracts IOCs. |
-| **Siren** | Validator | Cross-validates file events with **Prefetch** & **Amcache** to confirm execution. |
 
 ---
 
@@ -174,20 +176,22 @@ SkiaHelios generates a `Grimoire_[CaseName]_jp.md` that renders beautifully in V
 
 ```mermaid
 graph TD
-    %% [Visual Style v1.0 Restoration with Syntax Guard]
+    %% [Visual Style v2.5 - Omni-Visual]
     Attacker[🦁 Attacker] -->|Exploit/Access| Initial[Initial Access]
     
-    Initial -->|Detected Exploit| Ex_1["xss_s[1].htm"]
-    Initial -->|File Upload| WS_1["tmpbrjvl.php <br/>(WebShell)"]
+    Initial -->|Drop/Upload| WS_1["c99.php"]
+    WS_1 -->|Exec| Cmd_1((Shell))
     
-    WS_1 -->|Execution| Cmd_1{{Command Exec}}
-    Cmd_1 -->|Install| RK_1["mxdwdui.BUD <br/>(Rootkit)"]
+    Initial -->|Drop/Upload| WS_2["tmpudvfh.php"]
+    WS_2 -->|Exec| Cmd_2((Shell))
     
-    Attacker -.->|Remote Trace| IP_1("192.168.56.102")
+    Cmd_1 -->|Persistence| RK_1["mxdwdui.BUD <br/>(Rootkit)"]
+    
+    Attacker -.->|C2/Lateral| IP_1("192.168.56.102")
 
-    %% Styles (Original Orange Palette)
+    %% Styles
     classDef threat fill:#f96,stroke:#333,stroke-width:2px;
-    class Attacker,Initial,WS_1,RK_1,Ex_1,IP_1 threat;
+    class Attacker,Initial,WS_1,WS_2,RK_1,IP_1 threat;
 ```
 
 ---
@@ -196,11 +200,12 @@ graph TD
 
 * [x] **v1.0:** Core Logic (Clotho/Atropos/Lachesis)
 * [x] **v1.9:** Internal Scout & Lateral Movement Logic (Chimera)
-* [x] **v2.0:** **Visual Reporting (Mermaid Integration)**
-* [x] **v2.1:** **Legacy OS Support & Threat Intelligence**
-* [x] **v2.2:** **Interactive Mode & Syntax Guards**
-* [ ] **v2.5:** Volatility 3 Integration (Memory Forensics)
-* [ ] **v3.0:** AI-Driven Narrative Generation (LLM Integration)
+* [x] **v2.0:** Visual Reporting (Mermaid Integration)
+* [x] **v2.1:** Legacy OS Support & Threat Intelligence
+* [x] **v2.2:** Interactive Mode & Syntax Guards
+* [x] **v2.5:** **Modular Architecture (Nemesis/Themis) & Omni-Visual Reporting**
+* [ ] **v3.0:** Volatility 3 Integration (Memory Forensics)
+* [ ] **v4.0:** Rust Rewrite (Project: *Ares*)
 
 ---
 
