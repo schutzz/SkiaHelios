@@ -1,4 +1,4 @@
-# SkiaHelios v2.5 - God Mode (Visual & Modular Edition)
+# SkiaHelios v2.6 - Midas Touch (Visual & Golden Report Edition)
 
 ![SkiaHelios CI](https://github.com/schutzz/SkiaHelios/actions/workflows/test.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
@@ -8,22 +8,24 @@
 ![Status](https://img.shields.io/badge/Status-Battle_Tested-green)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey)
 
-> *"From Shadows to Sun. Order restored. Truth visualized."*
+> *"From Shadows to Sun. From Data to Gold."*
 
 **SkiaHelios** is a high-resolution, modular DFIR (Digital Forensics & Incident Response) framework built for **speed**, **causality**, and **visual narrative**.
 
 Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** to deconstruct artifacts, trace physical execution chains, and weave a cohesive narrative across multiple hosts.
 
-**Current Version:** v2.5 (Omni-Visual Reporting / Modular Architecture / Themis Rule Engine / Legacy Support)
+**Current Version:** v2.6 (Midas Touch / Omni-Visual Reporting / Evidence Packaging / Legacy Support)
 
 ---
 
-## ⚡ Key Features (v2.5 Updates)
+## ⚡ Key Features (v2.6 Updates)
 
-* **🏹 Omni-Visual Attack Flow:** [NEW] Lachesis now generates **Mermaid diagrams** that visualize not just files, but **Network IPs** and **Critical Executions** extracted by Atropos.
-* **⚖️ Themis Rule Engine:** [NEW] Logic is now externalized in `rules/triage_rules.yaml`. Customize **Threat Signatures** and **Noise Filters** without touching the code.
-* **🛡️ Golden Rule Logic:** [NEW] Implemented "Threat > Noise" logic. Critical artifacts (e.g., WebShells in Cache) pierce through noise filters.
-* **✂️ Nemesis Tracer:** [NEW] Modularized logic to aggressively deduplicate USN/MFT events and trace artifact lifecycles with sub-second precision. (Unit Tested)
+* **👑 Midas Touch (Docx/PDF):** [NEW] Automatically converts Markdown reports into **Executive Docx** files. Renders **Mermaid diagrams** into high-res PNGs and embeds them seamlessly.
+* **🦁 Team Sync Mode:** [NEW] Packages all evidence (CSVs, Source Code, Reports) into a **Hash-verified Zip** (`manifest.json` included) for forensic soundness and team collaboration.
+* **🏹 Omni-Visual Attack Flow:** Lachesis generates **Mermaid diagrams** that visualize not just files, but **Network IPs** and **Critical Executions** extracted by Atropos.
+* **⚖️ Themis Rule Engine:** Logic is externalized in `rules/triage_rules.yaml`. Customize **Threat Signatures** and **Noise Filters** without touching the code.
+* **🛡️ Golden Rule Logic:** Implemented "Threat > Noise" logic. Critical artifacts (e.g., WebShells in Cache) pierce through noise filters.
+* **✂️ Nemesis Tracer:** Modularized logic to aggressively deduplicate USN/MFT events and trace artifact lifecycles with sub-second precision. (Unit Tested)
 * **🕰️ Hybrid Time Logic:** Specialized **`--legacy` mode** for older OS environments to eliminate install-time noise.
 * **🔥 Chimera Fusion:** Correlates Lateral Movement across multiple hosts to visualize the entire campaign.
 
@@ -36,29 +38,33 @@ Get started immediately. No complex databases, just pure Python & Polars power.
 ### 1. Installation
 ```bash
 # Clone the repository
-git clone https://github.com/schutzz/SkiaHelios.git
+git clone [https://github.com/schutzz/SkiaHelios.git](https://github.com/schutzz/SkiaHelios.git)
 cd SkiaHelios
 
-# Install dependencies (Polars, Pandas, PyYAML, etc.)
+# Install dependencies
 pip install -r requirements.txt
+
+# [Optional] For Docx & Diagram generation:
+# Install Pandoc & Mermaid-CLI (npm install -g @mermaid-js/mermaid-cli)
 ```
 
 ### 2. Interactive Mode (Wizard) 🆕
-Simply run the script without arguments. It will guide you through directory selection and mode toggling.
+Simply run the script. It now asks if you want to generate a **Golden Report (Docx)**.
 
 ```bash
 python SH_HeliosConsole.py
-# Follow the prompts to select Input Dir, Output Dir, and Legacy Mode.
+# Follow the prompts: "Generate Docx Report? [y/N]"
 ```
 
 ### 3. Command Line Mode (Automation)
 Ideal for CI/CD pipelines or scripted analysis.
 
-**Standard Scan (Modern OS - Win10/11/Server 2016+):**
+**Standard Scan + Golden Report:**
 ```bash
 python SH_HeliosConsole.py \
   --dir "C:\Cases\Case_001\KAPE_Output" \
-  --case "Ransomware_Investigation"
+  --case "Ransomware_Inv" \
+  --docx
 ```
 
 **Legacy Scan (Old OS - XP/Vista/2008/2012 or High Noise):**
@@ -82,7 +88,7 @@ python tools/SH_ChimeraFusion.py \
 
 ---
 
-## 🏛️ Architecture (The Triad v2.5)
+## 🏛️ Architecture (The Triad + Midas)
 
 SkiaHelios separates concerns into divine roles to ensure modularity and logic isolation.
 
@@ -95,10 +101,11 @@ graph TD
     classDef moduleClass fill:#4A2B5F,stroke:#9370DB,stroke-width:2px,color:#E6E6FA;
     classDef outputClass fill:#2F1B3A,stroke:#BA55D3,stroke-width:2px,color:#DDA0DD;
     classDef fusionClass fill:#1A0033,stroke:#FF69B4,stroke-width:3px,color:#FFB6C1;
+    classDef goldClass fill:#B8860B,stroke:#FFD700,stroke-width:3px,color:#FFFFFF;
     classDef ruleClass fill:#4B0082,stroke:#FFD700,stroke-width:2px,color:#FFFFFF,stroke-dasharray: 5 5;
 
     %% Title
-    title[("⚡️ SkiaHelios v2.5 Triad Architecture ⚡️\nGod Mode: Modular & Visual")]:::inputClass
+    title[("⚡️ SkiaHelios v2.6 Architecture ⚡️\nGod Mode: Modular, Visual & Golden")]:::inputClass
 
     %% Input
     Evidence[📂 Raw Artifacts<br/>KAPE CSVs / EVTX / MFT / Prefetch]:::inputClass
@@ -134,6 +141,14 @@ graph TD
         Campaign[🏛️ Campaign Report<br/>Cross-Host Attack Narrative]:::outputClass
     end
 
+    %% Phase 5: Midas (NEW)
+    subgraph Phase5 ["👑 Phase 5: Midas (The Alchemist) - Final Polish"]
+        direction TB
+        Midas[SH_MidasTouch<br/>Docx Converter & Evidence Packager]:::goldClass
+        GoldReport[🏆 Golden Docx Report]:::goldClass
+        SyncPack[📦 Team Sync Zip<br/>(Hash Verified)]:::goldClass
+    end
+
     %% Flow
     Evidence --> Clotho
     ThemisFile -.->|Inject Rules| Themis
@@ -147,11 +162,17 @@ graph TD
     JSONData --> Chimera
     Chimera --> Campaign
 
+    %% Midas Connections
+    Report --> Midas
+    Campaign --> Midas
+    Midas --> GoldReport
+    Midas --> SyncPack
+
     %% Overall Layout
-    Phase1 --> Phase2 --> Phase3 --> Phase4
+    Phase1 --> Phase2 --> Phase3 --> Phase4 --> Phase5
 
     %% Footer
-    footer[("Powered by Python • Polars • Pure Logic\n© schutzz - v2.5 Complete")]:::inputClass
+    footer[("Powered by Python • Polars • Pure Logic\n© schutzz - v2.6 Complete")]:::inputClass
 ```
 
 ---
@@ -160,16 +181,17 @@ graph TD
 
 | Module | Role | Functionality |
 | :--- | :--- | :--- |
-| **Themis** | The Law | **[NEW]** Loads `triage_rules.yaml` to define Noise Filters and Threat Signatures dynamically. |
-| **Lachesis** | The Weaver | **[UPDATED]** Omni-Visual reporting. Now visualizes IP addresses, critical executions, and file drops in Mermaid diagrams. |
-| **Atropos** | The Thinker | **[UPDATED]** "Golden Rule" logic (Threat > Noise). Aggressive deduplication of USN/MFT events. |
-| **Nemesis** | The Tracer | **[NEW]** Standalone module for tracing artifact lifecycles (Birth -> Rename -> Death) and command-line seeds. |
-| **Pandora** | The Link | **[UPDATED]** Recovers deleted "Ghosts" with Threat Intel scoring. Implements the "Golden Rule" to save critical evidence from noise filters. |
+| **Midas** | The Alchemist | **[NEW]** Converts MD to Docx, renders Mermaid to PNG, and creates Evidence Packages (Team Sync). |
+| **Themis** | The Law | Loads `triage_rules.yaml` to define Noise Filters and Threat Signatures dynamically. |
+| **Lachesis** | The Weaver | Omni-Visual reporting. Now visualizes IP addresses, critical executions, and file drops in Mermaid diagrams. |
+| **Atropos** | The Thinker | "Golden Rule" logic (Threat > Noise). Aggressive deduplication of USN/MFT events. |
+| **Nemesis** | The Tracer | Standalone module for tracing artifact lifecycles (Birth -> Rename -> Death) and command-line seeds. |
+| **Pandora** | The Link | Recovers deleted "Ghosts" with Threat Intel scoring. Implements the "Golden Rule" to save critical evidence from noise filters. |
 | **Chronos** | Time Lord | Hybrid Logic. Detects **Timestomping** ($SI < $FN) with ms-level precision. |
 | **Hercules** | The Referee | Event Log analysis, Identity tracking (SID resolution), and initial triage. |
 | **Plutos** | Gatekeeper | Network & SRUM analysis. Detects C2 and Lateral Movement using "Heat Scores". |
 | **Sphinx** | Decipherer | Decodes obfuscated command lines (Base64, PowerShell) and extracts IOCs. |
-| **AION** | The Eye | **[NEW]** Persistence detection (RunKeys, Services) fully powered by Themis rules. |
+| **AION** | The Eye | Persistence detection (RunKeys, Services) fully powered by Themis rules. |
 
 ---
 
@@ -206,7 +228,8 @@ graph TD
 * [x] **v2.0:** Visual Reporting (Mermaid Integration)
 * [x] **v2.1:** Legacy OS Support & Threat Intelligence
 * [x] **v2.2:** Interactive Mode & Syntax Guards
-* [x] **v2.5:** **Modular Architecture (Nemesis/Themis) & Omni-Visual Reporting**
+* [x] **v2.5:** Modular Architecture (Nemesis/Themis) & Omni-Visual Reporting
+* [x] **v2.6:** **Midas Touch (Docx Generation & Evidence Packaging)**
 * [ ] **v3.0:** Volatility 3 Integration (Memory Forensics)
 * [ ] **v4.0:** Rust Rewrite (Project: *Ares*)
 
