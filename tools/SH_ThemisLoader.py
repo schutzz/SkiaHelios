@@ -5,9 +5,9 @@ import re
 import sys
 
 # ============================================================
-#  SH_ThemisLoader v1.1 [Safe Casting]
+#  SH_ThemisLoader v1.2 [AION Enabled]
 #  Mission: Compile YAML rules into Polars Expressions.
-#  Update: Enforce Int64 casting for Threat_Score before math.
+#  Update: Added 'persistence_targets' loader for AION.
 # ============================================================
 
 class ThemisLoader:
@@ -15,14 +15,14 @@ class ThemisLoader:
         self.rule_path = Path(rule_path)
         self.noise_rules = []
         self.threat_rules = []
+        self.persistence_targets = [] # [NEW] AION用
         self._load_yaml()
 
     def _load_yaml(self):
         """
-        YAMLファイルをロードし、ノイズルールと脅威ルールをメモリに展開するっス。
+        YAMLファイルをロードし、各種ルールをメモリに展開するっス。
         """
         if not self.rule_path.exists():
-            # ルールがない場合は空で続行（エラーにはしない）
             print(f"[!] Themis Warning: Rule file '{self.rule_path}' not found. Running without external laws.")
             return
 
@@ -32,14 +32,25 @@ class ThemisLoader:
                 if data:
                     self.noise_rules = data.get("noise_filters", [])
                     self.threat_rules = data.get("threat_signatures", [])
-            print(f"[*] Themis Loaded: {len(self.noise_rules)} Noise Filters, {len(self.threat_rules)} Threat Sigs.")
+                    # [NEW] AIONスキャン対象のロード
+                    self.persistence_targets = data.get("persistence_targets", [])
+            
+            print(f"[*] Themis Loaded: {len(self.noise_rules)} Noise, {len(self.threat_rules)} Threat, {len(self.persistence_targets)} Targets.")
         except Exception as e:
             print(f"[!] Themis Error: Failed to load YAML ({e})")
 
+    def get_persistence_targets(self, category="Registry"):
+        """
+        [NEW] 指定カテゴリのスキャン対象パターン（Regexリスト）を返すっス。
+        """
+        patterns = []
+        for target in self.persistence_targets:
+            if target.get("category") == category:
+                p = target.get("pattern")
+                if p: patterns.append(p)
+        return patterns
+
     def _build_condition(self, col_name, condition, pattern):
-        """
-        YAMLの条件定義を、Polarsの物理演算式(Expr)にコンパイルするっス。
-        """
         if condition == "contains":
             return pl.col(col_name).str.contains(pattern, literal=True)
         elif condition == "regex" or condition == "matches":
@@ -55,68 +66,43 @@ class ThemisLoader:
                 return pl.col(col_name).is_in(pattern)
             else:
                 return pl.col(col_name) == pattern
-        
         return pl.lit(False)
 
     def get_noise_filter_expr(self, available_columns):
-        """
-        ノイズ除去用の巨大なOR条件式を生成して返すっス。
-        """
         exprs = []
         for rule in self.noise_rules:
             target = rule.get("target")
-            if target not in available_columns:
-                continue
+            if target not in available_columns: continue
             expr = self._build_condition(target, rule.get("condition"), rule.get("pattern"))
             exprs.append(expr)
-        
-        if not exprs:
-            return pl.lit(False)
-        
+        if not exprs: return pl.lit(False)
         return pl.any_horizontal(exprs)
 
     def apply_threat_scoring(self, lf):
-        """
-        LazyFrameを受け取り、Threat_ScoreとThreat_Tagを計算・付与したLFを返すっス。
-        [FIX] 計算前に必ずInt64型へキャストする安全装置を追加したっス！
-        """
         cols = lf.collect_schema().names()
-        
-        # 1. Threat_Score の型安全化
         if "Threat_Score" not in cols:
             lf = lf.with_columns(pl.lit(0, dtype=pl.Int64).alias("Threat_Score"))
         else:
-            # すでにカラムがある場合、ClothoReaderがStringで読んでいる可能性があるため
-            # 強制的にInt64にキャストし、変換できないゴミは0埋めするっス
-            lf = lf.with_columns(
-                pl.col("Threat_Score").cast(pl.Int64, strict=False).fill_null(0)
-            )
+            lf = lf.with_columns(pl.col("Threat_Score").cast(pl.Int64, strict=False).fill_null(0))
 
-        # 2. Threat_Tag の型安全化
         if "Threat_Tag" not in cols:
             lf = lf.with_columns(pl.lit("", dtype=pl.Utf8).alias("Threat_Tag"))
         else:
-            lf = lf.with_columns(
-                pl.col("Threat_Tag").cast(pl.Utf8).fill_null("")
-            )
+            lf = lf.with_columns(pl.col("Threat_Tag").cast(pl.Utf8).fill_null(""))
 
-        # 3. ルール適用ループ
         for rule in self.threat_rules:
             target = rule.get("target")
             if target not in cols: continue
-
             condition_expr = self._build_condition(target, rule.get("condition"), rule.get("pattern"))
             score_boost = rule.get("score", 0)
             tag_name = rule.get("tag", "THREAT")
 
             lf = lf.with_columns([
-                # スコア加算
                 pl.when(condition_expr)
-                .then(pl.col("Threat_Score") + score_boost) # これでStringエラーは起きないっス！
+                .then(pl.col("Threat_Score") + score_boost)
                 .otherwise(pl.col("Threat_Score"))
                 .alias("Threat_Score"),
 
-                # タグ追記
                 pl.when(condition_expr)
                 .then(
                     pl.when(pl.col("Threat_Tag") == "")
@@ -126,38 +112,29 @@ class ThemisLoader:
                 .otherwise(pl.col("Threat_Tag"))
                 .alias("Threat_Tag")
             ])
-        
         return lf
 
     def suggest_new_noise_rules(self, df, threshold_ratio=50):
-        """
-        【おせっかい機能 (Osekkay)】
-        ※ 呼び出し元で collect() 済みの DataFrame を渡すこと！
-        """
         total_count = df.height
         if total_count == 0: return []
-        
         threat_count = df.filter(pl.col("Threat_Score") > 0).height
-        
         if threat_count == 0: threat_count = 1
         ratio = total_count / threat_count
-        
-        if ratio < threshold_ratio:
-            return []
+        if ratio < threshold_ratio: return []
 
         print(f"[*] Themis Insight: High Noise Ratio detected ({ratio:.1f}x). Analyzing noise candidates...")
-        
         noise_candidates = df.filter(pl.col("Threat_Score") == 0)
         
-        if "ParentPath" in df.columns:
-            stats = noise_candidates.group_by("ParentPath").len().sort("len", descending=True).head(5)
-            
-            suggestions = []
-            for row in stats.iter_rows(named=True):
-                path = row["ParentPath"]
-                count = row["len"]
-                if path:
-                    suggestions.append(f"  - Target: ParentPath | Pattern: {path} (Count: {count})")
-            return suggestions
-            
-        return []
+        # AION用にTarget_FileNameやFull_Pathも候補に入れる
+        target_cols = ["ParentPath", "Entry_Location", "Target_FileName"]
+        suggestions = []
+        
+        for t_col in target_cols:
+            if t_col in df.columns:
+                stats = noise_candidates.group_by(t_col).len().sort("len", descending=True).head(3)
+                for row in stats.iter_rows(named=True):
+                    val = row[t_col]
+                    count = row["len"]
+                    if val:
+                        suggestions.append(f"  - Target: {t_col} | Pattern: {str(val)[:50]} (Count: {count})")
+        return suggestions

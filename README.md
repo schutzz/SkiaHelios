@@ -4,6 +4,7 @@
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
 ![Polars](https://img.shields.io/badge/Engine-Polars_0.20%2B-orange?logo=polars)
 ![Mermaid](https://img.shields.io/badge/Report-Mermaid_Visuals-ff69b4?logo=mermaid)
+![Tests](https://img.shields.io/badge/Tests-12%2F12_PASS-brightgreen)
 ![Status](https://img.shields.io/badge/Status-Battle_Tested-green)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey)
 
@@ -22,7 +23,7 @@ Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture
 * **🏹 Omni-Visual Attack Flow:** [NEW] Lachesis now generates **Mermaid diagrams** that visualize not just files, but **Network IPs** and **Critical Executions** extracted by Atropos.
 * **⚖️ Themis Rule Engine:** [NEW] Logic is now externalized in `rules/triage_rules.yaml`. Customize **Threat Signatures** and **Noise Filters** without touching the code.
 * **🛡️ Golden Rule Logic:** [NEW] Implemented "Threat > Noise" logic. Critical artifacts (e.g., WebShells in Cache) pierce through noise filters.
-* **✂️ Nemesis Tracer:** [NEW] Modularized logic to aggressively deduplicate USN/MFT events and trace artifact lifecycles with sub-second precision.
+* **✂️ Nemesis Tracer:** [NEW] Modularized logic to aggressively deduplicate USN/MFT events and trace artifact lifecycles with sub-second precision. (Unit Tested)
 * **🕰️ Hybrid Time Logic:** Specialized **`--legacy` mode** for older OS environments to eliminate install-time noise.
 * **🔥 Chimera Fusion:** Correlates Lateral Movement across multiple hosts to visualize the entire campaign.
 
@@ -35,7 +36,7 @@ Get started immediately. No complex databases, just pure Python & Polars power.
 ### 1. Installation
 ```bash
 # Clone the repository
-git clone [https://github.com/schutzz/SkiaHelios.git](https://github.com/schutzz/SkiaHelios.git)
+git clone https://github.com/schutzz/SkiaHelios.git
 cd SkiaHelios
 
 # Install dependencies (Polars, Pandas, PyYAML, etc.)
@@ -101,7 +102,7 @@ graph TD
 
     %% Input
     Evidence[📂 Raw Artifacts<br/>KAPE CSVs / EVTX / MFT / Prefetch]:::inputClass
-    ThemisFile[📜 triage_rules.yaml<br/>(External Logic)]:::ruleClass
+    ThemisFile[📜 triage_rules.yaml<br/>External Logic]:::ruleClass
 
     %% Phase 1: Clotho
     subgraph Phase1 ["🧶 Phase 1: Clotho (The Spinner) - Ingestion & Enrichment"]
@@ -114,7 +115,7 @@ graph TD
     subgraph Phase2 ["✂️ Phase 2: Atropos (The Thinker) - Correlation & Judgment"]
         direction TB
         Atropos[SH_AtroposThinker<br/>Physics Time Sort<br/>Heat Correlation]:::coreClass
-        Nemesis[Nemesis Tracer (Standalone)<br/>Deep Lifecycle & Dedup]:::moduleClass
+        Nemesis[Nemesis Tracer Standalone<br/>Deep Lifecycle & Dedup]:::moduleClass
         Themis[⚖️ Themis Loader<br/>Rule Application & Scoring]:::moduleClass
     end
 
@@ -136,10 +137,8 @@ graph TD
     %% Flow
     Evidence --> Clotho
     ThemisFile -.->|Inject Rules| Themis
-    Themis -.->|Filter & Score| Pandora
     Themis -.->|Filter & Score| Atropos
     
-    Hunters -.->|Feed Seeds| Clotho
     Clotho -->|Enriched Data| Atropos
     Atropos --> Nemesis
     Atropos --> Lachesis
@@ -147,6 +146,9 @@ graph TD
     Lachesis --> JSONData
     JSONData --> Chimera
     Chimera --> Campaign
+
+    %% Overall Layout
+    Phase1 --> Phase2 --> Phase3 --> Phase4
 
     %% Footer
     footer[("Powered by Python • Polars • Pure Logic\n© schutzz - v2.5 Complete")]:::inputClass
@@ -167,6 +169,7 @@ graph TD
 | **Hercules** | The Referee | Event Log analysis, Identity tracking (SID resolution), and initial triage. |
 | **Plutos** | Gatekeeper | Network & SRUM analysis. Detects C2 and Lateral Movement using "Heat Scores". |
 | **Sphinx** | Decipherer | Decodes obfuscated command lines (Base64, PowerShell) and extracts IOCs. |
+| **AION** | The Eye | **[NEW]** Persistence detection (RunKeys, Services) fully powered by Themis rules. |
 
 ---
 

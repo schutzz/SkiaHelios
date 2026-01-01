@@ -1,6 +1,24 @@
 # rules/triage_rules.yaml [Themis Law v2.1]
 # Update: Tuned for Windows Internal Artifacts (RAC, WMI, RegBack)
 
+# --- [NEW] Persistence Targets (AION Scope) ---
+persistence_targets:
+  - name: "Run Keys"
+    category: "Registry"
+    pattern: "Microsoft\\\\Windows\\\\CurrentVersion\\\\Run"
+  
+  - name: "RunOnce Keys"
+    category: "Registry"
+    pattern: "Microsoft\\\\Windows\\\\CurrentVersion\\\\RunOnce"
+
+  - name: "Services"
+    category: "Registry"
+    pattern: "Services"
+
+  - name: "Scheduled Tasks"
+    category: "Registry"
+    pattern: "ScheduledTasks"
+
 noise_filters:
   # --- [System Internals Noise] ---
   - name: "Reliability Analysis Component (RAC)"
@@ -60,9 +78,26 @@ noise_filters:
     pattern: "(?i)[/\\\\](Tools|ghidra|sleuthkit|FTK Imager|exiftool|Autoruns|LogFileParser|YaraRules|Strings|Splunk)[/\\\\]"
 
   - name: "Trusted System Paths"
+    category: "Registry" # Technically noise filter, but just matching structure if needed or just part of noise_filters
     target: "ParentPath"
     condition: "regex"
     pattern: "(?i)^(?:[a-z]:)?\\\\(Windows\\\\System32|Program Files|Program Files \\(x86\\))"
+
+  # --- [AION Specific Noise] ---
+  - name: "Windows Safe Paths"
+    target: "Full_Path" # AIONが生成するカラム
+    condition: "regex"
+    pattern: "(?i)\\\\(Windows\\\\(WinSxS|Servicing|SoftwareDistribution|CbsTemp|Assembly|Microsoft\\.NET\\\\Framework|System32\\\\DriverStore))"
+
+  - name: "Known System DLLs"
+    target: "Target_FileName"
+    condition: "regex"
+    pattern: "(?i)^(amd64_|x86_|wow64_|system\\.|microsoft\\.build).*"
+
+  - name: "Safe Extensions"
+    target: "Target_FileName"
+    condition: "regex"
+    pattern: "(?i)\\.(manifest|mum|cat)$"
 
   # --- [Extension Noise] ---
   - name: "Garbage Extensions"
@@ -85,6 +120,20 @@ noise_filters:
 # 🦁 THREAT SIGNATURES (No Changes Needed)
 # ==========================================
 threat_signatures:
+  # --- [AION Specific Threats] ---
+  - name: "Suspicious Script Persistence"
+    tag: "SCRIPT_PERSISTENCE"
+    score: 40
+    target: "Target_FileName"
+    condition: "regex"
+    pattern: "(?i)\\.(bat|ps1|vbs|hta|js|wsf)$"
+
+  - name: "Suspicious Command in Registry"
+    tag: "SUSPICIOUS_CMD"
+    score: 50
+    target: "Full_Path" # データの中身もFull_Pathに入れているのでここで検知
+    condition: "regex"
+    pattern: "(?i)(powershell|cmd|wscript|cscript|mshta|rundll32|regsvr32|encodedcommand)"
   # ... (以前と同じ内容でOKっス！) ...
   - name: "WebShell (Generic Names)"
     tag: "WEBSHELL"
@@ -148,3 +197,5 @@ threat_signatures:
     target: "FileName"
     condition: "regex"
     pattern: "(?i)^(winword\\.exe|excel\\.exe|powerpnt\\.exe|outlook\\.exe)$"
+
+    
