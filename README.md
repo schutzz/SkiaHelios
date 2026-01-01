@@ -101,7 +101,7 @@ graph TD
 
     %% Input
     Evidence[📂 Raw Artifacts<br/>KAPE CSVs / EVTX / MFT / Prefetch]:::inputClass
-    ThemisFile[📜 triage_rules.yaml<br/>(External Logic)]:::ruleClass
+    ThemisFile[📜 triage_rules.yaml<br/>External Logic]:::ruleClass
 
     %% Phase 1: Clotho
     subgraph Phase1 ["🧶 Phase 1: Clotho (The Spinner) - Ingestion & Enrichment"]
@@ -114,7 +114,7 @@ graph TD
     subgraph Phase2 ["✂️ Phase 2: Atropos (The Thinker) - Correlation & Judgment"]
         direction TB
         Atropos[SH_AtroposThinker<br/>Physics Time Sort<br/>Heat Correlation]:::coreClass
-        Nemesis[Nemesis Tracer (Standalone)<br/>Deep Lifecycle & Dedup]:::moduleClass
+        Nemesis[Nemesis Tracer Standalone<br/>Deep Lifecycle & Dedup]:::moduleClass
         Themis[⚖️ Themis Loader<br/>Rule Application & Scoring]:::moduleClass
     end
 
@@ -136,10 +136,8 @@ graph TD
     %% Flow
     Evidence --> Clotho
     ThemisFile -.->|Inject Rules| Themis
-    Themis -.->|Filter & Score| Pandora
     Themis -.->|Filter & Score| Atropos
     
-    Hunters -.->|Feed Seeds| Clotho
     Clotho -->|Enriched Data| Atropos
     Atropos --> Nemesis
     Atropos --> Lachesis
@@ -147,6 +145,9 @@ graph TD
     Lachesis --> JSONData
     JSONData --> Chimera
     Chimera --> Campaign
+
+    %% Overall Layout
+    Phase1 --> Phase2 --> Phase3 --> Phase4
 
     %% Footer
     footer[("Powered by Python • Polars • Pure Logic\n© schutzz - v2.5 Complete")]:::inputClass
