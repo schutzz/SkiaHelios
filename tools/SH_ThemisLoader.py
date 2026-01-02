@@ -5,44 +5,63 @@ import re
 import sys
 
 # ============================================================
-#  SH_ThemisLoader v1.2 [AION Enabled]
-#  Mission: Compile YAML rules into Polars Expressions.
-#  Update: Added 'persistence_targets' loader for AION.
+#  SH_ThemisLoader v2.3 [Tag Normalizer]
+#  Mission: Compile YAML rules and Cleanse Threat Tags.
+#  Update: Added _normalize_tags to align with set13 style.
 # ============================================================
 
 class ThemisLoader:
-    def __init__(self, rule_path="rules/triage_rules.yaml"):
-        self.rule_path = Path(rule_path)
+    def __init__(self, rule_paths=None):
+        if rule_paths is None:
+            self.rule_paths = ["rules/triage_rules.yaml"]
+        else:
+            self.rule_paths = [rule_paths] if isinstance(rule_paths, str) else rule_paths
+
         self.noise_rules = []
         self.threat_rules = []
-        self.persistence_targets = [] # [NEW] AION用
-        self._load_yaml()
+        self.persistence_targets = []
+        
+        # [NEW] Tag Mapping Dictionary
+        self.tag_map = {
+            "attack.credential-access": "CREDENTIALS",
+            "attack.persistence": "PERSISTENCE",
+            "attack.privilege-escalation": "PRIVESC",
+            "attack.defense-evasion": "EVASION",
+            "attack.command-and-control": "C2",
+            "attack.discovery": "DISCOVERY",
+            "attack.execution": "EXECUTION",
+            "attack.impact": "IMPACT",
+            "attack.initial-access": "INIT_ACCESS",
+            "attack.lateral-movement": "LATERAL",
+            "attack.collection": "COLLECTION",
+            "attack.exfiltration": "EXFILTRATION",
+            "attack.t1003": "CREDENTIAL_DUMP",
+            "attack.t1055": "INJECTION",
+            "attack.t1059": "CMD_EXEC",
+        }
+        
+        self._load_all_yamls()
 
-    def _load_yaml(self):
-        """
-        YAMLファイルをロードし、各種ルールをメモリに展開するっス。
-        """
-        if not self.rule_path.exists():
-            print(f"[!] Themis Warning: Rule file '{self.rule_path}' not found. Running without external laws.")
-            return
-
-        try:
-            with open(self.rule_path, "r", encoding="utf-8") as f:
-                data = yaml.safe_load(f)
-                if data:
-                    self.noise_rules = data.get("noise_filters", [])
-                    self.threat_rules = data.get("threat_signatures", [])
-                    # [NEW] AIONスキャン対象のロード
-                    self.persistence_targets = data.get("persistence_targets", [])
-            
-            print(f"[*] Themis Loaded: {len(self.noise_rules)} Noise, {len(self.threat_rules)} Threat, {len(self.persistence_targets)} Targets.")
-        except Exception as e:
-            print(f"[!] Themis Error: Failed to load YAML ({e})")
+    def _load_all_yamls(self):
+        total_loaded = 0
+        for path_str in self.rule_paths:
+            p = Path(path_str)
+            if not p.exists():
+                print(f"[!] Themis Warning: Rule file '{p}' not found. Skipping.")
+                continue
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    data = yaml.safe_load(f)
+                    if data:
+                        self.noise_rules.extend(data.get("noise_filters", []))
+                        self.threat_rules.extend(data.get("threat_signatures", []))
+                        self.persistence_targets.extend(data.get("persistence_targets", []))
+                        total_loaded += 1
+            except Exception as e:
+                print(f"[!] Themis Error: Failed to load {p} ({e})")
+        print(f"[*] Themis Logic Assembled: {len(self.noise_rules)} Noise, {len(self.threat_rules)} Threat Rules from {total_loaded} files.")
 
     def get_persistence_targets(self, category="Registry"):
-        """
-        [NEW] 指定カテゴリのスキャン対象パターン（Regexリスト）を返すっス。
-        """
         patterns = []
         for target in self.persistence_targets:
             if target.get("category") == category:
@@ -78,6 +97,33 @@ class ThemisLoader:
         if not exprs: return pl.lit(False)
         return pl.any_horizontal(exprs)
 
+    def _clean_tag(self, raw_tag):
+        """
+        [NEW] Sigmaの長いタグを整形・翻訳するヘルパー関数
+        """
+        if not raw_tag: return ""
+        # カンマ区切りで分割
+        tags = [t.strip() for t in raw_tag.split(",")]
+        clean_tags = set()
+        
+        for t in tags:
+            # 1. 既知のマッピングがあれば変換
+            if t in self.tag_map:
+                clean_tags.add(self.tag_map[t])
+            # 2. MITRE ID (attack.tXXXX) は可読性が低いので、マッピングになければ除外
+            elif t.startswith("attack.t"):
+                continue 
+            # 3. その他の "attack." 系は、"attack." を取って大文字化
+            elif t.startswith("attack."):
+                clean_tags.add(t.replace("attack.", "").upper())
+            # 4. AION独自のタグ (WEBSHELL等) はそのまま採用
+            else:
+                clean_tags.add(t.upper())
+                
+        # 優先度の高いタグ順に並べる（WEBSHELLなどを先頭に）
+        sorted_tags = sorted(list(clean_tags), key=lambda x: 0 if x in ["WEBSHELL", "ROOTKIT", "RANSOMWARE"] else 1)
+        return ",".join(sorted_tags)
+
     def apply_threat_scoring(self, lf):
         cols = lf.collect_schema().names()
         if "Threat_Score" not in cols:
@@ -93,9 +139,13 @@ class ThemisLoader:
         for rule in self.threat_rules:
             target = rule.get("target")
             if target not in cols: continue
+            
             condition_expr = self._build_condition(target, rule.get("condition"), rule.get("pattern"))
             score_boost = rule.get("score", 0)
-            tag_name = rule.get("tag", "THREAT")
+            
+            # [UPDATE] タグの正規化処理をここで適用
+            raw_tag = rule.get("tag", "THREAT")
+            cleaned_tag = self._clean_tag(raw_tag)
 
             lf = lf.with_columns([
                 pl.when(condition_expr)
@@ -106,15 +156,21 @@ class ThemisLoader:
                 pl.when(condition_expr)
                 .then(
                     pl.when(pl.col("Threat_Tag") == "")
-                    .then(pl.lit(tag_name))
-                    .otherwise(pl.concat_str([pl.col("Threat_Tag"), pl.lit(f",{tag_name}")], separator=""))
+                    .then(pl.lit(cleaned_tag))
+                    .otherwise(pl.concat_str([pl.col("Threat_Tag"), pl.lit(f",{cleaned_tag}")], separator=""))
                 )
                 .otherwise(pl.col("Threat_Tag"))
                 .alias("Threat_Tag")
             ])
+            
+        # 最後に重複タグを整理（Pandora側でプレフィックスにする際に綺麗に見せるため）
+        # ※ Polars expression内で文字列操作は複雑なので、ここでは単純結合まで。
+        #   表示側のツール(Pandora/Chronos)で重複排除ロジックを入れるか、
+        #   単純にこれだけでもかなり綺麗になるはずっス。
         return lf
 
     def suggest_new_noise_rules(self, df, threshold_ratio=50):
+        # ... (変更なし) ...
         total_count = df.height
         if total_count == 0: return []
         threat_count = df.filter(pl.col("Threat_Score") > 0).height
@@ -125,7 +181,6 @@ class ThemisLoader:
         print(f"[*] Themis Insight: High Noise Ratio detected ({ratio:.1f}x). Analyzing noise candidates...")
         noise_candidates = df.filter(pl.col("Threat_Score") == 0)
         
-        # AION用にTarget_FileNameやFull_Pathも候補に入れる
         target_cols = ["ParentPath", "Entry_Location", "Target_FileName"]
         suggestions = []
         

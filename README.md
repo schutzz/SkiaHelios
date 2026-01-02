@@ -1,10 +1,10 @@
-# SkiaHelios v2.6 - Midas Touch (Visual & Golden Report Edition)
+# SkiaHelios v2.7 - AION-Sigma (Intelligence & Midas Edition)
 
 ![SkiaHelios CI](https://github.com/schutzz/SkiaHelios/actions/workflows/test.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
 ![Polars](https://img.shields.io/badge/Engine-Polars_0.20%2B-orange?logo=polars)
 ![Mermaid](https://img.shields.io/badge/Report-Mermaid_Visuals-ff69b4?logo=mermaid)
-![Tests](https://img.shields.io/badge/Tests-12%2F12_PASS-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-15%2F15_PASS-brightgreen)
 ![Status](https://img.shields.io/badge/Status-Battle_Tested-green)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey)
 
@@ -14,18 +14,20 @@
 
 Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** to deconstruct artifacts, trace physical execution chains, and weave a cohesive narrative across multiple hosts.
 
-**Current Version:** v2.6 (Midas Touch / Omni-Visual Reporting / Evidence Packaging / Legacy Support)
+**Current Version:** v2.7 (AION-Sigma Integration / Intelligent Summarization / Midas Touch)
 
 ---
 
-## ⚡ Key Features (v2.6 Updates)
+## ⚡ Key Features (v2.7 Updates)
 
-* **👑 Midas Touch (Docx/PDF):** [NEW] Automatically converts Markdown reports into **Executive Docx** files. Renders **Mermaid diagrams** into high-res PNGs and embeds them seamlessly.
-* **🦁 Team Sync Mode:** [NEW] Packages all evidence (CSVs, Source Code, Reports) into a **Hash-verified Zip** (`manifest.json` included) for forensic soundness and team collaboration.
+* **🧠 AION-Sigma Pipeline:** [NEW] Bridges world-standard **Sigma Rules** (YAML) directly into AION's physical regex engine via `CharonBridge`.
+* **📉 Intelligent Noise Reduction:** [NEW] Implemented **Strict Confidence Thresholds** (Score >= 80). Low-confidence events are automatically summarized into **"Detection Statistics"** tables to prevent alert fatigue.
+* **👑 Midas Touch (Docx/PDF):** Automatically converts Markdown reports into **Executive Docx** files. Renders **Mermaid diagrams** into high-res PNGs and embeds them seamlessly.
+* **🦁 Team Sync Mode:** Packages all evidence (CSVs, Source Code, Reports) into a **Hash-verified Zip** (`manifest.json` included) for forensic soundness and team collaboration.
 * **🏹 Omni-Visual Attack Flow:** Lachesis generates **Mermaid diagrams** that visualize not just files, but **Network IPs** and **Critical Executions** extracted by Atropos.
-* **⚖️ Themis Rule Engine:** Logic is externalized in `rules/triage_rules.yaml`. Customize **Threat Signatures** and **Noise Filters** without touching the code.
+* **⚖️ Themis Rule Engine:** Multi-Bank Loading support. Dynamically loads specialized rules (Process, File, Registry) for each module. Features **Tag Normalizer** to translate complex Sigma IDs into readable tags (e.g., `WEBSHELL`).
 * **🛡️ Golden Rule Logic:** Implemented "Threat > Noise" logic. Critical artifacts (e.g., WebShells in Cache) pierce through noise filters.
-* **✂️ Nemesis Tracer:** Modularized logic to aggressively deduplicate USN/MFT events and trace artifact lifecycles with sub-second precision. (Unit Tested)
+* **✂️ Nemesis Tracer:** Modularized logic to aggressively deduplicate USN/MFT events and trace artifact lifecycles with sub-second precision.
 * **🕰️ Hybrid Time Logic:** Specialized **`--legacy` mode** for older OS environments to eliminate install-time noise.
 * **🔥 Chimera Fusion:** Correlates Lateral Movement across multiple hosts to visualize the entire campaign.
 
@@ -48,7 +50,20 @@ pip install -r requirements.txt
 # Install Pandoc & Mermaid-CLI (npm install -g @mermaid-js/mermaid-cli)
 ```
 
-### 2. Interactive Mode (Wizard) 🆕
+### 2. Sigma Integration Setup (Optional) 🆕
+Import global threat intelligence (Sigma Rules) into AION's brain.
+
+```bash
+# 1. Clone Sigma Rules
+git clone [https://github.com/SigmaHQ/sigma.git](https://github.com/SigmaHQ/sigma.git)
+
+# 2. Convert Rules using CharonBridge
+python tools/SH_CharonBridge.py sigma/rules/windows/process_creation/ -o rules/sigma_process_creation.yaml
+python tools/SH_CharonBridge.py sigma/rules/windows/file/ -o rules/sigma_file_event.yaml
+python tools/SH_CharonBridge.py sigma/rules/windows/registry/ -o rules/sigma_registry.yaml
+```
+
+### 3. Interactive Mode (Wizard)
 Simply run the script. It now asks if you want to generate a **Golden Report (Docx)**.
 
 ```bash
@@ -56,7 +71,7 @@ python SH_HeliosConsole.py
 # Follow the prompts: "Generate Docx Report? [y/N]"
 ```
 
-### 3. Command Line Mode (Automation)
+### 4. Command Line Mode (Automation)
 Ideal for CI/CD pipelines or scripted analysis.
 
 **Standard Scan + Golden Report:**
@@ -76,7 +91,7 @@ python SH_HeliosConsole.py \
   --legacy
 ```
 
-### 4. Operation Chimera (Multi-Host Fusion)
+### 5. Operation Chimera (Multi-Host Fusion)
 Combine reports from multiple hosts to visualize the entire campaign.
 
 ```bash
@@ -88,7 +103,7 @@ python tools/SH_ChimeraFusion.py \
 
 ---
 
-## 🏛️ Architecture (The Triad + Midas)
+## 🏛️ Architecture (The Triad + Midas + Sigma)
 
 SkiaHelios separates concerns into divine roles to ensure modularity and logic isolation.
 
@@ -105,11 +120,18 @@ graph TD
     classDef ruleClass fill:#4B0082,stroke:#FFD700,stroke-width:2px,color:#FFFFFF,stroke-dasharray: 5 5;
 
     %% Title
-    title[("⚡️ SkiaHelios v2.6 Architecture ⚡️\nGod Mode: Modular, Visual & Golden")]:::inputClass
+    title[("⚡️ SkiaHelios v2.7 Architecture ⚡️\nGod Mode: AION-Sigma & Midas")]:::inputClass
 
     %% Input
     Evidence[📂 Raw Artifacts<br/>KAPE CSVs / EVTX / MFT / Prefetch]:::inputClass
+    SigmaRules[📜 Sigma Rules (YAML)]:::ruleClass
     ThemisFile[📜 triage_rules.yaml<br/>External Logic]:::ruleClass
+
+    %% Phase 0: Charon
+    subgraph Phase0 ["🌉 Phase 0: Charon (The Ferryman) - Rule Ingestion"]
+        direction TB
+        Charon[SH_CharonBridge<br/>Sigma to AION Conversion]:::coreClass
+    end
 
     %% Phase 1: Clotho
     subgraph Phase1 ["🧶 Phase 1: Clotho (The Spinner) - Ingestion & Enrichment"]
@@ -123,13 +145,13 @@ graph TD
         direction TB
         Atropos[SH_AtroposThinker<br/>Physics Time Sort<br/>Heat Correlation]:::coreClass
         Nemesis[Nemesis Tracer Standalone<br/>Deep Lifecycle & Dedup]:::moduleClass
-        Themis[⚖️ Themis Loader<br/>Rule Application & Scoring]:::moduleClass
+        Themis[⚖️ Themis Loader<br/>Multi-Bank Rule Engine]:::moduleClass
     end
 
     %% Phase 3: Lachesis
     subgraph Phase3 ["✍️ Phase 3: Lachesis (The Allotter) - Reporting"]
         direction TB
-        Lachesis[SH_LachesisWriter<br/>Omni-Visual Reporting<br/>Mermaid & JSON Generation]:::coreClass
+        Lachesis[SH_LachesisWriter<br/>Omni-Visual Reporting<br/>Detection Statistics]:::coreClass
         Report[📜 Grimoire Report<br/>Visual Markdown]:::outputClass
         JSONData[📊 Structured JSON Dump<br/>Machine-Readable Evidence]:::outputClass
     end
@@ -141,7 +163,7 @@ graph TD
         Campaign[🏛️ Campaign Report<br/>Cross-Host Attack Narrative]:::outputClass
     end
 
-    %% Phase 5: Midas (NEW)
+    %% Phase 5: Midas
     subgraph Phase5 ["👑 Phase 5: Midas (The Alchemist) - Final Polish"]
         direction TB
         Midas[SH_MidasTouch<br/>Docx Converter & Evidence Packager]:::goldClass
@@ -150,6 +172,9 @@ graph TD
     end
 
     %% Flow
+    SigmaRules --> Charon
+    Charon --> ThemisFile
+    
     Evidence --> Clotho
     ThemisFile -.->|Inject Rules| Themis
     Themis -.->|Filter & Score| Atropos
@@ -169,10 +194,11 @@ graph TD
     Midas --> SyncPack
 
     %% Overall Layout
+    Phase0 --> Phase1
     Phase1 --> Phase2 --> Phase3 --> Phase4 --> Phase5
 
     %% Footer
-    footer[("Powered by Python • Polars • Pure Logic\n© schutzz - v2.6 Complete")]:::inputClass
+    footer[("Powered by Python • Polars • Pure Logic\n© schutzz - v2.7 Complete")]:::inputClass
 ```
 
 ---
@@ -181,14 +207,15 @@ graph TD
 
 | Module | Role | Functionality |
 | :--- | :--- | :--- |
-| **Midas** | The Alchemist | **[NEW]** Converts MD to Docx, renders Mermaid to PNG, and creates Evidence Packages (Team Sync). |
-| **Themis** | The Law | Loads `triage_rules.yaml` to define Noise Filters and Threat Signatures dynamically. |
-| **Lachesis** | The Weaver | Omni-Visual reporting. Now visualizes IP addresses, critical executions, and file drops in Mermaid diagrams. |
+| **Charon** | The Ferryman | **[NEW]** Converts external **Sigma Rules** (YAML) into AION's internal regex format. |
+| **Themis** | The Law | **[UPDATE]** Multi-Bank Logic Engine. Loads specialized rulesets for Process, File, and Registry. Includes **Tag Normalizer**. |
+| **Lachesis** | The Weaver | **[UPDATE]** Omni-Visual reporting with **Detection Statistics** (Low-confidence summaries) and **Aggregated Findings**. |
+| **Midas** | The Alchemist | Converts MD to Docx, renders Mermaid to PNG, and creates Evidence Packages (Team Sync). |
 | **Atropos** | The Thinker | "Golden Rule" logic (Threat > Noise). Aggressive deduplication of USN/MFT events. |
 | **Nemesis** | The Tracer | Standalone module for tracing artifact lifecycles (Birth -> Rename -> Death) and command-line seeds. |
-| **Pandora** | The Link | Recovers deleted "Ghosts" with Threat Intel scoring. Implements the "Golden Rule" to save critical evidence from noise filters. |
+| **Pandora** | The Link | Recovers deleted "Ghosts". Implements **Score >= 80** strict threshold to separate Criticals from Medium noise. |
 | **Chronos** | Time Lord | Hybrid Logic. Detects **Timestomping** ($SI < $FN) with ms-level precision. |
-| **Hercules** | The Referee | Event Log analysis, Identity tracking (SID resolution), and initial triage. |
+| **Hercules** | The Referee | Event Log analysis. Now integrates **Sigma Process Creation** rules via Themis. |
 | **Plutos** | Gatekeeper | Network & SRUM analysis. Detects C2 and Lateral Movement using "Heat Scores". |
 | **Sphinx** | Decipherer | Decodes obfuscated command lines (Base64, PowerShell) and extracts IOCs. |
 | **AION** | The Eye | Persistence detection (RunKeys, Services) fully powered by Themis rules. |
@@ -229,7 +256,8 @@ graph TD
 * [x] **v2.1:** Legacy OS Support & Threat Intelligence
 * [x] **v2.2:** Interactive Mode & Syntax Guards
 * [x] **v2.5:** Modular Architecture (Nemesis/Themis) & Omni-Visual Reporting
-* [x] **v2.6:** **Midas Touch (Docx Generation & Evidence Packaging)**
+* [x] **v2.6:** Midas Touch (Docx Generation & Evidence Packaging)
+* [x] **v2.7:** **AION-Sigma Integration & Intelligent Summarization**
 * [ ] **v3.0:** Volatility 3 Integration (Memory Forensics)
 * [ ] **v4.0:** Rust Rewrite (Project: *Ares*)
 
@@ -237,4 +265,4 @@ graph TD
 
 ## 🛡️ License
 
-MIT License - Built for the Defenders.
+MIT License - Built for the DFIR Community.

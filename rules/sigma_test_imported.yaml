@@ -1,0 +1,9 @@
+'#': Imported by SH_CharonBridge on sigma_test
+threat_signatures:
+- name: '[Sigma] AION Conductance Test Rule'
+  tag: attack.execution,AION.TEST
+  score: 100
+  target: Target_Path
+  condition: regex
+  pattern: (?i)AION_CONDUCTANCE_TEST_SIGNAL
+noise_filters: []

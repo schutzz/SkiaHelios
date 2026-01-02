@@ -7,9 +7,9 @@ from datetime import datetime
 from tools.SH_ThemisLoader import ThemisLoader
 
 # ==========================================
-#  SH_PandorasLink v17.6 [Golden Rule]
+#  SH_PandorasLink v17.7 [Strict Filter]
 #  Mission: "Kill the Noise, Save the Signal."
-#  Update: Applied Golden Rule (Threats override Noise).
+#  Update: Added 'Safe Extension' logic to block high-score noise.
 # ==========================================
 
 def print_logo():
@@ -23,7 +23,7 @@ def print_logo():
     * \_/    \__\______/__/    \_/   *
       .     * /______\     .     .
     
-      [ SH_PandorasLink v17.6 ]
+      [ SH_PandorasLink v17.7 ]
      "Threats shall pass through the Noise."
     """
     print(logo)
@@ -33,16 +33,17 @@ class PandoraEngine:
         self.mft_live_path = mft_live
         self.usn_path = usn
         self.mft_vss_path = mft_vss
-        self.loader = ThemisLoader()
+        self.loader = ThemisLoader([
+            "rules/triage_rules.yaml",
+            "rules/sigma_file_event.yaml"
+        ])
         
         print(f"[*] Initializing Engine with Themis Rules...")
         self.lf_live = self._load_mft(mft_live).lazy()
         self.lf_usn = self._load_usn(usn).lazy()
         self.lf_vss = self._load_mft(mft_vss).lazy() if mft_vss else None
 
-    # ... (Loader methods _get_col_expr, _robust_date_parse, _load_mft, _load_usn omitted for brevity, logic unchanged) ...
-    # ※ 実装時はv17.5のローダーメソッドをそのまま使用してください
-
+    # ... (ローダーメソッド群は変更なし。v17.6のものを維持) ...
     def _get_col_expr(self, cols, targets, alias=None):
         for t in targets:
             if t in cols:
@@ -118,8 +119,7 @@ class PandoraEngine:
             return None
 
         ghosts_list = []
-
-        # --- Mode A: VSS ---
+        # --- Mode A: VSS (省略なし) ---
         if self.lf_vss is not None:
             print("    -> Mode A: VSS Differential Scan")
             try:
@@ -135,14 +135,13 @@ class PandoraEngine:
                 ghosts_list.append(ghost_vss)
             except Exception as e: print(f"[!] VSS Analysis Skipped: {e}")
 
-        # --- Mode B: USN ---
+        # --- Mode B: USN (省略なし) ---
         print("    -> Mode B: USN Delete Transaction Scan")
         usn_with_date = self.lf_usn.with_columns(self._robust_date_parse(pl.col("TimeStamp")).alias("Parsed_Date"))
         q_usn_del = usn_with_date.filter((pl.col("Parsed_Date").is_between(start_dt, end_dt)) & (pl.col("UpdateReason").str.contains("FileDelete")))
         ghost_usn = q_usn_del.join(self.lf_live, on="EntryNumber", how="left", suffix="_Live").filter(
             (pl.col("FileSequenceNumber") != pl.col("FileSequenceNumber_Live")) | (pl.col("Live_InUse") == False) | (pl.col("FileSequenceNumber_Live").is_null())
         )
-        
         if "ParentEntryNumber" in ghost_usn.collect_schema().names():
             parent_lookup = self.lf_live.select([pl.col("EntryNumber").alias("P_Entry"), pl.col("Live_ParentPath").alias("GrandParentPath"), pl.col("Live_FileName").alias("ParentName")])
             ghost_usn = ghost_usn.join(parent_lookup, left_on="ParentEntryNumber", right_on="P_Entry", how="left")
@@ -155,25 +154,34 @@ class PandoraEngine:
         if not ghosts_list: return None
         combined_ghosts = pl.concat(ghosts_list).unique(subset=["EntryNumber", "Ghost_FileName"])
         
-        # ⚖️ Themis Integration [GOLDEN RULE]
-        # 1. まず脅威スコアを付ける
+        # ⚖️ Themis Integration
         print("    -> Applying Themis Threat Scoring (YAML)...")
-        combined_ghosts = combined_ghosts.with_columns(pl.col("Ghost_FileName").alias("FileName")) # Themis用エイリアス
+        combined_ghosts = combined_ghosts.with_columns(pl.col("Ghost_FileName").alias("FileName"))
         scored_ghosts = self.loader.apply_threat_scoring(combined_ghosts)
         
-        # 2. 次にノイズ除去を行うが、スコアがついたもの（Threat_Score > 0）は救出する！
         print("    -> Applying Themis Noise Filters (Golden Rule: Threat > Noise)...")
         available_cols = scored_ghosts.collect_schema().names()
         noise_expr = self.loader.get_noise_filter_expr(available_cols)
         
-        # Filter: (NOT Noise) OR (Threat > 0)
-        # これにより、Content.IE5内のIP Traceも生存する！
-        final_ghosts = scored_ghosts.filter((~noise_expr) | (pl.col("Threat_Score") > 0))
+        # [NEW] 安全な拡張子の定義 (Web素材などは場所ベース検知でも許容する)
+        # ※ "WebShell" などの名前ベース検知はこれに関係なくタグが付くのでOK
+        safe_ext_expr = pl.col("Ghost_FileName").str.to_lowercase().str.contains(r"\.(css|js|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|map)$")
+        
+        # [Logic Upgrade]
+        # 残す条件:
+        # 1. ノイズルールにヒットしない (基本)
+        # OR
+        # 2. 脅威スコアが高く(80以上)、かつ安全な拡張子ではない (特例許可)
+        
+        final_ghosts = scored_ghosts.filter(
+            (~noise_expr) | 
+            ((pl.col("Threat_Score") >= 80) & (~safe_ext_expr))
+        )
         
         return final_ghosts
 
     def run_anti_forensics(self, limit=50):
-        # ... (v17.5と同じ) ...
+        # ... (変更なし) ...
         print(f"[*] Phase 2: Analyzing Anti-Forensics Anomalies (Top {limit})...")
         cols = self.lf_live.collect_schema().names()
         if "Live_ParentPath" not in cols: return pl.LazyFrame([])
@@ -184,7 +192,7 @@ class PandoraEngine:
         return stats.sort("Dir_Mean_Seq", descending=True).limit(limit)
 
     def run_necromancer(self, lf_ghosts, pf_csv=None, shim_csv=None, chaos_csv=None):
-        # ... (v17.5と同じ) ...
+        # ... (変更なし) ...
         if lf_ghosts is None: return None
         print("[*] Phase 3: Engaging Necromancer (Intent Analysis)...")
         lf_enriched = lf_ghosts.with_columns(pl.col("Ghost_FileName").str.to_lowercase().alias("join_key"))
@@ -212,14 +220,14 @@ def auto_detect_ntfs(target_dir):
 
 def main(argv=None):
     print_logo()
-    parser = argparse.ArgumentParser(description="SH_PandorasLink v17.6")
+    parser = argparse.ArgumentParser(description="SH_PandorasLink v17.7")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("-d", "--dir", help="Auto-detect CSVs")
     group.add_argument("--manual", action="store_true")
     parser.add_argument("--mft"); parser.add_argument("--usn"); parser.add_argument("--vss")
     parser.add_argument("--start", required=True); parser.add_argument("--end", required=True)
     parser.add_argument("--chaos"); parser.add_argument("--pf"); parser.add_argument("--shim")
-    parser.add_argument("--out", default="pandora_result_v17.6.csv")
+    parser.add_argument("--out", default="pandora_result_v17.7.csv")
     args = parser.parse_args(argv)
 
     mft_path = args.mft

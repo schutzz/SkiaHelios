@@ -33,7 +33,10 @@ class ChronosEngine:
         
         try:
             # Themisの初期化（ルールロード）
-            loader = ThemisLoader()
+            loader = ThemisLoader([
+                "rules/triage_rules.yaml",
+                "rules/sigma_file_event.yaml" # ファイルイベントのみ！
+            ])
 
             lf = pl.scan_csv(args.file, ignore_errors=True, infer_schema_length=0)
             
@@ -131,8 +134,8 @@ class ChronosEngine:
             # Themisのスコアが0より大きい＝WANTED_FILESや重要ターゲットにヒットしている
             
             lf = lf.with_columns([
-                # Themisで脅威判定されたものは CRITICAL_ARTIFACT 扱い
-                pl.when(pl.col("Threat_Score") > 0)
+                # Themisで脅威判定されたもの (Score >= 80: High/Critical) は CRITICAL_ARTIFACT 扱い
+                pl.when(pl.col("Threat_Score") >= 80)
                   .then(pl.lit("CRITICAL_ARTIFACT"))
                   
                 .when(pl.col("diff_sec") < -60)

@@ -1,7 +1,7 @@
-# rules/triage_rules.yaml [Themis Law v2.1]
-# Update: Tuned for Windows Internal Artifacts (RAC, WMI, RegBack)
+# rules/triage_rules.yaml [Themis Law v2.2]
+# Update: Fixed Noise Filter placement & Enhanced folder suppression
 
-# --- [NEW] Persistence Targets (AION Scope) ---
+# --- [Persistence Targets (AION Scope)] ---
 persistence_targets:
   - name: "Run Keys"
     category: "Registry"
@@ -19,7 +19,65 @@ persistence_targets:
     category: "Registry"
     pattern: "ScheduledTasks"
 
+# ==========================================
+# 🛡️ NOISE FILTERS (Ignored Artifacts)
+# ==========================================
 noise_filters:
+  # --- [User Artifacts Noise (Strong)] ---
+  # フォルダそのもの(FileName)と中身(ParentPath)を両方消す「二段構え」
+  - name: "Windows Sample Media (Folder)"
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)^(Sample Music|Sample Pictures|Sample Videos)$"
+
+  - name: "Windows Sample Media (Contents)"
+    target: "ParentPath"
+    condition: "regex"
+    pattern: "(?i)\\\\(Sample Music|Sample Pictures|Sample Videos)"
+
+  - name: "Browser History & Cache (Folder)"
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)^(History|Temporary Internet Files|Content\\.IE5|INetCache|Cookies)$"
+
+  - name: "Browser History & Cache (Contents)"
+    target: "ParentPath"
+    condition: "regex"
+    pattern: "(?i)\\\\(History|Temporary Internet Files|Content\\.IE5|INetCache|Cookies)"
+
+  - name: "Standard Temp Folders (Folder)"
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)^(Temp|Tmp|Application Data)$"
+
+  - name: "Standard Temp Folders (Contents)"
+    target: "ParentPath"
+    condition: "regex"
+    pattern: "(?i)\\\\(AppData\\\\Local\\\\Temp|Windows\\\\Temp)"
+
+  - name: "Common Noisy System Folders"
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)^(Microsoft|Windows|Internet Explorer|Quick Launch)$"
+
+# --- [User Artifacts Noise (Expanded)] ---
+  - name: "Windows User Folders"
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)^(My Music|My Pictures|My Videos|My Documents|Downloads|Desktop|Favorites|Links|Contacts|Searches)$"
+
+  # --- [System Noise (Stronger)] ---
+  # RACDなどが親パスに含まれていたら問答無用で消す
+  - name: "Reliability Analysis Component (RAC)"
+    target: "ParentPath"
+    condition: "regex"
+    pattern: "(?i)RACD"
+    
+  - name: "WMI & System Logs"
+    target: "ParentPath"
+    condition: "regex"
+    pattern: "(?i)(WmiApRpl|wbem\\\\Performance)"
+    
   # --- [System Internals Noise] ---
   - name: "Reliability Analysis Component (RAC)"
     target: "ParentPath"
@@ -46,7 +104,7 @@ noise_filters:
     condition: "regex"
     pattern: "(?i)^(ChkAcc\\.bak|WRITABLE\\.TST|SCM\\.EVM.*|.*\\.OLD|.*\\.toc|.*\\.cmf|ResCache\\.dir|rc[0-9]+|ielock.*|HardAdmin.*)$"
 
-  # --- [Existing Filters (Kept)] ---
+  # --- [Existing Filters] ---
   - name: "Browser Cache (IE/Edge)"
     target: "ParentPath"
     condition: "contains"
@@ -78,14 +136,14 @@ noise_filters:
     pattern: "(?i)[/\\\\](Tools|ghidra|sleuthkit|FTK Imager|exiftool|Autoruns|LogFileParser|YaraRules|Strings|Splunk)[/\\\\]"
 
   - name: "Trusted System Paths"
-    category: "Registry" # Technically noise filter, but just matching structure if needed or just part of noise_filters
+    category: "Registry"
     target: "ParentPath"
     condition: "regex"
     pattern: "(?i)^(?:[a-z]:)?\\\\(Windows\\\\System32|Program Files|Program Files \\(x86\\))"
 
   # --- [AION Specific Noise] ---
   - name: "Windows Safe Paths"
-    target: "Full_Path" # AIONが生成するカラム
+    target: "Full_Path"
     condition: "regex"
     pattern: "(?i)\\\\(Windows\\\\(WinSxS|Servicing|SoftwareDistribution|CbsTemp|Assembly|Microsoft\\.NET\\\\Framework|System32\\\\DriverStore))"
 
@@ -116,8 +174,9 @@ noise_filters:
     condition: "regex"
     pattern: "(?i)^(chrome\\.exe|msedge\\.exe|firefox\\.exe|iexplore\\.exe)$"
 
+
 # ==========================================
-# 🦁 THREAT SIGNATURES (No Changes Needed)
+# 🦁 THREAT SIGNATURES (Alerts)
 # ==========================================
 threat_signatures:
   # --- [AION Specific Threats] ---
@@ -131,10 +190,10 @@ threat_signatures:
   - name: "Suspicious Command in Registry"
     tag: "SUSPICIOUS_CMD"
     score: 50
-    target: "Full_Path" # データの中身もFull_Pathに入れているのでここで検知
+    target: "Full_Path"
     condition: "regex"
     pattern: "(?i)(powershell|cmd|wscript|cscript|mshta|rundll32|regsvr32|encodedcommand)"
-  # ... (以前と同じ内容でOKっス！) ...
+
   - name: "WebShell (Generic Names)"
     tag: "WEBSHELL"
     score: 100
@@ -197,5 +256,3 @@ threat_signatures:
     target: "FileName"
     condition: "regex"
     pattern: "(?i)^(winword\\.exe|excel\\.exe|powerpnt\\.exe|outlook\\.exe)$"
-
-    

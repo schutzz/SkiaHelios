@@ -4,6 +4,7 @@ from pathlib import Path
 import sys
 import datetime
 import json
+from tools.SH_ThemisLoader import ThemisLoader
 
 # ============================================================
 #  SH_HerculesReferee v3.6 [Identity + Schema Safe]
@@ -21,6 +22,12 @@ def print_logo():
 class HerculesReferee:
     def __init__(self, kape_dir):
         self.kape_dir = Path(kape_dir)
+        # プロセス作成(Chronosの領域だがHerculesも見る) + レジストリ(Core)
+        self.loader = ThemisLoader([
+            "rules/triage_rules.yaml",
+            "rules/sigma_process_creation.yaml",
+            "rules/sigma_registry.yaml"
+        ])
 
     def _load_evtx_csv(self):
         csvs = list(self.kape_dir.rglob("*EvtxECmd*.csv"))
@@ -259,6 +266,55 @@ class HerculesReferee:
                 ])
                 
                 df_combined = pl.concat([df_identity, df_scripts], how="diagonal")
+
+            # =========================================================
+            # [NEW] Phase 3E: Sigma Rules Application (Themis) 🦁
+            # =========================================================
+            print("[*] Phase 3E: Applying Sigma Rules (Themis)...")
+            
+            # Themis用にカラム名をマッピング (Sigma: CommandLine/Image -> AION: Target_Path)
+            # ※ df_evtx自体は破壊せず、判定用の一時DataFrameを作る
+            df_for_themis = df_evtx.with_columns([
+                pl.coalesce(["Payload", "CommandLine", "PayloadData6"]).alias("Target_Path"),
+                pl.col("Computer").alias("ComputerName") if "Computer" in df_evtx.columns else pl.lit("").alias("ComputerName"),
+                pl.col("ParentImage").alias("ParentPath") if "ParentImage" in df_evtx.columns else pl.lit("").alias("ParentPath")
+            ])
+            
+            # ルール適用！
+            df_scored = self.loader.apply_threat_scoring(df_for_themis)
+            
+            # スコアが付いたもの（脅威）だけを抽出
+            sigma_hits = df_scored.filter(pl.col("Threat_Score") > 0)
+            
+            if sigma_hits.height > 0:
+                print(f"   > Sigma Rules detected {sigma_hits.height} threats.")
+                
+                # 結果をHerculesの出力フォーマット(df_combined)に合わせる
+                # ※ 必要なカラムを選んでリネームする
+                df_sigma_results = sigma_hits.select([
+                    pl.col("TimeCreated").alias("Timestamp_UTC"),
+                    pl.lit("Sigma_Detection").alias("Action"),
+                    pl.col("UserName").alias("User"),
+                    pl.col("UserId").alias("Subject_SID"),
+                    pl.col("Target_Path"), # コマンドライン等
+                    pl.lit("Security.evtx").alias("Source_File"),
+                    pl.col("Threat_Tag").alias("Tag"),
+                    pl.lit("CRITICAL_SIGMA").alias("Judge_Verdict"), # Sigma検知はCritical扱い
+                    pl.col("UserName").alias("Resolved_User"),
+                    pl.lit("Active").alias("Account_Status"),
+                    pl.lit("EventLog").alias("Artifact_Type")
+                ])
+                
+                # 型合わせ（念のため）
+                df_sigma_results = df_sigma_results.with_columns([
+                    pl.col(c).cast(pl.Utf8) for c in df_sigma_results.columns 
+                ])
+                
+                # 合流！
+                df_combined = pl.concat([df_combined, df_sigma_results], how="diagonal")
+            else:
+                print("   > No Sigma threats detected.")
+            # =========================================================
 
         # 3. Sniper Correlation (with Schema Enforcement)
         df_final = self.correlate_ghosts(df_combined, df_ghosts)

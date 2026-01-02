@@ -1,0 +1,366 @@
+'#': Imported by SH_CharonBridge on process_creation
+threat_signatures:
+- name: '[Sigma] Boot Configuration Tampering Via Bcdedit.EXE'
+  tag: attack.impact,attack.t1490
+  score: 80
+  target: Full_Path
+  condition: regex
+  pattern: (?i)(\{'Image\|endswith':\ '\\\\bcdedit\.exe'\}|\{'OriginalFileName':\
+    'bcdedit\.exe'\})
+- name: '[Sigma] Boot Configuration Tampering Via Bcdedit.EXE'
+  tag: attack.impact,attack.t1490
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)set
+- name: '[Sigma] Boot Configuration Tampering Via Bcdedit.EXE'
+  tag: attack.impact,attack.t1490
+  score: 80
+  target: Full_Path
+  condition: regex
+  pattern: (?i)(\{'CommandLine\|contains\|all':\ \['bootstatuspolicy',\ 'ignoreallfailures'\]\}|\{'CommandLine\|contains\|all':\
+    \['recoveryenabled',\ 'no'\]\})
+- name: '[Sigma] VolumeShadowCopy Symlink Creation Via Mklink'
+  tag: attack.credential-access,attack.t1003.002,attack.t1003.003
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(mklink|HarddiskVolumeShadowCopy)
+- name: '[Sigma] CMSTP Execution Process Creation'
+  tag: attack.defense-evasion,attack.execution,attack.t1218.003,attack.g0069,car.2019-04-001
+  score: 80
+  target: ParentPath
+  condition: regex
+  pattern: (?i)\\cmstp\.exe$
+- name: '[Sigma] Fsutil Suspicious Invocation'
+  tag: attack.defense-evasion,attack.impact,attack.t1070,attack.t1485
+  score: 80
+  target: Full_Path
+  condition: regex
+  pattern: (?i)(\{'Image\|endswith':\ '\\\\fsutil\.exe'\}|\{'OriginalFileName':\ 'fsutil\.exe'\})
+- name: '[Sigma] Fsutil Suspicious Invocation'
+  tag: attack.defense-evasion,attack.impact,attack.t1070,attack.t1485
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(deletejournal|createjournal|setZeroData)
+- name: '[Sigma] HackTool - CrackMapExec Execution Patterns'
+  tag: attack.privilege-escalation,attack.persistence,attack.execution,attack.t1047,attack.t1053,attack.t1059.003,attack.t1059.001,attack.s0106
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(cmd\.exe\ /Q\ /c\ .*\ 1>\ \\\\\\\\.*\\\\.*\\\\.*\ 2>\&1|cmd\.exe\
+    /C\ .*\ >\ \\\\\\\\.*\\\\.*\\\\.*\ 2>\&1|cmd\.exe\ /C\ .*\ >\ .*\\\\Temp\\\\.*\
+    2>\&1|powershell\.exe\ \-exec\ bypass\ \-noni\ \-nop\ \-w\ 1\ \-C\ "|powershell\.exe\
+    \-noni\ \-nop\ \-w\ 1\ \-enc\ )
+- name: '[Sigma] HackTool - Empire PowerShell UAC Bypass'
+  tag: attack.defense-evasion,attack.privilege-escalation,attack.t1548.002,car.2019-04-001
+  score: 100
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(\ \-NoP\ \-NonI\ \-w\ Hidden\ \-c\ \$x=\$\(\(gp\ HKCU:Software\\Microsoft\\Windows\
+    Update\)\.Update\)|\ \-NoP\ \-NonI\ \-c\ \$x=\$\(\(gp\ HKCU:Software\\Microsoft\\Windows\
+    Update\)\.Update\);)
+- name: '[Sigma] HackTool - Potential Impacket Lateral Movement Activity'
+  tag: attack.execution,attack.t1047,attack.lateral-movement,attack.t1021.003
+  score: 80
+  target: ParentPath
+  condition: regex
+  pattern: (?i)(\\wmiprvse\.exe|\\mmc\.exe|\\explorer\.exe|\\services\.exe)$
+- name: '[Sigma] HackTool - Potential Impacket Lateral Movement Activity'
+  tag: attack.execution,attack.t1047,attack.lateral-movement,attack.t1021.003
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(cmd\.exe|/Q|/c|\\\\\\\\127\.0\.0\.1\\\\|\&1)
+- name: '[Sigma] HackTool - Potential Impacket Lateral Movement Activity'
+  tag: attack.execution,attack.t1047,attack.lateral-movement,attack.t1021.003
+  score: 80
+  target: Full_Path
+  condition: regex
+  pattern: (?i)(svchost\.exe\ \-k\ netsvcs|taskeng\.exe)
+- name: '[Sigma] HackTool - Potential Impacket Lateral Movement Activity'
+  tag: attack.execution,attack.t1047,attack.lateral-movement,attack.t1021.003
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(cmd\.exe|/C|Windows\\Temp\\|\&1)
+- name: '[Sigma] HackTool - Rubeus Execution'
+  tag: attack.defense-evasion,attack.credential-access,attack.t1003,attack.t1558.003,attack.lateral-movement,attack.t1550.003
+  score: 100
+  target: Full_Path
+  condition: regex
+  pattern: (?i)(\{'Image\|endswith':\ '\\\\Rubeus\.exe'\}|\{'OriginalFileName':\ 'Rubeus\.exe'\}|\{'Description':\
+    'Rubeus'\}|\{'CommandLine\|contains':\ \['asreproast\ ',\ 'dump\ /service:krbtgt\
+    ',\ 'dump\ /luid:0x',\ 'kerberoast\ ',\ 'createnetonly\ /program:',\ 'ptt\ /ticket:',\
+    '/impersonateuser:',\ 'renew\ /ticket:',\ 'asktgt\ /user:',\ 'harvest\ /interval:',\
+    's4u\ /user:',\ 's4u\ /ticket:',\ 'hash\ /password:',\ 'golden\ /aes256:',\ 'silver\
+    /user:'\]\})
+- name: '[Sigma] HackTool - SecurityXploded Execution'
+  tag: attack.credential-access,attack.t1555
+  score: 100
+  target: Full_Path
+  condition: regex
+  pattern: (?i)(\{'Company':\ 'SecurityXploded'\}|\{'Image\|endswith':\ 'PasswordDump\.exe'\}|\{'OriginalFileName\|endswith':\
+    'PasswordDump\.exe'\})
+- name: '[Sigma] Share And Session Enumeration Using Net.EXE'
+  tag: attack.discovery,attack.t1018
+  score: 20
+  target: Full_Path
+  condition: regex
+  pattern: (?i)(\{'Image\|endswith':\ \['\\\\net\.exe',\ '\\\\net1\.exe'\]\}|\{'OriginalFileName':\
+    \['net\.exe',\ 'net1\.exe'\]\})
+- name: '[Sigma] Share And Session Enumeration Using Net.EXE'
+  tag: attack.discovery,attack.t1018
+  score: 20
+  target: Target_Path
+  condition: regex
+  pattern: (?i)view
+- name: '[Sigma] Share And Session Enumeration Using Net.EXE'
+  tag: attack.discovery,attack.t1018
+  score: 20
+  target: Target_Path
+  condition: regex
+  pattern: (?i)\\\\\\\\
+- name: '[Sigma] Potential Powershell ReverseShell Connection'
+  tag: attack.execution,attack.t1059.001
+  score: 80
+  target: Full_Path
+  condition: regex
+  pattern: (?i)(\{'OriginalFileName':\ \['PowerShell\.EXE',\ 'pwsh\.dll'\]\}|\{'Image\|endswith':\
+    \['\\\\powershell\.exe',\ '\\\\pwsh\.exe'\]\})
+- name: '[Sigma] Potential Powershell ReverseShell Connection'
+  tag: attack.execution,attack.t1059.001
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(\ Net\.Sockets\.TCPClient|\.GetStream\(|\.Write\()
+- name: '[Sigma] ShimCache Flush'
+  tag: attack.persistence,attack.defense-evasion,attack.t1112
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(rundll32|apphelp\.dll)
+- name: '[Sigma] ShimCache Flush'
+  tag: attack.persistence,attack.defense-evasion,attack.t1112
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(ShimFlushCache|\#250)
+- name: '[Sigma] ShimCache Flush'
+  tag: attack.persistence,attack.defense-evasion,attack.t1112
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(rundll32|kernel32\.dll)
+- name: '[Sigma] ShimCache Flush'
+  tag: attack.persistence,attack.defense-evasion,attack.t1112
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(BaseFlushAppcompatCache|\#46)
+- name: '[Sigma] Potential Crypto Mining Activity'
+  tag: attack.impact,attack.t1496
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(\ \-\-cpu\-priority=|\-\-donate\-level=0|\ \-o\ pool\.|\ \-\-nicehash|\
+    \-\-algo=rx/0\ |stratum\+tcp://|stratum\+udp://|LS1kb25hdGUtbGV2ZWw9|0tZG9uYXRlLWxldmVsP|tLWRvbmF0ZS1sZXZlbD|c3RyYXR1bSt0Y3A6Ly|N0cmF0dW0rdGNwOi8v|zdHJhdHVtK3RjcDovL|c3RyYXR1bSt1ZHA6Ly|N0cmF0dW0rdWRwOi8v|zdHJhdHVtK3VkcDovL)
+- name: '[Sigma] Potential Crypto Mining Activity'
+  tag: attack.impact,attack.t1496
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(\ pool\.c\ |\ pool\.o\ |gcc\ \-)
+- name: '[Sigma] Suspicious Double Extension File Execution'
+  tag: attack.initial-access,attack.t1566.001
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(\ \ \ \ \ \ \.exe|______\.exe|\.doc\.exe|\.doc\.js|\.docx\.exe|\.docx\.js|\.gif\.exe|\.jpeg\.exe|\.jpg\.exe|\.mkv\.exe|\.mov\.exe|\.mp3\.exe|\.mp4\.exe|\.pdf\.exe|\.pdf\.js|\.png\.exe|\.ppt\.exe|\.ppt\.js|\.pptx\.exe|\.pptx\.js|\.rtf\.exe|\.rtf\.js|\.svg\.exe|\.txt\.exe|\.txt\.js|\.xls\.exe|\.xls\.js|\.xlsx\.exe|\.xlsx\.js|⠀⠀⠀⠀⠀⠀\.exe)$
+- name: '[Sigma] Suspicious Double Extension File Execution'
+  tag: attack.initial-access,attack.t1566.001
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(\ \ \ \ \ \ \.exe|______\.exe|\.doc\.exe|\.doc\.js|\.docx\.exe|\.docx\.js|\.gif\.exe|\.jpeg\.exe|\.jpg\.exe|\.mkv\.exe|\.mov\.exe|\.mp3\.exe|\.mp4\.exe|\.pdf\.exe|\.pdf\.js|\.png\.exe|\.ppt\.exe|\.ppt\.js|\.pptx\.exe|\.pptx\.js|\.rtf\.exe|\.rtf\.js|\.svg\.exe|\.txt\.exe|\.txt\.js|\.xls\.exe|\.xls\.js|\.xlsx\.exe|\.xlsx\.js|⠀⠀⠀⠀⠀⠀\.exe)
+- name: '[Sigma] Suspicious Eventlog Clearing or Configuration Change Activity'
+  tag: attack.defense-evasion,attack.t1070.001,attack.t1562.002,car.2016-04-002
+  score: 80
+  target: Full_Path
+  condition: regex
+  pattern: (?i)(\{'Image\|endswith':\ '\\\\wevtutil\.exe'\}|\{'OriginalFileName':\
+    'wevtutil\.exe'\})
+- name: '[Sigma] Suspicious Eventlog Clearing or Configuration Change Activity'
+  tag: attack.defense-evasion,attack.t1070.001,attack.t1562.002,car.2016-04-002
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(clear\-log\ |\ cl\ |set\-log\ |\ sl\ |lfn:)
+- name: '[Sigma] Suspicious Eventlog Clearing or Configuration Change Activity'
+  tag: attack.defense-evasion,attack.t1070.001,attack.t1562.002,car.2016-04-002
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(\\powershell\.exe|\\powershell_ise\.exe|\\pwsh\.exe)$
+- name: '[Sigma] Suspicious Eventlog Clearing or Configuration Change Activity'
+  tag: attack.defense-evasion,attack.t1070.001,attack.t1562.002,car.2016-04-002
+  score: 80
+  target: Full_Path
+  condition: regex
+  pattern: (?i)(\{'CommandLine\|contains':\ \['Clear\-EventLog\ ',\ 'Remove\-EventLog\
+    ',\ 'Limit\-EventLog\ ',\ 'Clear\-WinEvent\ '\]\}|\{'CommandLine\|contains\|all':\
+    \['Eventing\.Reader\.EventLogSession',\ 'ClearLog'\]\}|\{'CommandLine\|contains\|all':\
+    \['Diagnostics\.EventLog',\ 'Clear'\]\})
+- name: '[Sigma] Suspicious Eventlog Clearing or Configuration Change Activity'
+  tag: attack.defense-evasion,attack.t1070.001,attack.t1562.002,car.2016-04-002
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(\\powershell\.exe|\\powershell_ise\.exe|\\pwsh\.exe|\\wmic\.exe)$
+- name: '[Sigma] Suspicious Eventlog Clearing or Configuration Change Activity'
+  tag: attack.defense-evasion,attack.t1070.001,attack.t1562.002,car.2016-04-002
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)ClearEventLog
+- name: '[Sigma] Suspicious Eventlog Clearing or Configuration Change Activity'
+  tag: attack.defense-evasion,attack.t1070.001,attack.t1562.002,car.2016-04-002
+  score: 80
+  target: ParentPath
+  condition: regex
+  pattern: (?i)(C:\\Windows\\SysWOW64\\msiexec\.exe|C:\\Windows\\System32\\msiexec\.exe)
+- name: '[Sigma] Suspicious Eventlog Clearing or Configuration Change Activity'
+  tag: attack.defense-evasion,attack.t1070.001,attack.t1562.002,car.2016-04-002
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: '(?i)\ sl\ '
+- name: '[Sigma] Shadow Copies Deletion Using Operating Systems Utilities'
+  tag: attack.defense-evasion,attack.impact,attack.t1070,attack.t1490
+  score: 80
+  target: Full_Path
+  condition: regex
+  pattern: (?i)(\{'Image\|endswith':\ \['\\\\powershell\.exe',\ '\\\\pwsh\.exe',\
+    '\\\\wmic\.exe',\ '\\\\vssadmin\.exe',\ '\\\\diskshadow\.exe'\]\}|\{'OriginalFileName':\
+    \['PowerShell\.EXE',\ 'pwsh\.dll',\ 'wmic\.exe',\ 'VSSADMIN\.EXE',\ 'diskshadow\.exe'\]\})
+- name: '[Sigma] Shadow Copies Deletion Using Operating Systems Utilities'
+  tag: attack.defense-evasion,attack.impact,attack.t1070,attack.t1490
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(shadow|delete)
+- name: '[Sigma] Shadow Copies Deletion Using Operating Systems Utilities'
+  tag: attack.defense-evasion,attack.impact,attack.t1070,attack.t1490
+  score: 80
+  target: Full_Path
+  condition: regex
+  pattern: (?i)(\{'Image\|endswith':\ '\\\\wbadmin\.exe'\}|\{'OriginalFileName':\
+    'WBADMIN\.EXE'\})
+- name: '[Sigma] Shadow Copies Deletion Using Operating Systems Utilities'
+  tag: attack.defense-evasion,attack.impact,attack.t1070,attack.t1490
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(delete|catalog|quiet)
+- name: '[Sigma] Shadow Copies Deletion Using Operating Systems Utilities'
+  tag: attack.defense-evasion,attack.impact,attack.t1070,attack.t1490
+  score: 80
+  target: Full_Path
+  condition: regex
+  pattern: (?i)(\{'Image\|endswith':\ '\\\\vssadmin\.exe'\}|\{'OriginalFileName':\
+    'VSSADMIN\.EXE'\})
+- name: '[Sigma] Shadow Copies Deletion Using Operating Systems Utilities'
+  tag: attack.defense-evasion,attack.impact,attack.t1070,attack.t1490
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(resize|shadowstorage)
+- name: '[Sigma] Shadow Copies Deletion Using Operating Systems Utilities'
+  tag: attack.defense-evasion,attack.impact,attack.t1070,attack.t1490
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(unbounded|/MaxSize=)
+- name: '[Sigma] Potential LSASS Process Dump Via Procdump'
+  tag: attack.defense-evasion,attack.t1036,attack.credential-access,attack.t1003.001,car.2013-05-009
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(\ \-ma\ |\ \-mm\ |\ \-mp\ )
+- name: '[Sigma] Potential LSASS Process Dump Via Procdump'
+  tag: attack.defense-evasion,attack.t1036,attack.credential-access,attack.t1003.001,car.2013-05-009
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(\ ls|\ keyiso|\ samss)
+- name: '[Sigma] CMSTP UAC Bypass via COM Object Access'
+  tag: attack.execution,attack.defense-evasion,attack.privilege-escalation,attack.t1548.002,attack.t1218.003,attack.g0069,car.2019-04-001
+  score: 80
+  target: ParentPath
+  condition: regex
+  pattern: (?i)\\DllHost\.exe$
+- name: '[Sigma] CMSTP UAC Bypass via COM Object Access'
+  tag: attack.execution,attack.defense-evasion,attack.privilege-escalation,attack.t1548.002,attack.t1218.003,attack.g0069,car.2019-04-001
+  score: 80
+  target: Full_Path
+  condition: regex
+  pattern: (?i)(\ /Processid:\{3E5FC7F9\-9A51\-4367\-9063\-A120244FBEC7\}|\ /Processid:\{3E000D72\-A845\-4CD9\-BD83\-80C07C3B881F\}|\
+    /Processid:\{BD54C901\-076B\-434E\-B6C7\-17C531F4AB41\}|\ /Processid:\{D2E7041B\-2927\-42FB\-8E9F\-7CE93B6DC937\}|\
+    /Processid:\{E9495B87\-D950\-4AB5\-87A5\-FF6D70BF3E90\})
+- name: '[Sigma] CMSTP UAC Bypass via COM Object Access'
+  tag: attack.execution,attack.defense-evasion,attack.privilege-escalation,attack.t1548.002,attack.t1218.003,attack.g0069,car.2019-04-001
+  score: 80
+  target: Full_Path
+  condition: regex
+  pattern: (?i)(High|System|S\-1\-16\-16384|S\-1\-16\-12288)
+- name: '[Sigma] WmiPrvSE Spawned A Process'
+  tag: attack.execution,attack.t1047
+  score: 50
+  target: ParentPath
+  condition: regex
+  pattern: (?i)\\WmiPrvSe\.exe$
+- name: '[Sigma] WmiPrvSE Spawned A Process'
+  tag: attack.execution,attack.t1047
+  score: 50
+  target: Full_Path
+  condition: regex
+  pattern: (?i)(0x3e7|null)
+- name: '[Sigma] WmiPrvSE Spawned A Process'
+  tag: attack.execution,attack.t1047
+  score: 50
+  target: User
+  condition: regex
+  pattern: (?i)(AUTHORI|AUTORI)
+- name: '[Sigma] WmiPrvSE Spawned A Process'
+  tag: attack.execution,attack.t1047
+  score: 50
+  target: Target_Path
+  condition: regex
+  pattern: (?i)\\WmiPrvSE\.exe$
+- name: '[Sigma] WmiPrvSE Spawned A Process'
+  tag: attack.execution,attack.t1047
+  score: 50
+  target: Target_Path
+  condition: regex
+  pattern: (?i)\\WerFault\.exe$
+- name: '[Sigma] WmiPrvSE Spawned A Process'
+  tag: attack.execution,attack.t1047
+  score: 50
+  target: Full_Path
+  condition: regex
+  pattern: None
+- name: '[Sigma] Potential WMI Lateral Movement WmiPrvSE Spawned PowerShell'
+  tag: attack.execution,attack.t1047,attack.t1059.001
+  score: 50
+  target: ParentPath
+  condition: regex
+  pattern: (?i)\\WmiPrvSE\.exe$
+- name: '[Sigma] Potential WMI Lateral Movement WmiPrvSE Spawned PowerShell'
+  tag: attack.execution,attack.t1047,attack.t1059.001
+  score: 50
+  target: Full_Path
+  condition: regex
+  pattern: (?i)(\{'Image\|endswith':\ \['\\\\powershell\.exe',\ '\\\\pwsh\.exe'\]\}|\{'OriginalFileName':\
+    \['PowerShell\.EXE',\ 'pwsh\.dll'\]\})
+noise_filters: []
