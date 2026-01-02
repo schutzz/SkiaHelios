@@ -1,4 +1,4 @@
-# SkiaHelios v2.7 - AION-Sigma (Intelligence & Midas Edition)
+つ# SkiaHelios v2.7 - AION-Sigma (Intelligence & Midas Edition)
 
 ![SkiaHelios CI](https://github.com/schutzz/SkiaHelios/actions/workflows/test.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
@@ -119,107 +119,49 @@ graph TD
     classDef goldClass fill:#B8860B,stroke:#FFD700,stroke-width:3px,color:#FFFFFF;
     classDef ruleClass fill:#4B0082,stroke:#FFD700,stroke-width:2px,color:#FFFFFF,stroke-dasharray: 5 5;
 
-    %% Title
-    title[("⚡️ SkiaHelios v2.7 Architecture ⚡️\nGod Mode: AION-Sigma & Midas")]:::inputClass
-
-    %% Input
-    Evidence[📂 Raw Artifacts<br/>KAPE CSVs / EVTX / MFT / Prefetch]:::inputClass
-    SigmaRules[📜 Sigma Rules (YAML)]:::ruleClass
-    ThemisFile[📜 triage_rules.yaml<br/>External Logic]:::ruleClass
-
-    %% Phase 0: Charon
-    subgraph Phase0 ["🌉 Phase 0: Charon (The Ferryman) - Rule Ingestion"]
-        direction TB
-        Charon[SH_CharonBridge<br/>Sigma to AION Conversion]:::coreClass
-    end
-
-    %% Phase 1: Clotho
-    subgraph Phase1 ["🧶 Phase 1: Clotho (The Spinner) - Ingestion & Enrichment"]
-        direction TB
-        Clotho[SH_ClothoReader<br/>Universal Ingestion<br/>5W1H Enrichment]:::coreClass
-        Hunters[🐍 Specialized Hunters<br/>• PlutosGate • HerculesReferee<br/>• Pandora • ChronosSift<br/>• Sirenhunt • Sphinx • AION]:::moduleClass
-    end
-
-    %% Phase 2: Atropos
-    subgraph Phase2 ["✂️ Phase 2: Atropos (The Thinker) - Correlation & Judgment"]
-        direction TB
-        Atropos[SH_AtroposThinker<br/>Physics Time Sort<br/>Heat Correlation]:::coreClass
-        Nemesis[Nemesis Tracer Standalone<br/>Deep Lifecycle & Dedup]:::moduleClass
-        Themis[⚖️ Themis Loader<br/>Multi-Bank Rule Engine]:::moduleClass
-    end
-
-    %% Phase 3: Lachesis
-    subgraph Phase3 ["✍️ Phase 3: Lachesis (The Allotter) - Reporting"]
-        direction TB
-        Lachesis[SH_LachesisWriter<br/>Omni-Visual Reporting<br/>Detection Statistics]:::coreClass
-        Report[📜 Grimoire Report<br/>Visual Markdown]:::outputClass
-        JSONData[📊 Structured JSON Dump<br/>Machine-Readable Evidence]:::outputClass
-    end
-
-    %% Phase 4: Chimera
-    subgraph Phase4 ["🦁 Phase 4: Chimera (The Beast) - Multi-Host Fusion"]
-        direction TB
-        Chimera[SH_ChimeraFusion<br/>Campaign-Level Integration]:::fusionClass
-        Campaign[🏛️ Campaign Report<br/>Cross-Host Attack Narrative]:::outputClass
-    end
-
-    %% Phase 5: Midas
-    subgraph Phase5 ["👑 Phase 5: Midas (The Alchemist) - Final Polish"]
-        direction TB
-        Midas[SH_MidasTouch<br/>Docx Converter & Evidence graph TD
-    %% Style Definitions
-    classDef inputClass fill:#2D1B3A,stroke:#E0B0FF,stroke-width:2px,color:#E0B0FF;
-    classDef phaseClass fill:#1E0B2A,stroke:#B19CD9,stroke-width:3px,color:#FFFFFF,rx:15,ry:15;
-    classDef coreClass fill:#3A1B4F,stroke:#D8BFD8,stroke-width:2px,color:#FFFFFF;
-    classDef moduleClass fill:#4A2B5F,stroke:#9370DB,stroke-width:2px,color:#E6E6FA;
-    classDef outputClass fill:#2F1B3A,stroke:#BA55D3,stroke-width:2px,color:#DDA0DD;
-    classDef fusionClass fill:#1A0033,stroke:#FF69B4,stroke-width:3px,color:#FFB6C1;
-    classDef goldClass fill:#B8860B,stroke:#FFD700,stroke-width:3px,color:#FFFFFF;
-    classDef ruleClass fill:#4B0082,stroke:#FFD700,stroke-width:2px,color:#FFFFFF,stroke-dasharray: 5 5;
-
     %% Title Node
     Title["⚡️ SkiaHelios v2.7 Architecture ⚡️<br/>God Mode: AION-Sigma & Midas"]:::inputClass
 
     %% Input
-    Evidence[📂 Raw Artifacts<br/>KAPE CSVs / EVTX / MFT / Prefetch]:::inputClass
-    SigmaRules[📜 Sigma Rules (YAML)]:::ruleClass
-    ThemisFile[📜 triage_rules.yaml<br/>External Logic]:::ruleClass
+    Evidence["📂 Raw Artifacts<br/>KAPE CSVs / EVTX / MFT / Prefetch"]:::inputClass
+    SigmaRules["📜 Sigma Rules (YAML)"]:::ruleClass
+    ThemisFile["📜 triage_rules.yaml<br/>External Logic"]:::ruleClass
 
     %% Phase 0: Charon
     subgraph Phase0 ["🌉 Phase 0: Charon (The Ferryman) - Rule Ingestion"]
-        Charon[SH_CharonBridge<br/>Sigma to AION Conversion]:::coreClass
+        Charon["SH_CharonBridge<br/>Sigma to AION Conversion"]:::coreClass
     end
 
     %% Phase 1: Clotho
     subgraph Phase1 ["🧶 Phase 1: Clotho (The Spinner) - Ingestion & Enrichment"]
-        Clotho[SH_ClothoReader<br/>Universal Ingestion<br/>5W1H Enrichment]:::coreClass
-        Hunters[🐍 Specialized Hunters<br/>• PlutosGate • HerculesReferee<br/>• Pandora • ChronosSift<br/>• Sirenhunt • Sphinx • AION]:::moduleClass
+        Clotho["SH_ClothoReader<br/>Universal Ingestion<br/>5W1H Enrichment"]:::coreClass
+        Hunters["🐍 Specialized Hunters<br/>• PlutosGate • HerculesReferee<br/>• Pandora • ChronosSift<br/>• Sirenhunt • Sphinx • AION"]:::moduleClass
     end
 
     %% Phase 2: Atropos
     subgraph Phase2 ["✂️ Phase 2: Atropos (The Thinker) - Correlation & Judgment"]
-        Atropos[SH_AtroposThinker<br/>Physics Time Sort<br/>Heat Correlation]:::coreClass
-        Nemesis[Nemesis Tracer Standalone<br/>Deep Lifecycle & Dedup]:::moduleClass
-        Themis[⚖️ Themis Loader<br/>Multi-Bank Rule Engine]:::moduleClass
+        Atropos["SH_AtroposThinker<br/>Physics Time Sort<br/>Heat Correlation"]:::coreClass
+        Nemesis["Nemesis Tracer Standalone<br/>Deep Lifecycle & Dedup"]:::moduleClass
+        Themis["⚖️ Themis Loader<br/>Multi-Bank Rule Engine"]:::moduleClass
     end
 
     %% Phase 3: Lachesis
     subgraph Phase3 ["✍️ Phase 3: Lachesis (The Allotter) - Reporting"]
-        Lachesis[SH_LachesisWriter<br/>Omni-Visual Reporting<br/>Detection Statistics]:::coreClass
-        Report[📜 Grimoire Report<br/>Visual Markdown]:::outputClass
-        JSONData[📊 Structured JSON Dump<br/>Machine-Readable Evidence]:::outputClass
+        Lachesis["SH_LachesisWriter<br/>Omni-Visual Reporting<br/>Detection Statistics"]:::coreClass
+        Report["📜 Grimoire Report<br/>Visual Markdown"]:::outputClass
+        JSONData["📊 Structured JSON Dump<br/>Machine-Readable Evidence"]:::outputClass
     end
 
     %% Phase 4: Chimera
     subgraph Phase4 ["🦁 Phase 4: Chimera (The Beast) - Multi-Host Fusion"]
-        Chimera[SH_ChimeraFusion<br/>Campaign-Level Integration]:::fusionClass
-        Campaign[🏛️ Campaign Report<br/>Cross-Host Attack Narrative]:::outputClass
+        Chimera["SH_ChimeraFusion<br/>Campaign-Level Integration"]:::fusionClass
+        Campaign["🏛️ Campaign Report<br/>Cross-Host Attack Narrative"]:::outputClass
     end
 
     %% Phase 5: Midas
     subgraph Phase5 ["👑 Phase 5: Midas (The Alchemist) - Final Polish"]
-        Midas[SH_MidasTouch<br/>Docx Converter & Evidence Packager]:::goldClass
-        GoldReport[🏆 Golden Docx Report]:::goldClass
+        Midas["SH_MidasTouch<br/>Docx Converter & Evidence Packager"]:::goldClass
+        GoldReport["🏆 Golden Docx Report"]:::goldClass
         SyncPack["📦 Team Sync Zip<br/>(Hash Verified)"]:::goldClass
     end
 
@@ -256,7 +198,7 @@ graph TD
     Phase0 --> Phase1 --> Phase2 --> Phase3 --> Phase4 --> Phase5
     Phase5 --> Footer
 
-    %% Phase Styling (optional for emphasis)
+    %% Phase Styling
     class Phase0,Phase1,Phase2,Phase3,Phase4,Phase5 phaseClass;
 ```
 
