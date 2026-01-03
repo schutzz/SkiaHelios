@@ -1,0 +1,17 @@
+author: SkiaHelios Antigravity
+date: '2025-01-01'
+description: Detects the specific magic word for connectivity testing.
+detection:
+  condition: selection
+  selection:
+    CommandLine: AION_CONDUCTANCE_TEST_SIGNAL
+id: test-signal-001
+level: critical
+logsource:
+  category: process_creation
+  product: windows
+status: test
+tags:
+- attack.execution
+- AION.TEST
+title: AION Conductance Test Rule

@@ -6,30 +6,15 @@ threat_signatures:
   target: Full_Path
   condition: regex
   pattern: (?i)(\\AppData\\Local\\Microsoft\\Credentials\\|\\AppData\\Roaming\\Microsoft\\Credentials\\|\\AppData\\Local\\Microsoft\\Vault\\|\\ProgramData\\Microsoft\\Vault\\)
-- name: '[Sigma] Credential Manager Access By Uncommon Applications'
-  tag: attack.t1003,attack.credential-access
-  score: 50
-  target: Target_Path
-  condition: regex
-  pattern: ^(C:\\Program\ Files\\|C:\\Program\ Files\ \(x86\)\\|C:\\Windows\\system32\\|C:\\Windows\\SysWOW64\\)
+
 - name: '[Sigma] Access To Windows Credential History File By Uncommon Applications'
   tag: attack.credential-access,attack.t1555.004
   score: 50
   target: Full_Path
   condition: regex
   pattern: (?i)\\Microsoft\\Protect\\CREDHIST$
-- name: '[Sigma] Access To Windows Credential History File By Uncommon Applications'
-  tag: attack.credential-access,attack.t1555.004
-  score: 50
-  target: Target_Path
-  condition: regex
-  pattern: ^(C:\\Program\ Files\\|C:\\Program\ Files\ \(x86\)\\|C:\\Windows\\system32\\|C:\\Windows\\SysWOW64\\)
-- name: '[Sigma] Access To Windows Credential History File By Uncommon Applications'
-  tag: attack.credential-access,attack.t1555.004
-  score: 50
-  target: Target_Path
-  condition: regex
-  pattern: (?i)C:\\Windows\\explorer\.exe
+
+
 - name: '[Sigma] Access To Crypto Currency Wallets By Uncommon Applications'
   tag: attack.t1003,attack.credential-access
   score: 50
@@ -41,18 +26,8 @@ threat_signatures:
     '\\\\AppData\\\\Roaming\\\\BitcoinSV\\\\wallet\.dat',\ '\\\\AppData\\\\Roaming\\\\DashCore\\\\wallet\.dat',\
     '\\\\AppData\\\\Roaming\\\\DogeCoin\\\\wallet\.dat',\ '\\\\AppData\\\\Roaming\\\\Litecoin\\\\wallet\.dat',\
     '\\\\AppData\\\\Roaming\\\\Ripple\\\\wallet\.dat',\ '\\\\AppData\\\\Roaming\\\\Zcash\\\\wallet\.dat'\]\})
-- name: '[Sigma] Access To Crypto Currency Wallets By Uncommon Applications'
-  tag: attack.t1003,attack.credential-access
-  score: 50
-  target: Target_Path
-  condition: regex
-  pattern: (?i)System
-- name: '[Sigma] Access To Crypto Currency Wallets By Uncommon Applications'
-  tag: attack.t1003,attack.credential-access
-  score: 50
-  target: Target_Path
-  condition: regex
-  pattern: ^(C:\\Program\ Files\ \(x86\)\\|C:\\Program\ Files\\|C:\\Windows\\system32\\|C:\\Windows\\SysWOW64\\)
+
+
 - name: '[Sigma] Access To Crypto Currency Wallets By Uncommon Applications'
   tag: attack.t1003,attack.credential-access
   score: 50
@@ -71,12 +46,7 @@ threat_signatures:
   target: Full_Path
   condition: regex
   pattern: (?i)(\\Microsoft\\Protect\\S\-1\-5\-18\\|\\Microsoft\\Protect\\S\-1\-5\-21\-)
-- name: '[Sigma] Access To Windows DPAPI Master Keys By Uncommon Applications'
-  tag: attack.credential-access,attack.t1555.004
-  score: 50
-  target: Target_Path
-  condition: regex
-  pattern: ^(C:\\Program\ Files\\|C:\\Program\ Files\ \(x86\)\\|C:\\Windows\\system32\\|C:\\Windows\\SysWOW64\\)
+
 - name: '[Sigma] Access To Potentially Sensitive Sysvol Files By Uncommon Applications'
   tag: attack.credential-access,attack.t1552.006
   score: 50
@@ -95,18 +65,8 @@ threat_signatures:
   target: Full_Path
   condition: regex
   pattern: (?i)(audit\.csv|Files\.xml|GptTmpl\.inf|groups\.xml|Registry\.pol|Registry\.xml|scheduledtasks\.xml|scripts\.ini|services\.xml)$
-- name: '[Sigma] Access To Potentially Sensitive Sysvol Files By Uncommon Applications'
-  tag: attack.credential-access,attack.t1552.006
-  score: 50
-  target: Target_Path
-  condition: regex
-  pattern: ^(C:\\Program\ Files\ \(x86\)\\|C:\\Program\ Files\\|C:\\Windows\\system32\\|C:\\Windows\\SysWOW64\\)
-- name: '[Sigma] Access To Potentially Sensitive Sysvol Files By Uncommon Applications'
-  tag: attack.credential-access,attack.t1552.006
-  score: 50
-  target: Target_Path
-  condition: regex
-  pattern: (?i)C:\\Windows\\explorer\.exe
+
+
 - name: '[Sigma] Microsoft Teams Sensitive File Access By Uncommon Applications'
   tag: attack.credential-access,attack.t1528
   score: 50
@@ -582,12 +542,7 @@ threat_signatures:
   target: Target_Path
   condition: regex
   pattern: (?i)(C:\\Windows\\System32\\wuauclt\.exe|C:\\Windows\\SysWOW64\\wuauclt\.exe|C:\\Windows\\UUS\\arm64\\wuaucltcore\.exe)
-- name: '[Sigma] Files With System Process Name In Unsuspected Locations'
-  tag: attack.defense-evasion,attack.t1036.005
-  score: 50
-  target: Target_FileName
-  condition: regex
-  pattern: (?i)C:\\Windows\\explorer\.exe$
+
 - name: '[Sigma] Files With System Process Name In Unsuspected Locations'
   tag: attack.defense-evasion,attack.t1036.005
   score: 50
@@ -644,12 +599,7 @@ threat_signatures:
   target: Target_Path
   condition: regex
   pattern: (?i)(\\wscript\.exe|\\cscript\.exe)$
-- name: '[Sigma] WScript or CScript Dropper - File'
-  tag: attack.execution,attack.t1059.005,attack.t1059.007
-  score: 80
-  target: Target_FileName
-  condition: regex
-  pattern: ^(C:\\Users\\|C:\\ProgramData)
+
 - name: '[Sigma] WScript or CScript Dropper - File'
   tag: attack.execution,attack.t1059.005,attack.t1059.007
   score: 80
@@ -668,12 +618,7 @@ threat_signatures:
   target: Target_FileName
   condition: regex
   pattern: (?i)\.cmdline$
-- name: '[Sigma] Potential DCOM InternetExplorer.Application DLL Hijack'
-  tag: attack.lateral-movement,attack.t1021.002,attack.t1021.003
-  score: 100
-  target: Target_Path
-  condition: regex
-  pattern: (?i)System
+
 - name: '[Sigma] Potential DCOM InternetExplorer.Application DLL Hijack'
   tag: attack.lateral-movement,attack.t1021.002,attack.t1021.003
   score: 100
@@ -686,24 +631,14 @@ threat_signatures:
   target: Target_FileName
   condition: regex
   pattern: (?i)\\desktop\.ini$
-- name: '[Sigma] Desktop.INI Created by Uncommon Process'
-  tag: attack.privilege-escalation,attack.persistence,attack.t1547.009
-  score: 50
-  target: Target_Path
-  condition: regex
-  pattern: ^(C:\\Windows\\|C:\\Program\ Files\\|C:\\Program\ Files\ \(x86\)\\)
+
 - name: '[Sigma] Desktop.INI Created by Uncommon Process'
   tag: attack.privilege-escalation,attack.persistence,attack.t1547.009
   score: 50
   target: Target_FileName
   condition: regex
   pattern: ^C:\\\$WINDOWS\.\~BT\\NewOS\\
-- name: '[Sigma] Desktop.INI Created by Uncommon Process'
-  tag: attack.privilege-escalation,attack.persistence,attack.t1547.009
-  score: 50
-  target: Target_Path
-  condition: regex
-  pattern: ^C:\\Users\\
+
 - name: '[Sigma] Desktop.INI Created by Uncommon Process'
   tag: attack.privilege-escalation,attack.persistence,attack.t1547.009
   score: 50
@@ -716,24 +651,14 @@ threat_signatures:
   target: Target_FileName
   condition: regex
   pattern: (?i)\\JetBrains\\apps\\
-- name: '[Sigma] Desktop.INI Created by Uncommon Process'
-  tag: attack.privilege-escalation,attack.persistence,attack.t1547.009
-  score: 50
-  target: Target_Path
-  condition: regex
-  pattern: ^C:\\Users\\
+
 - name: '[Sigma] Desktop.INI Created by Uncommon Process'
   tag: attack.privilege-escalation,attack.persistence,attack.t1547.009
   score: 50
   target: Target_Path
   condition: regex
   pattern: (?i)\\AppData\\Local\\Microsoft\\OneDrive\\
-- name: '[Sigma] DLL Search Order Hijackig Via Additional Space in Path'
-  tag: attack.persistence,attack.privilege-escalation,attack.defense-evasion,attack.t1574.001
-  score: 80
-  target: Target_FileName
-  condition: regex
-  pattern: ^(C:\\Windows\ \\|C:\\Program\ Files\ \\|C:\\Program\ Files\ \(x86\)\ \\)
+
 - name: '[Sigma] DLL Search Order Hijackig Via Additional Space in Path'
   tag: attack.persistence,attack.privilege-escalation,attack.defense-evasion,attack.t1574.001
   score: 80
@@ -913,12 +838,6 @@ threat_signatures:
   target: Target_FileName
   condition: regex
   pattern: (?i)\.dll$
-- name: '[Sigma] Potential Initial Access via DLL Search Order Hijacking'
-  tag: attack.privilege-escalation,attack.persistence,attack.t1566,attack.t1566.001,attack.initial-access,attack.t1574,attack.t1574.001,attack.defense-evasion
-  score: 50
-  target: Target_FileName
-  condition: regex
-  pattern: (?i)(\\Users\\|\\AppData\\)
 - name: '[Sigma] Potential Initial Access via DLL Search Order Hijacking'
   tag: attack.privilege-escalation,attack.persistence,attack.t1566,attack.t1566.001,attack.initial-access,attack.t1574,attack.t1574.001,attack.defense-evasion
   score: 50
@@ -1137,30 +1056,15 @@ threat_signatures:
   target: Target_Path
   condition: regex
   pattern: (?i)(Temp|zzzzInvokeManagedCustomActionOutOfProc)
-- name: '[Sigma] Suspicious File Creation In Uncommon AppData Folder'
-  tag: attack.defense-evasion,attack.execution
-  score: 80
-  target: Target_FileName
-  condition: regex
-  pattern: ^C:\\Users\\
-- name: '[Sigma] Suspicious File Creation In Uncommon AppData Folder'
-  tag: attack.defense-evasion,attack.execution
-  score: 80
-  target: Target_FileName
-  condition: regex
-  pattern: (?i)\\AppData\\
+
+
 - name: '[Sigma] Suspicious File Creation In Uncommon AppData Folder'
   tag: attack.defense-evasion,attack.execution
   score: 80
   target: Target_FileName
   condition: regex
   pattern: (?i)(\.bat|\.cmd|\.cpl|\.dll|\.exe|\.hta|\.iso|\.lnk|\.msi|\.ps1|\.psm1|\.scr|\.vbe|\.vbs)$
-- name: '[Sigma] Suspicious File Creation In Uncommon AppData Folder'
-  tag: attack.defense-evasion,attack.execution
-  score: 80
-  target: Target_FileName
-  condition: regex
-  pattern: ^C:\\Users\\
+
 - name: '[Sigma] Suspicious File Creation In Uncommon AppData Folder'
   tag: attack.defense-evasion,attack.execution
   score: 80
@@ -1197,12 +1101,7 @@ threat_signatures:
   target: Target_Path
   condition: regex
   pattern: (?i)\\Notepad\+\+\\updater\\gup\.exe$
-- name: '[Sigma] Potential Persistence Via Notepad++ Plugins'
-  tag: attack.persistence
-  score: 50
-  target: Target_Path
-  condition: regex
-  pattern: ^C:\\Users\\
+
 - name: '[Sigma] Potential Persistence Via Notepad++ Plugins'
   tag: attack.persistence
   score: 50
@@ -1635,12 +1534,7 @@ threat_signatures:
   target: Target_FileName
   condition: regex
   pattern: (?i)(\.bat|\.chm|\.cmd|\.com|\.dll|\.exe|\.hta|\.jar|\.js|\.ocx|\.scr|\.sys|\.vbe|\.vbs|\.wsf)$
-- name: '[Sigma] Potential Binary Or Script Dropper Via PowerShell'
-  tag: attack.persistence
-  score: 50
-  target: Target_FileName
-  condition: regex
-  pattern: ^C:\\Users\\
+
 - name: '[Sigma] Potential Binary Or Script Dropper Via PowerShell'
   tag: attack.persistence
   score: 50
@@ -1665,12 +1559,7 @@ threat_signatures:
   target: Target_FileName
   condition: regex
   pattern: (?i)(\.dll|\.exe)$
-- name: '[Sigma] Potential Binary Or Script Dropper Via PowerShell'
-  tag: attack.persistence
-  score: 50
-  target: Target_FileName
-  condition: regex
-  pattern: ^C:\\Users\\
+
 - name: '[Sigma] Potential Binary Or Script Dropper Via PowerShell'
   tag: attack.persistence
   score: 50
@@ -1713,12 +1602,7 @@ threat_signatures:
   target: Target_FileName
   condition: regex
   pattern: (?i)__PSScriptPolicyTest_
-- name: '[Sigma] PowerShell Script Dropped Via PowerShell.EXE'
-  tag: attack.persistence
-  score: 20
-  target: Target_FileName
-  condition: regex
-  pattern: ^C:\\Users\\
+
 - name: '[Sigma] PowerShell Script Dropped Via PowerShell.EXE'
   tag: attack.persistence
   score: 20
@@ -2595,12 +2479,7 @@ threat_signatures:
   target: Target_FileName
   condition: regex
   pattern: (?i)\\comctl32\.dll$
-- name: '[Sigma] UAC Bypass Using .NET Code Profiler on MMC'
-  tag: attack.defense-evasion,attack.privilege-escalation,attack.t1548.002
-  score: 80
-  target: Target_FileName
-  condition: regex
-  pattern: ^C:\\Users\\
+
 - name: '[Sigma] UAC Bypass Using .NET Code Profiler on MMC'
   tag: attack.defense-evasion,attack.privilege-escalation,attack.t1548.002
   score: 80
@@ -2643,12 +2522,7 @@ threat_signatures:
   target: Target_Path
   condition: regex
   pattern: (?i)C:\\Program\ Files\\Internet\ Explorer\\IEInstal\.exe
-- name: '[Sigma] UAC Bypass Using IEInstal - File'
-  tag: attack.defense-evasion,attack.privilege-escalation,attack.t1548.002
-  score: 80
-  target: Target_FileName
-  condition: regex
-  pattern: ^C:\\Users\\
+
 - name: '[Sigma] UAC Bypass Using IEInstal - File'
   tag: attack.defense-evasion,attack.privilege-escalation,attack.t1548.002
   score: 80
@@ -2661,48 +2535,28 @@ threat_signatures:
   target: Target_FileName
   condition: regex
   pattern: (?i)consent\.exe$
-- name: '[Sigma] UAC Bypass Using MSConfig Token Modification - File'
-  tag: attack.defense-evasion,attack.privilege-escalation,attack.t1548.002
-  score: 80
-  target: Target_FileName
-  condition: regex
-  pattern: ^C:\\Users\\
+
 - name: '[Sigma] UAC Bypass Using MSConfig Token Modification - File'
   tag: attack.defense-evasion,attack.privilege-escalation,attack.t1548.002
   score: 80
   target: Target_FileName
   condition: regex
   pattern: (?i)\\AppData\\Local\\Temp\\pkgmgr\.exe$
-- name: '[Sigma] UAC Bypass Using NTFS Reparse Point - File'
-  tag: attack.defense-evasion,attack.privilege-escalation,attack.t1548.002
-  score: 80
-  target: Target_FileName
-  condition: regex
-  pattern: ^C:\\Users\\
+
 - name: '[Sigma] UAC Bypass Using NTFS Reparse Point - File'
   tag: attack.defense-evasion,attack.privilege-escalation,attack.t1548.002
   score: 80
   target: Target_FileName
   condition: regex
   pattern: (?i)\\AppData\\Local\\Temp\\api\-ms\-win\-core\-kernel32\-legacy\-l1\.DLL$
-- name: '[Sigma] UAC Bypass Abusing Winsat Path Parsing - File'
-  tag: attack.defense-evasion,attack.privilege-escalation,attack.t1548.002
-  score: 80
-  target: Target_FileName
-  condition: regex
-  pattern: ^C:\\Users\\
+
 - name: '[Sigma] UAC Bypass Abusing Winsat Path Parsing - File'
   tag: attack.defense-evasion,attack.privilege-escalation,attack.t1548.002
   score: 80
   target: Target_FileName
   condition: regex
   pattern: (?i)(\\AppData\\Local\\Temp\\system32\\winsat\.exe|\\AppData\\Local\\Temp\\system32\\winmm\.dll)$
-- name: '[Sigma] UAC Bypass Using Windows Media Player - File'
-  tag: attack.defense-evasion,attack.privilege-escalation,attack.t1548.002
-  score: 80
-  target: Target_FileName
-  condition: regex
-  pattern: ^C:\\Users\\
+
 - name: '[Sigma] UAC Bypass Using Windows Media Player - File'
   tag: attack.defense-evasion,attack.privilege-escalation,attack.t1548.002
   score: 80
@@ -2793,12 +2647,7 @@ threat_signatures:
   target: Target_FileName
   condition: regex
   pattern: (?i)(\\AppData\\Local\\Temp\\|\\Windows\\Temp\\)
-- name: '[Sigma] Potential Webshell Creation On Static Website'
-  tag: attack.persistence,attack.t1505.003
-  score: 50
-  target: Target_Path
-  condition: regex
-  pattern: (?i)System
+
 - name: '[Sigma] Potential Webshell Creation On Static Website'
   tag: attack.persistence,attack.t1505.003
   score: 50
@@ -2836,12 +2685,7 @@ threat_signatures:
   condition: regex
   pattern: (?i)(\{'TargetFilename\|re':\ '\\\\\\\\Windows\\\\\\\\__1\\\\d\{9\}\\\\\.\\\\d\{1,7\}\$'\}|\{'TargetFilename\|re':\
     'C:\\\\\\\\__1\\\\d\{9\}\\\\\.\\\\d\{1,7\}\$'\}|\{'TargetFilename\|re':\ 'D:\\\\\\\\__1\\\\d\{9\}\\\\\.\\\\d\{1,7\}\$'\})
-- name: '[Sigma] Wmiprvse Wbemcomn DLL Hijack - File'
-  tag: attack.execution,attack.t1047,attack.lateral-movement,attack.t1021.002
-  score: 100
-  target: Target_Path
-  condition: regex
-  pattern: (?i)System
+
 - name: '[Sigma] Wmiprvse Wbemcomn DLL Hijack - File'
   tag: attack.execution,attack.t1047,attack.lateral-movement,attack.t1021.002
   score: 100

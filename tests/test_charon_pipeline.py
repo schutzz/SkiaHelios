@@ -137,7 +137,7 @@ def run_detection_logic():
     
     if hits.height > 0:
         print("\n" + "="*50)
-        print("🎉 TEST PASSED: Threat Detected! 🎉")
+        print("[+] TEST PASSED: Threat Detected!")
         print("="*50)
         for row in hits.iter_rows(named=True):
             print(f"Hit Rule: {row['Threat_Tag']}")
@@ -146,7 +146,7 @@ def run_detection_logic():
         return True
     else:
         print("\n" + "="*50)
-        print("💀 TEST FAILED: No Threats Detected.")
+        print("[-] TEST FAILED: No Threats Detected.")
         print("="*50)
         print("Debug Info: Check rules/sigma_test_imported.yaml and column mappings.")
         return False

@@ -7,9 +7,9 @@ import json
 import re
 
 # ============================================================
-#  SH_LachesisWriter v2.9 [Aggregated View]
+#  SH_LachesisWriter v3.2 [Omni-Aware]
 #  Mission: Weave the Grimoire with Summarized Findings.
-#  Update: Grouped Technical Findings to reduce verbosity.
+#  Update: Integrates Chronos, AION, and Siren into Visual IOCs.
 # ============================================================
 
 TEXT_RES = {
@@ -49,25 +49,23 @@ class LachesisWriter:
         self.case_name = case_name
         self.visual_iocs = []
 
-    def weave_report(self, analysis_result, output_path, dfs_for_ioc):
-        print(f"[*] Lachesis v2.9 is weaving the report into {output_path}...")
+    def weave_report(self, analysis_result, output_path, dfs_for_ioc, hostname, os_info, primary_user):
+        print(f"[*] Lachesis v3.3 is weaving the refined report into {output_path}...")
+        
+        self.hostname = hostname # Clothoから受け取った確実なホスト名
         
         valid_events = analysis_result["events"]
         phases = analysis_result["phases"]
         origin_stories = analysis_result["origin_stories"]
         verdict_flags = analysis_result["verdict_flags"]
         lateral_summary = analysis_result["lateral_summary"]
-        compromised_users = analysis_result["compromised_users"]
         flow_steps = analysis_result["flow_steps"]
-
-        primary_user = "Unknown"
-        if compromised_users:
-            top_user = compromised_users.most_common(1)
-            if top_user: primary_user = top_user[0][0]
 
         # Extract IOCs
         self.visual_iocs = [] 
         self._extract_visual_iocs_from_pandora(dfs_for_ioc)
+        self._extract_visual_iocs_from_chronos(dfs_for_ioc)
+        self._extract_visual_iocs_from_aion(dfs_for_ioc)
         self._extract_visual_iocs_from_events(valid_events)
 
         out_file = Path(output_path)
@@ -75,15 +73,16 @@ class LachesisWriter:
 
         with open(out_file, "w", encoding="utf-8") as f:
             self._embed_chimera_tags(f, primary_user)
-            self._write_header(f)
-            self._write_executive_summary_visual(f, valid_events, verdict_flags, lateral_summary, flow_steps, compromised_users)
+            self._write_header(f, os_info, primary_user) # OS/Userを渡す
+            self._write_executive_summary_visual(f, valid_events, verdict_flags, lateral_summary, flow_steps, primary_user)
+            # (以下略: 既存ロジック)
             
             if origin_stories: self._write_origin_analysis(f, origin_stories)
             self._write_timeline_visual(f, phases)
             self._write_technical_findings(f, phases)
             self._write_detection_statistics(f, dfs_for_ioc)
             self._write_ioc_appendix(f, dfs_for_ioc)
-            f.write(f"\n---\n*Report woven by SkiaHelios (The Triad v2.9)* 🦁")
+            f.write(f"\n---\n*Report woven by SkiaHelios (The Triad v3.2)* 🦁")
         
         json_path = out_file.with_suffix('.json')
         self._export_json_grimoire(analysis_result, dfs_for_ioc, json_path, primary_user)
@@ -91,8 +90,13 @@ class LachesisWriter:
     def _is_noise(self, name, path=""):
         name = str(name).lower()
         path = str(path).lower()
-        noise_keywords = ["my music", "my pictures", "my videos", "desktop.ini", "thumbs.db"]
-        noise_paths = ["racd", "wmiaprpl", "wbem\\performance"]
+        # [NEW] Enhanced Noise List
+        noise_keywords = ["desktop.ini", "thumbs.db", "safe browsing", "inputpersonalization", "traineddatastore"]
+        noise_paths = ["winsxs", "servicing", "msocache", "program files", "appdata\\local\\programs\\python", "lib\\test", "windows\\assembly"]
+        
+        suspicious_keywords = ["hash_suite", "nmap", "mimikatz", "tor browser", "psexec", "pwdump"]
+        if any(s in path or s in name for s in suspicious_keywords): return False
+
         if any(k in name for k in noise_keywords): return True
         if any(p in path for p in noise_paths): return True
         return False
@@ -114,6 +118,44 @@ class LachesisWriter:
                         })
                 except: pass
 
+    # [NEW] Chronos (Timestomp) Integration
+    def _extract_visual_iocs_from_chronos(self, dfs):
+        if dfs.get('Chronos') is not None:
+            df = dfs['Chronos']
+            if "Chronos_Score" in df.columns:
+                try:
+                    # Score 80以上 (FALSIFIED_FUTURE, TIMESTOMP_BACKDATE, CRITICAL) を抽出
+                    threats = df.filter(pl.col("Chronos_Score").cast(pl.Int64, strict=False) >= 80)
+                    for row in threats.iter_rows(named=True):
+                        name = row.get("FileName")
+                        path = row.get("ParentPath")
+                        if self._is_noise(name, path): continue
+                        
+                        anomaly = row.get("Anomaly_Time", "TIME_ANOMALY")
+                        self._add_unique_visual_ioc({
+                            "Type": anomaly, "Value": name,
+                            "Path": path, "Note": f"Timestomp Detected (Chronos)"
+                        })
+                except: pass
+
+    # [NEW] AION (Persistence) Integration
+    def _extract_visual_iocs_from_aion(self, dfs):
+        if dfs.get('AION') is not None:
+            df = dfs['AION']
+            if "AION_Score" in df.columns:
+                try:
+                    threats = df.filter(pl.col("AION_Score").cast(pl.Int64, strict=False) >= 50)
+                    for row in threats.iter_rows(named=True):
+                        name = row.get("Target_FileName")
+                        path = row.get("Full_Path")
+                        if self._is_noise(name, path): continue
+                        
+                        self._add_unique_visual_ioc({
+                            "Type": "PERSISTENCE", "Value": name,
+                            "Path": path, "Note": f"Persistence Mechanism (AION)"
+                        })
+                except: pass
+
     def _extract_visual_iocs_from_events(self, events):
         re_ip = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b')
         for ev in events:
@@ -132,6 +174,10 @@ class LachesisWriter:
                     })
 
     def _add_unique_visual_ioc(self, ioc_dict):
+        # ノイズ除外 (念のため)
+        if self._is_noise(ioc_dict["Value"], ioc_dict["Path"]): return
+        
+        # 重複チェック
         for existing in self.visual_iocs:
             if existing["Value"] == ioc_dict["Value"] and existing["Type"] == ioc_dict["Type"]:
                 return
@@ -170,9 +216,20 @@ class LachesisWriter:
                     examples = ", ".join(unique_targets[:2])
                     final_flow.append(f"{key} (**{count} files**: {examples}, ...)")
         return final_flow
+    
+    def _sanitize_verdicts(self, verdicts):
+        clean_tags = set()
+        for v in verdicts:
+            inner = v.replace("[", "").replace("]", "")
+            for ignore in ["DETECTED:", "DETECTED", "CONFIRMED", "POTENTIAL_"]:
+                 inner = inner.replace(ignore, "")
+            parts = [p.strip() for p in re.split(r'[, ]+', inner) if p.strip()]
+            for p in parts:
+                clean_tags.add(p)
+        if not clean_tags: return ""
+        return f"[DETECTED: {', '.join(sorted(list(clean_tags)))}]"
 
     def _write_technical_findings(self, f, phases):
-        """[NEW] Aggregated Technical Findings"""
         t = self.txt
         f.write(f"## {t['h1_tech']}\n")
         f.write("本セクションでは、確度が高い（High Confidence）と判定された重要イベントのみを集約して記載します。\n")
@@ -182,16 +239,19 @@ class LachesisWriter:
         for idx, phase in enumerate(phases):
             if not phase: continue
             
-            # Phaseごとのイベントを「Insight」でグルーピング
+            created_files = set()
+            for ev in phase:
+                if ev['Category'] in ['DROP', 'EXEC'] and ev.get('Keywords'):
+                    for k in ev['Keywords']: created_files.add(str(k).lower())
+
             grouped_events = {}
             date_str = str(phase[0]['Time']).replace('T', ' ').split(' ')[0]
             
             for ev in phase:
                 if self._is_noise(ev['Summary']): continue
                 
-                # Criticality Filter (Strict: >= 80)
                 if ev['Criticality'] >= 80:
-                    insight = self._generate_insight(ev)
+                    insight = self._generate_insight(ev, created_files) 
                     if insight not in grouped_events:
                         grouped_events[insight] = []
                     grouped_events[insight].append(ev)
@@ -203,15 +263,9 @@ class LachesisWriter:
                 for insight, events in grouped_events.items():
                     f.write(f"- **{insight}**\n")
                     
-                    # ターゲット（Summary）のユニーク化
                     targets = []
                     for ev in events:
-                        # Summaryからファイル名などを抽出して短くする工夫
-                        # 例: "File Deletion: [TAG] filename.ext [TAG]" -> "filename.ext"
-                        summary = ev['Summary']
-                        # タグを除去して純粋なファイル名などを取り出せればベストだが、
-                        # ここでは単純にSummary全体をターゲットとする
-                        targets.append(summary)
+                        targets.append(ev['Summary'])
                     
                     unique_targets = sorted(list(set(targets)))
                     count = len(unique_targets)
@@ -220,7 +274,6 @@ class LachesisWriter:
                         f.write(f"  - Target: {unique_targets[0]}\n")
                     else:
                         f.write(f"  - **Total Events:** {len(events)} (Unique Targets: {count})\n")
-                        # 3つまで表示
                         for tgt in unique_targets[:3]:
                             f.write(f"  - {tgt}\n")
                         if count > 3:
@@ -231,43 +284,67 @@ class LachesisWriter:
         if not has_any_findings:
             f.write("本調査範囲において、特筆すべき高確度の技術的痕跡は検出されませんでした。\n\n")
 
-    # --- Other methods (Mermaid, Summary, etc.) are kept same as v2.8 ---
-    # To save space, standard methods are abbreviated here but implied to be present.
-    # (Copy _write_executive_summary_visual, _write_timeline_visual, etc. from v2.8)
-    
     def _generate_mermaid(self):
         if not self.visual_iocs: return ""
         chart = "\n```mermaid\ngraph TD\n"
         chart += "    %% Nodes Definition\n"
         chart += "    Attacker((🦁 Attacker)) -->|Exploit/Access| Initial{Initial Access}\n"
-        webshells = [i["Value"] for i in self.visual_iocs if "WEBSHELL" in i["Type"] or "OBFUSCATION" in i["Type"]]
-        rootkits = [i["Value"] for i in self.visual_iocs if "ROOTKIT" in i["Type"]]
-        ips = [i["Value"] for i in self.visual_iocs if "IP_TRACE" in i["Type"]]
-        execs = [i["Value"] for i in self.visual_iocs if "EXECUTION" in i["Type"]]
+        
+        # [NEW] IOCのTypeに基づいてノードを生成
+        webshells = [i for i in self.visual_iocs if "WEBSHELL" in i["Type"] or "OBFUSCATION" in i["Type"]]
+        persistence = [i for i in self.visual_iocs if "PERSISTENCE" in i["Type"] or "ROOTKIT" in i["Type"]]
+        timestomps = [i for i in self.visual_iocs if "TIMESTOMP" in i["Type"] or "FALSIFIED" in i["Type"]]
+        ips = [i for i in self.visual_iocs if "IP_TRACE" in i["Type"]]
+        execs = [i for i in self.visual_iocs if "EXECUTION" in i["Type"]]
+        malware = [i for i in self.visual_iocs if "CRITICAL" in i["Type"] or "CREDENTIALS" in i["Type"]]
+
         if webshells:
-            for ws in webshells[:3]:
+            for item in webshells[:3]:
+                ws = item["Value"]
                 chart += f"    Initial -->|Drop/Upload| WS_{abs(hash(ws))}[\"{ws}\"]\n"
                 chart += f"    WS_{abs(hash(ws))} -->|Exec| Cmd_{abs(hash(ws))}((Shell))\n"
-        if rootkits:
-            parent = f"Cmd_{abs(hash(webshells[0]))}" if webshells else "Initial"
-            for rk in rootkits[:3]:
-                chart += f"    {parent} -->|Persistence| RK_{abs(hash(rk))}[\"{rk}<br/>(Rootkit)\"]\n"
+        
+        # Persistence & Timestomp & Malware
+        parent = f"Cmd_{abs(hash(webshells[0]['Value']))}" if webshells else "Initial"
+        
+        if persistence:
+            for item in persistence[:3]:
+                p = item["Value"]
+                chart += f"    {parent} -->|Persistence| P_{abs(hash(p))}[\"{p}<br/>(AutoRun)\"]\n"
+
+        if timestomps:
+             for item in timestomps[:3]:
+                ts = item["Value"]
+                chart += f"    {parent} -->|Timestomp| TS_{abs(hash(ts))}[\"{ts}<br/>(Time Forged)\"]\n"
+
+        if malware:
+             for item in malware[:3]:
+                m = item["Value"]
+                chart += f"    {parent} -->|Malware/Tool| MW_{abs(hash(m))}[\"{m}\"]\n"
+
         if ips:
-            for ip in ips[:5]:
+            for item in ips[:5]:
+                ip = item["Value"]
                 chart += f"    Attacker -.->|C2/Lateral| IP_{abs(hash(ip))}(\"{ip}\")\n"
+        
         if execs and not webshells:
-            for ex in execs[:3]:
+            for item in execs[:3]:
+                ex = item["Value"]
                 chart += f"    Initial -->|Execute| EX_{abs(hash(ex))}[[\"{ex}\"]]\n"
+                
         chart += "\n    %% Styles\n"
         chart += "    classDef threat fill:#ffcccc,stroke:#ff0000,stroke-width:2px,color:#000;\n"
         chart += "    class Attacker,Initial threat;\n"
         chart += "```\n"
         return chart
 
-    def _write_executive_summary_visual(self, f, events, verdicts, lateral, flows, users):
+    # 引数名を users -> primary_user_str に変更して分かりやすくしました
+    def _write_executive_summary_visual(self, f, events, verdicts, lateral, flows, primary_user_str):
         t = self.txt
         f.write(f"## {t['h1_exec']}\n")
-        verdict_str = " ".join(list(verdicts))
+        
+        verdict_str = self._sanitize_verdicts(verdicts)
+        
         latest_crit = "Unknown"
         if events:
              for ev in reversed(events):
@@ -279,21 +356,31 @@ class LachesisWriter:
             f.write("\n\n")
         else:
             f.write("**結論:**\n現在提供されているログの範囲では、クリティカルな侵害痕跡は確認されませんでした。\n\n")
+        
         f.write("\n### 🏹 Detected Attack Flow (攻撃フロー図)\n")
         if self.visual_iocs: f.write(self._generate_mermaid())
         else: f.write("(No sufficient visual indicators found for diagram generation)\n")
+        
         f.write("\n### 💎 Key Indicators (確度の高い侵害指標)\n")
         if self.visual_iocs:
             f.write("| Type | Value (File/IP) | Path | Note |\n|---|---|---|---|\n")
+            # 重複排除して表示
+            shown = set()
             for ioc in self.visual_iocs:
+                key = ioc['Value']
+                if key in shown: continue
+                shown.add(key)
+                
                 short_path = (ioc['Path'][:40] + '..') if len(ioc['Path']) > 40 else ioc['Path']
                 f.write(f"| **{ioc['Type']}** | `{ioc['Value']}` | `{short_path}` | {ioc['Note']} |\n")
         else: f.write("No critical IOCs automatically detected.\n")
+        
         f.write("\n")
         if lateral: f.write(f"\n**Lateral Movement:**\n{lateral}\n")
-        main_user = users.most_common(1)
-        user_str = main_user[0][0] if main_user else "特定不能 (System権限のみ)"
-        f.write(f"\n**侵害されたアカウント:**\n主に **{user_str}** アカウントでの活動が確認されています。\n\n")
+        
+        # [FIX] ここを修正！Counterではなく文字列をそのまま使う
+        user_display = primary_user_str if primary_user_str and primary_user_str != "Unknown_User" else "特定不能 (System権限のみ)"
+        f.write(f"\n**侵害されたアカウント:**\n主に **{user_display}** アカウントでの活動が確認されています。\n\n")
         f.write(f"**攻撃フロー（タイムライン概要）:**\n")
         consolidated_flows = self._consolidate_attack_flow(flows)
         if consolidated_flows:
@@ -338,13 +425,15 @@ class LachesisWriter:
     def _embed_chimera_tags(self, f, primary_user):
         f.write("\n\n")
 
-    def _write_header(self, f):
+    def _write_header(self, f, os_info, primary_user):
         t = self.txt
         f.write(f"# {t['title']} - {self.hostname}\n\n")
         f.write(f"### 🛡️ {t['coc_header']}\n")
         f.write("| Item | Details |\n|---|---|\n")
         f.write(f"| **Case Name** | {self.case_name} |\n")
         f.write(f"| **Target Host** | **{self.hostname}** |\n")
+        f.write(f"| **OS Info** | {os_info} |\n") # 追加
+        f.write(f"| **Primary User** | {primary_user} |\n") # 追加
         f.write(f"| **Date** | {datetime.now().strftime('%Y-%m-%d')} |\n")
         f.write(f"| **Status** | Analyzed (SkiaHelios Triad) |\n\n---\n\n")
 
@@ -445,21 +534,33 @@ class LachesisWriter:
                     iocs.append({"Name": row.get('Ghost_FileName'), "SHA1": "N/A (Deleted)", "SHA256": "N/A (Deleted)", "Path": path, "Source": f"Pandora ({row.get('Risk_Tag')})"})
         if dfs.get('Chronos') is not None:
             df = dfs['Chronos']
-            if 'Anomaly_Time' in df.columns:
-                hits = df.filter(pl.col("Anomaly_Time") != "")
-                for row in hits.iter_rows(named=True):
-                    path = row.get('ParentPath', '') + "\\" + row.get('FileName', '')
-                    iocs.append({"Name": row.get('FileName'), "SHA1": "N/A (Timestomp)", "SHA256": "N/A (Timestomp)", "Path": path, "Source": f"Chronos ({row.get('Anomaly_Time')})"})
+            if 'Anomaly_Time' in df.columns and 'Chronos_Score' in df.columns:
+                try:
+                    # cast(pl.Int64) を追加
+                    hits = df.filter(pl.col("Chronos_Score").cast(pl.Int64, strict=False) > 0)
+                    for row in hits.iter_rows(named=True):
+                        path = row.get('ParentPath', '') + "\\" + row.get('FileName', '')
+                        iocs.append({"Name": row.get('FileName'), "SHA1": "N/A (Timestomp)", "SHA256": "N/A (Timestomp)", "Path": path, "Source": f"Chronos ({row.get('Anomaly_Time')})"})
+                except Exception as e:
+                    print(f"    [!] Chronos IOC Error: {e}")
         unique_iocs = {}
         for i in iocs:
             key = i['Path'] if i['Path'] else i['Name']
             if key not in unique_iocs: unique_iocs[key] = i
         return list(unique_iocs.values())
 
-    def _generate_insight(self, ev):
+    def _generate_insight(self, ev, created_files_in_phase=None):
         cat = ev['Category']
         summary = ev['Summary'].lower()
         src = ev['Source'].lower()
+        
+        # [MODIFIED] Browser/C2 Context Safety Valve
+        if re.search(r'\[\d+\]\.(htm|html|js|php|jsp)', summary):
+            is_cache_path = any(x in summary for x in ['cache', 'temp', 'history', 'appdata'])
+            is_high_confidence = ev.get('Criticality', 0) >= 90
+            if not is_cache_path and is_high_confidence:
+                return "外部C2（または踏み台）との通信を伴うブラウザ経由の活動です。"
+
         if cat == "INIT":
             if "powershell" in src and ("base64" in summary or "decoded" in summary): return "PowerShellコマンドのBase64難読化実行を検知しました。"
             return "不審なスクリプトブロックの実行を検知しました。"
@@ -468,7 +569,17 @@ class LachesisWriter:
         elif cat == "PERSIST": return "永続化設定が確認されました。"
         elif cat == "ANTI":
             if "timestomp" in summary: return "ファイルタイムスタンプの改ざん痕跡です。"
+            
+            is_volatile = False
+            if created_files_in_phase:
+                for kw in ev.get('Keywords', []):
+                    if str(kw).lower() in created_files_in_phase:
+                        is_volatile = True; break
+            
+            if is_volatile:
+                return "揮発性痕跡（Volatile Artifact）の検知（作成直後の削除）です。"
             return "攻撃活動の痕跡隠滅（ファイル削除）です。"
+            
         return "調査が必要な不審なイベントです。"
 
     def _export_json_grimoire(self, analysis_result, dfs_for_ioc, json_path, primary_user):

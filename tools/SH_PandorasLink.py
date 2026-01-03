@@ -109,6 +109,65 @@ class PandoraEngine:
             print(f"[!] Error loading USN {path}: {e}")
             raise RuntimeError(f"Failed to load USN")
 
+            raise RuntimeError(f"Failed to load USN")
+
+    def _apply_safety_filters(self, df):
+        """
+        [NEW] Sigmaルールの誤爆（特にCREDENTIALS）を強制的に浄化するフィルタ v2 (Legacy Hammer Edition)
+        """
+        print("    -> [Pandora] Applying Safety Filters (Legacy Hammer Mode)...")
+        F
+        # 1. 誤爆剥奪リスト（ここにマッチしたらタグ剥奪＆スコア0）
+        noise_keywords = [
+            # WinSxSの暴走対策 (最優先)
+            r"Windows\\WinSxS\\Temp",
+            r"\\InFlight\\",
+            
+            # Python標準ライブラリの誤検知対策 (Lib/testフォルダなど)
+            r"Python35-32\\Lib\\",
+            r"Python27\\Lib\\",
+            r"Programs\\Python\\.*\\Lib\\test",
+            r"test_ssl\.py",
+            r"ssl_key\.pem",
+            
+            # Adobe Readerの一時ファイル対策
+            r"Adobe\\Acrobat Reader DC\\.*\.tmp$",
+            r"Adobe\\Acrobat Reader DC\\.*\.rbs$",
+            
+            # ブラウザ・Officeのキャッシュ・設定ファイル
+            r"AppData\\Local\\Temp", 
+            r"AppData\\Local\\Google\\Chrome\\User Data",
+            r"AppData\\Local\\Microsoft\\Windows\\INetCache",
+            r"AppData\\Local\\Microsoft\\Windows\\History",
+            r"AppData\\Roaming\\Microsoft\\Windows\\Recent\\CustomDestinations", # ジャンプリスト自体は脅威ではない
+            r"AppData\\Roaming\\Microsoft\\Windows\\Recent\\AutomaticDestinations",
+            r"Preferences", 
+            r"Local State",
+            r"\.log$", 
+            r"\.dat$",
+            r"\.etl$"  # Event Trace Log (OTeleDataなど)
+        ]
+        
+        # Polarsの式を構築
+        clean_expr = pl.col("Threat_Tag")
+        threat_score_expr = pl.col("Threat_Score")
+        
+        for kw in noise_keywords:
+            # パスまたはファイル名がキーワードにマッチするか
+            is_noise = (pl.col("Ghost_FileName").str.contains(kw)) | (pl.col("ParentPath").str.contains(kw))
+            
+            # マッチしたらタグを "NOISE" に変更
+            clean_expr = pl.when(is_noise).then(pl.lit("NOISE_ARTIFACT")).otherwise(clean_expr)
+            # マッチしたらスコアを 0 に変更 (これでフィルタで落ちる)
+            threat_score_expr = pl.when(is_noise).then(0).otherwise(threat_score_expr)
+
+        df = df.with_columns([
+            clean_expr.alias("Threat_Tag"),
+            threat_score_expr.alias("Threat_Score")
+        ])
+        
+        return df
+
     def run_gap_analysis(self, start_date, end_date):
         print("[*] Phase 1: Running Physical Gap Analysis...")
         try:
@@ -159,6 +218,9 @@ class PandoraEngine:
         combined_ghosts = combined_ghosts.with_columns(pl.col("Ghost_FileName").alias("FileName"))
         scored_ghosts = self.loader.apply_threat_scoring(combined_ghosts)
         
+        # [NEW] Safety Valve against FP (CREDENTIALS in Temp/Cache)
+        scored_ghosts = self._apply_safety_filters(scored_ghosts)
+        
         print("    -> Applying Themis Noise Filters (Golden Rule: Threat > Noise)...")
         available_cols = scored_ghosts.collect_schema().names()
         noise_expr = self.loader.get_noise_filter_expr(available_cols)
@@ -173,8 +235,11 @@ class PandoraEngine:
         # OR
         # 2. 脅威スコアが高く(80以上)、かつ安全な拡張子ではない (特例許可)
         
+ # [FIX] NOISE_ARTIFACT タグが付いたものは強制排除する条件を追加
         final_ghosts = scored_ghosts.filter(
-            (~noise_expr) | 
+            (
+                (~noise_expr) & (pl.col("Threat_Tag") != "NOISE_ARTIFACT") 
+            ) | 
             ((pl.col("Threat_Score") >= 80) & (~safe_ext_expr))
         )
         

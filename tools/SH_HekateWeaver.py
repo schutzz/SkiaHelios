@@ -82,7 +82,7 @@ def main(argv=None):
         # ----------------------------------------------------
         print("\n[*] Phase 1: Clotho is spinning the threads...")
         clotho = ClothoReader(args)
-        dfs, siren_data, hostname = clotho.spin_thread()
+        dfs, siren_data, hostname, os_info, primary_user = clotho.spin_thread()
 
         # ----------------------------------------------------
         # 2. Atropos: Measure & Cut (Analyze Logic)
@@ -97,7 +97,7 @@ def main(argv=None):
         # ----------------------------------------------------
         print("\n[*] Phase 3: Lachesis is writing the fate...")
         lachesis = LachesisWriter(lang=args.lang, hostname=hostname, case_name=args.case)
-        lachesis.weave_report(analysis_result, args.out, dfs)
+        lachesis.weave_report(analysis_result, args.out, dfs, hostname, os_info, primary_user)
 
         print(f"\n[+] Operation Complete. The fate has been woven into: {args.out}")
 
