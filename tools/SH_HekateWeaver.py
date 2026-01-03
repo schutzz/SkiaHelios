@@ -3,6 +3,61 @@ import sys
 import traceback
 import os
 from pathlib import Path
+import polars as pl
+
+# [ADD] Helper function to extract OS info
+def get_os_info(kape_csv_dir):
+    """
+    SOFTWAREハイブのCSVからOS情報を物理的に抽出する
+    Target: HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion
+    """
+    if not kape_csv_dir or not Path(kape_csv_dir).exists():
+        return "Unknown OS"
+    
+    # [FIX] 検索パターンを大幅に増強
+    patterns = ["*Registry*.csv", "*SOFTWARE*.csv", "*Software*.csv", "*SystemInfo*.csv", "*BasicSystemInfo*.csv"]
+    reg_files = []
+    for p in patterns:
+        reg_files.extend(list(Path(kape_csv_dir).rglob(p)))
+    
+    product_name = "Unknown OS"
+    build_number = ""
+
+    for csv in reg_files:
+        try:
+            # 必要なカラムだけ読んで高速化
+            df = pl.read_csv(csv, ignore_errors=True, infer_schema_length=0)
+            cols = df.columns
+            
+            # カラム名正規化
+            key_col = next((c for c in cols if "Key" in c and "Path" in c), None)
+            val_name_col = next((c for c in cols if "Value" in c and "Name" in c), None)
+            val_data_col = next((c for c in cols if "Value" in c and "Data" in c), None)
+
+            if not (key_col and val_name_col and val_data_col): continue
+
+            # "Windows NT\CurrentVersion" を含む行をフィルタリング
+            target_df = df.filter(
+                (pl.col(key_col).str.contains(r"Windows NT\\CurrentVersion")) &
+                (pl.col(val_name_col).is_in(["ProductName", "CurrentBuild"]))
+            )
+
+            for row in target_df.iter_rows(named=True):
+                v_name = row.get(val_name_col)
+                v_data = row.get(val_data_col)
+                
+                if v_name == "ProductName":
+                    product_name = v_data
+                elif v_name == "CurrentBuild":
+                    build_number = f" (Build {v_data})"
+            
+            if product_name != "Unknown OS":
+                return f"{product_name}{build_number}"
+
+        except Exception:
+            continue
+
+    return "Unknown OS"
 
 # ============================================================
 #  [PATH FIX] Force add 'tools' directory to sys.path
@@ -58,6 +113,9 @@ def main(argv=None):
     parser.add_argument("-i", "--input", required=True, help="Primary Timeline CSV (Hercules)")
     parser.add_argument("-o", "--out", default="SANS_Report.md", help="Output Report Path")
     
+    # [NEW] Add this line!
+    parser.add_argument("--kape", help="KAPE Artifacts Directory (Source for Registry)")
+    
     # Artifact Inputs
     parser.add_argument("--aion", help="AION Persistence CSV")
     parser.add_argument("--persistence", help="Legacy alias for --aion")
@@ -83,6 +141,14 @@ def main(argv=None):
         print("\n[*] Phase 1: Clotho is spinning the threads...")
         clotho = ClothoReader(args)
         dfs, siren_data, hostname, os_info, primary_user = clotho.spin_thread()
+
+        # [NEW] OS Info Fallback Logic
+        if os_info == "Unknown OS" and args.kape:
+            print(f"    -> [Hekate] OS Info missing. Attempting to parse Registry from: {args.kape}")
+            recovered_os = get_os_info(args.kape)
+            if recovered_os != "Unknown OS":
+                os_info = recovered_os
+                print(f"    -> [Hekate] OS Identified: {os_info}")
 
         # ----------------------------------------------------
         # 2. Atropos: Measure & Cut (Analyze Logic)

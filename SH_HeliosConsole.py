@@ -8,28 +8,27 @@ import json
 from datetime import datetime
 
 # ============================================================
-#  SH_HeliosConsole v4.7 [From Sun to Gold]
+#  SH_HeliosConsole v4.9 [Logical Flow Fix]
 #  Mission: Coordinate all modules & Measure Performance.
 #  Updates:
-#    - Integrated SH_MidasTouch (Docx Generation)
-#    - Added Midas module registration
-#    - Updated Interactive Mode for Docx option
+#    - Reordered Pipeline: Artifacts (Chronos/Pandora) -> Events (Hercules)
+#    - Fixed Dependency Deadlock
 # ============================================================
 
 def print_logo():
     os.system('cls' if os.name == 'nt' else 'clear')
     print(r"""
-          , - ~ ~ ~ - ,
-      , '   _ _ _ _   ' ,
-     ,     |_______|      ,
-    ,       _______        ,  < SKIA HELIOS >
-   ,       |_______|        ,  v4.7 - Sun to Gold
-   ,       _______          ,
-    ,      |_______|       ,
-     ,                    ,
-      , _ _ _ _ _ _ _ _ ,
-          ' - _ _ - '
-    "Illuminating Identity, Authority, Intent, and Velocity."
+           , - ~ ~ ~ - ,
+       , '   _ _ _ _   ' ,
+      ,     |_______|      ,
+     ,       _______        ,  < SKIA HELIOS >
+    ,       |_______|        ,  v4.9 - Logical Flow
+    ,       _______          ,
+     ,      |_______|       ,
+      ,                    ,
+       , _ _ _ _ _ _ _ _ ,
+           ' - _ _ - '
+     "Illuminating Identity, Authority, Intent, and Velocity."
     """)
 
 class HeliosCommander:
@@ -44,7 +43,6 @@ class HeliosCommander:
 
     def _import_dynamic(self, script_name):
         search_paths = [f"tools.{script_name}", script_name]
-        
         for path in search_paths:
             try:
                 mod = importlib.import_module(path)
@@ -66,7 +64,7 @@ class HeliosCommander:
             "hekate": "SH_HekateWeaver",
             "sphinx": "SH_SphinxDeciphering",
             "siren": "SH_Sirenhunt",
-            "midas": "SH_MidasTouch"  # [NEW] Midas追加！
+            "midas": "SH_MidasTouch"
         }
         for key, script in tool_map.items():
             self.modules[key] = self._import_dynamic(script)
@@ -78,10 +76,8 @@ class HeliosCommander:
             return False
         
         print(f"\n>>> [EXECUTING] {key.upper()} Stage...")
-        
         start_t = time.perf_counter()
         success = False
-        
         try:
             import inspect
             sig = inspect.signature(func)
@@ -89,7 +85,6 @@ class HeliosCommander:
                 func(args)
             else:
                 func()
-            
             success = True
         except Exception as e:
             print(f"[!] {key.upper()} Stage Failed: {e}")
@@ -101,7 +96,6 @@ class HeliosCommander:
             self.stats["Modules"][key] = round(elapsed, 4)
             status_str = "DONE" if success else "FAILED"
             print(f">>> [{status_str}] {key.upper()} finished in {elapsed:.4f}s")
-        
         return success
 
     def full_auto_scan(self, csv_dir, raw_dir, out_dir, case_name, start_date=None, end_date=None, mount_point=None, legacy_mode=False, docx_mode=False, ref_doc=None):
@@ -126,32 +120,28 @@ class HeliosCommander:
         if start_date: time_args.extend(["--start", start_date])
         if end_date:   time_args.extend(["--end", end_date])
 
-        # 1. ClioGet
+        # ==================================================
+        # Phase 1: Artifact & Physical Evidence Extraction
+        # ==================================================
+
+        # 1. ClioGet (Browser)
         browser_out = Path(csv_dir) / "Browser_Artifacts"
         browser_out.mkdir(exist_ok=True)
         self.run_module("clio", ["-d", raw_dir, "-o", str(browser_out)])
 
-        # 2. ChaosGrasp
+        # 2. ChaosGrasp (Timeline)
         chaos_out = case_dir / "Master_Timeline.csv"
         self.run_module("chaos", ["-d", csv_dir, "-o", str(chaos_out)])
 
-        # 3. Pandora
+        # 3. Pandora (Ghost Hunting - MFT/USN)
         pandora_out = case_dir / "Ghost_Report.csv"
         p_start = start_date if start_date else "2000-01-01"
         p_end = end_date if end_date else "2099-12-31"
         self.run_module("pandora", ["-d", csv_dir, "--start", p_start, "--end", p_end, "--out", str(pandora_out)])
 
-        # 4. Hercules
-        judged_out = case_dir / "Hercules_Judged_Timeline.csv"
-        hercules_success = self.run_module("hercules", [
-            "--timeline", str(chaos_out), 
-            "--kape", csv_dir, 
-            "--out", str(judged_out), 
-            "--ghosts", str(pandora_out)
-        ])
-        timeline_target = str(judged_out) if (hercules_success and judged_out.exists()) else str(chaos_out)
-
-        # 5. Deep Forensics
+        # 4. Chronos (Time Anomalies - MFT) - [MOVED UP]
+        # Chronos needs MFT but works independently of Event Logs. 
+        # Running it here ensures 'Time_Anomalies.csv' exists for Hercules.
         mft_raw = next(Path(csv_dir).rglob("*$MFT_Output.csv"), None)
         chronos_out = case_dir / "Time_Anomalies.csv"
         if mft_raw:
@@ -159,22 +149,51 @@ class HeliosCommander:
             if legacy_mode:
                 chronos_args.append("--legacy")
             self.run_module("chronos", chronos_args)
-        
+
+        # 5. AION (Persistence) - [MOVED UP]
+        # AION scans Registry/MFT. Can run early.
         aion_out = case_dir / "Persistence_Report.csv"
-        aion_args = ["--dir", csv_dir, "--mft", str(mft_raw if mft_raw else timeline_target), "-o", str(aion_out)]
+        # Ideally AION uses the judged timeline, but using Chaos (raw) is safer to avoid circular logic for now.
+        # Or we can re-run/update later. Using Chaos is fine for basic persistence checks.
+        aion_args = ["--dir", csv_dir, "--mft", str(mft_raw if mft_raw else chaos_out), "-o", str(aion_out)]
         if mount_point: aion_args.extend(["--mount", mount_point])
         self.run_module("aion", aion_args)
 
+        # ==================================================
+        # Phase 2: Event Analysis & Cross-Correlation
+        # ==================================================
+
+        # 6. Hercules (Event Logs & Correlation)
+        # Now that Pandora and Chronos have run, Hercules can use their outputs.
+        judged_out = case_dir / "Hercules_Judged_Timeline.csv"
+        hercules_success = self.run_module("hercules", [
+            "--timeline", str(chaos_out), 
+            "--kape", csv_dir, 
+            "--out", str(judged_out), 
+            "--ghosts", str(pandora_out) 
+            # Note: Hercules v3.20 auto-detects 'Time_Anomalies.csv' in the same dir 
+            # if we adhere to standard output structure, but passing it explicitly would be cleaner in v5.
+        ])
+        
+        # Determine the definitive timeline for Hekate
+        timeline_target = str(judged_out) if (hercules_success and judged_out.exists()) else str(chaos_out)
+
+        # 7. Plutos (Network/Lateral)
         plutos_out = case_dir / "Exfil_Report.csv"
         plutos_net_out = case_dir / "Exfil_Report_Network.csv"
         self.run_module("plutos", ["--dir", csv_dir, "--pandora", str(pandora_out), "-o", str(plutos_out), "--net-out", str(plutos_net_out)] + time_args)
 
+        # 8. Sphinx (Encoded Commands)
         sphinx_out = case_dir / "Sphinx_Decoded.csv"
         evtx_raw = next(Path(csv_dir).rglob("*EvtxECmd_Output.csv"), None)
         if evtx_raw:
             self.run_module("sphinx", ["-f", str(evtx_raw), "-o", str(sphinx_out)] + time_args)
 
-        # 5.5. Sirenhunt
+        # ==================================================
+        # Phase 3: Synthesis & Reporting
+        # ==================================================
+
+        # 9. Sirenhunt (Execution Evidence)
         prefetch_raw = next(Path(csv_dir).rglob("*PECmd_Output.csv"), None)
         amcache_raw = next(Path(csv_dir).rglob("*Amcache_UnassociatedFileEntries.csv"), None)
         siren_json = case_dir / "Sirenhunt_Results.json"
@@ -183,13 +202,14 @@ class HeliosCommander:
         if amcache_raw: siren_cmd.extend(["--amcache", str(amcache_raw)])
         self.run_module("siren", siren_cmd)
 
-        # 6. Hekate & 7. Midas (The Golden Finish)
+        # 10. Hekate & Midas (Reporting)
         for lang in ["jp", "en"]:
             report_path = case_dir / f"Grimoire_{case_name}_{lang}.md"
             self.run_module("hekate", [
                 "-i", timeline_target, 
                 "-o", str(report_path), 
                 "--lang", lang,
+                "--kape", csv_dir,
                 "--aion", str(aion_out), 
                 "--plutos", str(plutos_out),
                 "--plutos-net", str(plutos_net_out),
@@ -200,7 +220,7 @@ class HeliosCommander:
                 "--case", case_name
             ])
 
-            # [NEW] MidasTouch Invocation
+            # 11. MidasTouch (Docx)
             if docx_mode and report_path.exists():
                 midas_args = [str(report_path)]
                 if ref_doc:
@@ -226,7 +246,7 @@ class HeliosCommander:
 
 def main():
     if len(sys.argv) > 1:
-        parser = argparse.ArgumentParser(description="SH_HeliosConsole v4.7 [Sun to Gold]")
+        parser = argparse.ArgumentParser(description="SH_HeliosConsole v4.9 [Logical Flow]")
         parser.add_argument("--dir", required=True, help="Parsed CSV Directory")
         parser.add_argument("--raw", help="Raw Artifact Directory")
         parser.add_argument("--mount", help="Mount Point")
@@ -235,7 +255,6 @@ def main():
         parser.add_argument("--case", default="Investigation", help="Case Name")
         parser.add_argument("-o", "--out", default="Helios_Output", help="Output Directory")
         parser.add_argument("--legacy", action="store_true", help="Enable Legacy Mode")
-        # [NEW] Arguments for Midas
         parser.add_argument("--docx", action="store_true", help="Generate Docx Report (MidasTouch)")
         parser.add_argument("--ref-doc", help="Path to Reference Docx")
         
@@ -260,7 +279,6 @@ def main():
             legacy_input = input("4. Enable Legacy Mode (Older OS / High Noise)? [y/N]: ").strip().lower()
             legacy_mode = legacy_input in ['y', 'yes']
 
-            # [NEW] Docx Prompt
             docx_input = input("5. Generate Docx Report (Requires Pandoc & Mermaid)? [y/N]: ").strip().lower()
             docx_mode = docx_input in ['y', 'yes']
             

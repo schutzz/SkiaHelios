@@ -7,9 +7,9 @@ import json
 import re
 
 # ============================================================
-#  SH_LachesisWriter v3.2 [Omni-Aware]
+#  SH_LachesisWriter v3.12 [Final Report Polish]
 #  Mission: Weave the Grimoire with Summarized Findings.
-#  Update: Integrates Chronos, AION, and Siren into Visual IOCs.
+#  Update: Refined Statistics & Score Filters for Final Output.
 # ============================================================
 
 TEXT_RES = {
@@ -48,12 +48,11 @@ class LachesisWriter:
         self.hostname = hostname
         self.case_name = case_name
         self.visual_iocs = []
+        self.infra_ips_found = set()
 
     def weave_report(self, analysis_result, output_path, dfs_for_ioc, hostname, os_info, primary_user):
-        print(f"[*] Lachesis v3.3 is weaving the refined report into {output_path}...")
-        
-        self.hostname = hostname # Clothoから受け取った確実なホスト名
-        
+        print(f"[*] Lachesis v3.12 is weaving the refined report into {output_path}...")
+        self.hostname = hostname 
         valid_events = analysis_result["events"]
         phases = analysis_result["phases"]
         origin_stories = analysis_result["origin_stories"]
@@ -61,8 +60,9 @@ class LachesisWriter:
         lateral_summary = analysis_result["lateral_summary"]
         flow_steps = analysis_result["flow_steps"]
 
-        # Extract IOCs
         self.visual_iocs = [] 
+        self.infra_ips_found = set()
+
         self._extract_visual_iocs_from_pandora(dfs_for_ioc)
         self._extract_visual_iocs_from_chronos(dfs_for_ioc)
         self._extract_visual_iocs_from_aion(dfs_for_ioc)
@@ -73,10 +73,8 @@ class LachesisWriter:
 
         with open(out_file, "w", encoding="utf-8") as f:
             self._embed_chimera_tags(f, primary_user)
-            self._write_header(f, os_info, primary_user) # OS/Userを渡す
+            self._write_header(f, os_info, primary_user)
             self._write_executive_summary_visual(f, valid_events, verdict_flags, lateral_summary, flow_steps, primary_user)
-            # (以下略: 既存ロジック)
-            
             if origin_stories: self._write_origin_analysis(f, origin_stories)
             self._write_timeline_visual(f, phases)
             self._write_technical_findings(f, phases)
@@ -90,11 +88,20 @@ class LachesisWriter:
     def _is_noise(self, name, path=""):
         name = str(name).lower()
         path = str(path).lower()
-        # [NEW] Enhanced Noise List
-        noise_keywords = ["desktop.ini", "thumbs.db", "safe browsing", "inputpersonalization", "traineddatastore"]
-        noise_paths = ["winsxs", "servicing", "msocache", "program files", "appdata\\local\\programs\\python", "lib\\test", "windows\\assembly"]
+        noise_keywords = [
+            "desktop.ini", "thumbs.db", "safe browsing", "inputpersonalization", "traineddatastore",
+            "customdestinations", "automaticdestinations", "inetcookies", "browsermetrics", 
+            "mptelemetry", "crashpad", "watson", "wer", "favorites", "edge", "bing",
+            # Hercules Noise 
+            "tmpidcrl.dll", "bcwipe", "bcwipesvc", "vbox", "java auto updater"
+        ]
+        noise_paths = [
+            "winsxs", "servicing", "msocache", "program files", "appdata\\local\\programs\\python", 
+            "lib\\test", "windows\\assembly", "windows\\fonts", "windows\\installer",
+            "python27\\tcl", "python27\\lib", "program files (x86)\\google"
+        ]
         
-        suspicious_keywords = ["hash_suite", "nmap", "mimikatz", "tor browser", "psexec", "pwdump"]
+        suspicious_keywords = ["hash_suite", "nmap", "mimikatz", "tor browser", "psexec", "pwdump", "wireshark"]
         if any(s in path or s in name for s in suspicious_keywords): return False
 
         if any(k in name for k in noise_keywords): return True
@@ -108,37 +115,33 @@ class LachesisWriter:
                 try:
                     threats = df.filter(pl.col("Threat_Score").cast(pl.Int64, strict=False) >= 80).unique(subset=["Ghost_FileName"])
                     for row in threats.iter_rows(named=True):
-                        if self._is_noise(row.get("Ghost_FileName"), row.get("ParentPath")): continue
+                        fname = row.get("Ghost_FileName", "")
+                        if self._is_noise(fname, row.get("ParentPath")): continue
+                        if "lnk" in fname.lower() or "url" in fname.lower(): continue
                         ioc_type = row.get("Threat_Tag", "SUSPICIOUS")
                         if not ioc_type: ioc_type = row.get("Risk_Tag", "ANOMALY")
-                        clean_name = row.get("Ghost_FileName", "").split("] ")[-1]
+                        clean_name = fname.split("] ")[-1]
                         self._add_unique_visual_ioc({
-                            "Type": ioc_type, "Value": clean_name,
-                            "Path": row.get("ParentPath", ""), "Note": "File Artifact (Pandora)"
+                            "Type": ioc_type, "Value": clean_name, "Path": row.get("ParentPath", ""), "Note": "File Artifact (Pandora)"
                         })
                 except: pass
 
-    # [NEW] Chronos (Timestomp) Integration
     def _extract_visual_iocs_from_chronos(self, dfs):
         if dfs.get('Chronos') is not None:
             df = dfs['Chronos']
             if "Chronos_Score" in df.columns:
                 try:
-                    # Score 80以上 (FALSIFIED_FUTURE, TIMESTOMP_BACKDATE, CRITICAL) を抽出
                     threats = df.filter(pl.col("Chronos_Score").cast(pl.Int64, strict=False) >= 80)
                     for row in threats.iter_rows(named=True):
                         name = row.get("FileName")
                         path = row.get("ParentPath")
                         if self._is_noise(name, path): continue
-                        
                         anomaly = row.get("Anomaly_Time", "TIME_ANOMALY")
                         self._add_unique_visual_ioc({
-                            "Type": anomaly, "Value": name,
-                            "Path": path, "Note": f"Timestomp Detected (Chronos)"
+                            "Type": anomaly, "Value": name, "Path": path, "Note": f"Timestomp Detected (Chronos)"
                         })
                 except: pass
 
-    # [NEW] AION (Persistence) Integration
     def _extract_visual_iocs_from_aion(self, dfs):
         if dfs.get('AION') is not None:
             df = dfs['AION']
@@ -149,35 +152,56 @@ class LachesisWriter:
                         name = row.get("Target_FileName")
                         path = row.get("Full_Path")
                         if self._is_noise(name, path): continue
-                        
                         self._add_unique_visual_ioc({
-                            "Type": "PERSISTENCE", "Value": name,
-                            "Path": path, "Note": f"Persistence Mechanism (AION)"
+                            "Type": "PERSISTENCE", "Value": name, "Path": path, "Note": f"Persistence Mechanism (AION)"
                         })
                 except: pass
 
     def _extract_visual_iocs_from_events(self, events):
         re_ip = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b')
+        infra_ips = ["10.0.2.15", "10.0.2.2", "127.0.0.1", "0.0.0.0", "::1"]
+        
+        ignore_execs = [
+            "tiworker.exe", "trustedinstaller.exe", "sppsvc.exe", "searchindexer.exe",
+            "compattelrunner.exe", "explorer.exe", "conhost.exe", "svchost.exe",
+            "sppwinob.dll", "wermgr.exe", "backgroundtaskhost.exe", "tmpidcrl.dll",
+            "googleupdate.exe", "wmpnetworksvc",
+            "vcredist_x64.exe", "usbpcapsetup", "chrome.exe", "firefox.exe"
+        ]
+
         for ev in events:
             content = ev['Summary'] + " " + str(ev.get('Detail', ''))
             ips = re_ip.findall(content)
             for ip in ips:
-                if not ip.startswith("127.") and ip != "0.0.0.0" and ip != "::1":
-                    self._add_unique_visual_ioc({
-                        "Type": "IP_TRACE", "Value": ip, "Path": "Network", "Note": f"Detected in {ev['Source']}"
-                    })
+                if ip in infra_ips or ip.startswith("127."): 
+                    self.infra_ips_found.add(ip)
+                    continue
+
+                parts = ip.split('.')
+                if len(parts) == 4:
+                    try:
+                        p1 = int(parts[0])
+                        p2 = int(parts[1])
+                        if p1 < 10 and ip != "1.1.1.1" and ip != "8.8.8.8" and ip != "8.8.4.4": continue 
+                        if p1 == 6 and p2 == 3: continue
+                        if p1 == 10 and p2 == 0: continue
+                    except: continue
+                
+                self._add_unique_visual_ioc({
+                    "Type": "IP_TRACE", "Value": ip, "Path": "Network", "Note": f"Detected in {ev['Source']}"
+                })
+            
             if ev['Criticality'] >= 90 and ev['Category'] == 'EXEC':
                 kws = ev.get('Keywords', [])
-                if kws and not self._is_noise(kws[0]):
-                    self._add_unique_visual_ioc({
-                        "Type": "EXECUTION", "Value": kws[0], "Path": "Process", "Note": f"High Crit Execution ({ev['Source']})"
-                    })
+                if kws:
+                    kw = str(kws[0]).lower()
+                    if not self._is_noise(kw) and kw not in ignore_execs:
+                        self._add_unique_visual_ioc({
+                            "Type": "EXECUTION", "Value": kws[0], "Path": "Process", "Note": f"High Crit Execution ({ev['Source']})"
+                        })
 
     def _add_unique_visual_ioc(self, ioc_dict):
-        # ノイズ除外 (念のため)
         if self._is_noise(ioc_dict["Value"], ioc_dict["Path"]): return
-        
-        # 重複チェック
         for existing in self.visual_iocs:
             if existing["Value"] == ioc_dict["Value"] and existing["Type"] == ioc_dict["Type"]:
                 return
@@ -262,22 +286,16 @@ class LachesisWriter:
                 
                 for insight, events in grouped_events.items():
                     f.write(f"- **{insight}**\n")
-                    
                     targets = []
-                    for ev in events:
-                        targets.append(ev['Summary'])
-                    
+                    for ev in events: targets.append(ev['Summary'])
                     unique_targets = sorted(list(set(targets)))
                     count = len(unique_targets)
-                    
                     if count == 1:
                         f.write(f"  - Target: {unique_targets[0]}\n")
                     else:
                         f.write(f"  - **Total Events:** {len(events)} (Unique Targets: {count})\n")
-                        for tgt in unique_targets[:3]:
-                            f.write(f"  - {tgt}\n")
-                        if count > 3:
-                            f.write(f"  - *(... and {count - 3} more targets)*\n")
+                        for tgt in unique_targets[:3]: f.write(f"  - {tgt}\n")
+                        if count > 3: f.write(f"  - *(... and {count - 3} more targets)*\n")
                     f.write("\n")
                 f.write("\n")
 
@@ -290,7 +308,6 @@ class LachesisWriter:
         chart += "    %% Nodes Definition\n"
         chart += "    Attacker((🦁 Attacker)) -->|Exploit/Access| Initial{Initial Access}\n"
         
-        # [NEW] IOCのTypeに基づいてノードを生成
         webshells = [i for i in self.visual_iocs if "WEBSHELL" in i["Type"] or "OBFUSCATION" in i["Type"]]
         persistence = [i for i in self.visual_iocs if "PERSISTENCE" in i["Type"] or "ROOTKIT" in i["Type"]]
         timestomps = [i for i in self.visual_iocs if "TIMESTOMP" in i["Type"] or "FALSIFIED" in i["Type"]]
@@ -304,7 +321,6 @@ class LachesisWriter:
                 chart += f"    Initial -->|Drop/Upload| WS_{abs(hash(ws))}[\"{ws}\"]\n"
                 chart += f"    WS_{abs(hash(ws))} -->|Exec| Cmd_{abs(hash(ws))}((Shell))\n"
         
-        # Persistence & Timestomp & Malware
         parent = f"Cmd_{abs(hash(webshells[0]['Value']))}" if webshells else "Initial"
         
         if persistence:
@@ -338,13 +354,10 @@ class LachesisWriter:
         chart += "```\n"
         return chart
 
-    # 引数名を users -> primary_user_str に変更して分かりやすくしました
     def _write_executive_summary_visual(self, f, events, verdicts, lateral, flows, primary_user_str):
         t = self.txt
         f.write(f"## {t['h1_exec']}\n")
-        
         verdict_str = self._sanitize_verdicts(verdicts)
-        
         latest_crit = "Unknown"
         if events:
              for ev in reversed(events):
@@ -364,21 +377,34 @@ class LachesisWriter:
         f.write("\n### 💎 Key Indicators (確度の高い侵害指標)\n")
         if self.visual_iocs:
             f.write("| Type | Value (File/IP) | Path | Note |\n|---|---|---|---|\n")
-            # 重複排除して表示
             shown = set()
             for ioc in self.visual_iocs:
                 key = ioc['Value']
                 if key in shown: continue
                 shown.add(key)
-                
                 short_path = (ioc['Path'][:40] + '..') if len(ioc['Path']) > 40 else ioc['Path']
                 f.write(f"| **{ioc['Type']}** | `{ioc['Value']}` | `{short_path}` | {ioc['Note']} |\n")
         else: f.write("No critical IOCs automatically detected.\n")
         
         f.write("\n")
-        if lateral: f.write(f"\n**Lateral Movement:**\n{lateral}\n")
+        if lateral: 
+            f.write(f"\n**Lateral Movement (Confirmed):**\n")
+            try:
+                lat_tags = [x.strip() for x in lateral.replace('"', '').split(',')]
+                noise_tags = ["EVASION", "EXECUTION", "PERSISTENCE", "PRIVESC", "DISCOVERY", "CREDENTIALS", "CMD_EXEC"]
+                clean_lat = []
+                for t in lat_tags:
+                    if t not in noise_tags and not t.startswith("CAR."):
+                        clean_lat.append(t)
+                
+                unique_lat = sorted(list(set(clean_lat)))
+                if unique_lat:
+                    f.write(f"{', '.join(unique_lat)}\n")
+                else:
+                    f.write("None (Filtered Noise)\n")
+            except:
+                f.write(f"{lateral}\n")
         
-        # [FIX] ここを修正！Counterではなく文字列をそのまま使う
         user_display = primary_user_str if primary_user_str and primary_user_str != "Unknown_User" else "特定不能 (System権限のみ)"
         f.write(f"\n**侵害されたアカウント:**\n主に **{user_display}** アカウントでの活動が確認されています。\n\n")
         f.write(f"**攻撃フロー（タイムライン概要）:**\n")
@@ -396,16 +422,20 @@ class LachesisWriter:
             if not phase: continue
             date_str = str(phase[0]['Time']).replace('T', ' ').split(' ')[0]
             f.write(f"### 📅 Phase {idx+1} ({date_str})\n")
-            f.write(f"| Time (UTC) | Category | Event Summary | Source |\n|---|---|---|---|\n")
+            f.write(f"| Time (UTC) | Category | Event Summary (Command / File) | Source |\n|---|---|---|---|\n") 
             noise_buffer = []
             for ev in phase:
                 time_display = str(ev['Time']).replace('T', ' ').split('.')[0]
                 cat_name = t['cats'].get(ev['Category'], ev['Category'])
                 summary = ev['Summary']
+                if len(summary) > 120: summary = summary[:115] + "..."
                 source = ev['Source']
                 if self._is_noise(summary) or self._is_noise(str(ev.get('Detail', ''))): continue
                 is_critical = ev['Criticality'] >= 80 or "CRITICAL" in summary or "WEBSHELL" in summary or "ROOTKIT" in summary
-                row_str = f"| {time_display} | {cat_name} | **{summary}** | {source} |"
+                
+                if ev['Category'] == 'EXEC': row_str = f"| {time_display} | {cat_name} | `{summary}` | {source} |"
+                else: row_str = f"| {time_display} | {cat_name} | **{summary}** | {source} |"
+
                 if is_critical:
                     if noise_buffer:
                         self._write_noise_buffer(f, noise_buffer)
@@ -432,8 +462,8 @@ class LachesisWriter:
         f.write("| Item | Details |\n|---|---|\n")
         f.write(f"| **Case Name** | {self.case_name} |\n")
         f.write(f"| **Target Host** | **{self.hostname}** |\n")
-        f.write(f"| **OS Info** | {os_info} |\n") # 追加
-        f.write(f"| **Primary User** | {primary_user} |\n") # 追加
+        f.write(f"| **OS Info** | {os_info} |\n")
+        f.write(f"| **Primary User** | {primary_user} |\n")
         f.write(f"| **Date** | {datetime.now().strftime('%Y-%m-%d')} |\n")
         f.write(f"| **Status** | Analyzed (SkiaHelios Triad) |\n\n---\n\n")
 
@@ -457,25 +487,36 @@ class LachesisWriter:
         f.write("以下は、確度は低いものの異常検知された項目の件数サマリーです。\n")
         f.write("これらの中には、攻撃の予兆やラテラルムーブメントの痕跡が含まれる可能性があります。\n\n")
         f.write("| Category | Detection Type | Count | Reference CSV |\n|---|---|---|---|\n")
+        
+        # [UPDATED] Summarized Stats
         if dfs.get('Chronos') is not None:
             df = dfs['Chronos']
             if "Chronos_Score" in df.columns:
-                stats = df.filter((pl.col("Chronos_Score").cast(pl.Int64, strict=False) < 80) & (pl.col("Chronos_Score").cast(pl.Int64, strict=False) > 0)) \
+                # Cast to Int64 safely before comparison
+                stats = df.filter(pl.col("Chronos_Score").cast(pl.Int64, strict=False) > 0) \
                           .group_by("Anomaly_Time").count().sort("count", descending=True)
                 for row in stats.iter_rows(named=True):
-                    f.write(f"| Timeline Event | {row['Anomaly_Time']} | {row['count']} | `Chronos_Results.csv` |\n")
+                    note = ""
+                    if row['Anomaly_Time'] == "LEGACY_BUILD": note = " (システムビルド由来の可能性高 - 低確度)"
+                    f.write(f"| Timeline Event | {row['Anomaly_Time']}{note} | {row['count']} | `Chronos_Results.csv` |\n")
+
         if dfs.get('Pandora') is not None:
             df = dfs['Pandora']
             if "Threat_Score" in df.columns:
-                stats = df.filter((pl.col("Threat_Score").cast(pl.Int64, strict=False) < 80) & (pl.col("Threat_Score").cast(pl.Int64, strict=False) > 0)) \
+                # Cast to Int64 safely
+                stats = df.filter(pl.col("Threat_Score").cast(pl.Int64, strict=False) >= 0) \
                           .group_by("Risk_Tag").count().sort("count", descending=True)
                 for row in stats.iter_rows(named=True):
                     tag = row['Risk_Tag'] if row['Risk_Tag'] else "Unknown Anomaly"
+                    if tag == "": tag = "Potential Artifacts"
                     f.write(f"| File Artifact | {tag} | {row['count']} | `pandora_result_v*.csv` |\n")
+        
         if dfs.get('Hercules') is not None:
              df = dfs['Hercules']
              if "Threat_Score" in df.columns:
-                 stats = df.filter((pl.col("Threat_Score").cast(pl.Int64, strict=False) < 80) & (pl.col("Threat_Score").cast(pl.Int64, strict=False) > 0)) \
+                 # Cast to Int64 safely
+                 stats = df.filter((pl.col("Threat_Score").cast(pl.Int64, strict=False) < 80) & \
+                                   (pl.col("Threat_Score").cast(pl.Int64, strict=False) > 0)) \
                            .group_by("Threat_Tag").count().sort("count", descending=True)
                  for row in stats.iter_rows(named=True):
                      tag = row['Threat_Tag'] if row['Threat_Tag'] else "Sigma Detection"
@@ -486,6 +527,7 @@ class LachesisWriter:
         t = self.txt
         f.write(f"## {t['h1_app']} (Full IOC List)\n")
         f.write("本調査で確認されたすべての侵害指標（IOC）の一覧です。\n\n")
+        
         file_iocs = self._collect_file_iocs(dfs)
         if file_iocs:
             f.write("### 📂 File IOCs (Malicious/Suspicious Files)\n")
@@ -494,6 +536,7 @@ class LachesisWriter:
                 if self._is_noise(ioc['Name'], ioc['Path']): continue
                 f.write(f"| `{ioc['Name']}` | `{ioc['Path']}` | {ioc['Source']} | {ioc['SHA256']} |\n")
             f.write("\n")
+        
         if dfs.get('PlutosNet') is not None:
             df = dfs['PlutosNet']
             if 'Remote_IP' in df.columns:
@@ -502,8 +545,12 @@ class LachesisWriter:
                     f.write("### 🌐 Network IOCs (Suspicious Connections)\n")
                     f.write("| Remote IP | Port | Process | Timestamp (UTC) |\n|---|---|---|---|\n")
                     for row in hits.unique(subset=["Remote_IP", "Remote_Port"]).iter_rows(named=True):
+                         if row['Remote_IP'] in self.infra_ips_found: continue
                          f.write(f"| `{row['Remote_IP']}` | {row.get('Remote_Port','-')} | `{row.get('Process','-')}` | {row.get('Timestamp','-')} |\n")
                     f.write("\n")
+                    if self.infra_ips_found:
+                         f.write(f"> **Note:** VirtualBox/Localhost traffic ({', '.join(sorted(list(self.infra_ips_found)))}) was detected but summarized. Refer to `Plutos_Network.csv` for details.\n\n")
+
         if dfs.get('Sphinx') is not None:
             df = dfs['Sphinx']
             if "Sphinx_Score" in df.columns:
@@ -536,7 +583,6 @@ class LachesisWriter:
             df = dfs['Chronos']
             if 'Anomaly_Time' in df.columns and 'Chronos_Score' in df.columns:
                 try:
-                    # cast(pl.Int64) を追加
                     hits = df.filter(pl.col("Chronos_Score").cast(pl.Int64, strict=False) > 0)
                     for row in hits.iter_rows(named=True):
                         path = row.get('ParentPath', '') + "\\" + row.get('FileName', '')
@@ -554,7 +600,6 @@ class LachesisWriter:
         summary = ev['Summary'].lower()
         src = ev['Source'].lower()
         
-        # [MODIFIED] Browser/C2 Context Safety Valve
         if re.search(r'\[\d+\]\.(htm|html|js|php|jsp)', summary):
             is_cache_path = any(x in summary for x in ['cache', 'temp', 'history', 'appdata'])
             is_high_confidence = ev.get('Criticality', 0) >= 90
