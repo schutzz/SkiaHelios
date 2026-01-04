@@ -6,11 +6,11 @@ from pathlib import Path
 from datetime import datetime
 from tools.SH_ThemisLoader import ThemisLoader
 
-# ==========================================
-#  SH_PandorasLink v17.31 [Normalized Trinity]
+# ============================================================
+#  SH_PandorasLink v18.14 [Themis Integrated]
 #  Mission: Surgical removal & Cross-Correlation.
-#  Update: Reverted to Normalization + Trash Override.
-# ==========================================
+#  Update: Plan I - Killed Chrome/Skype Junk (.ldb, -journal).
+# ============================================================
 
 def print_logo():
     logo = r"""
@@ -23,7 +23,7 @@ def print_logo():
     * \_/    \__\______/__/    \_/   *
       .     * /______\     .     .
     
-      [ SH_PandorasLink v17.31 ]
+      [ SH_PandorasLink v18.14 ]
      "The Trinity: Normalized & Focused."
     """
     print(logo)
@@ -39,7 +39,6 @@ class PandoraEngine:
         self.lf_usn = self._load_usn(usn).lazy()
         self.lf_vss = self._load_mft(mft_vss).lazy() if mft_vss else None
 
-    # ... (Load methods unchanged) ...
     def _get_col_expr(self, cols, targets, alias=None):
         for t in targets:
             if t in cols:
@@ -166,13 +165,11 @@ class PandoraEngine:
             .alias("Threat_Tag")
         )
         
-        # [NEW] Zone of Death (Normalized)
+        # Zone of Death
         is_web_trash = pl.col("Ghost_Key").str.contains(r"/inetcache/|/inetcookies/|/history/|/temp/")
         is_hash_suite_noise = (pl.col("Ghost_Key").str.contains("hash_suite_free") & (~pl.col("Ghost_Key").str.ends_with(".exe")))
         
         has_correlation = (pl.col("Chronos_Boost") > 0) | (pl.col("Herc_Boost") > 0)
-        
-        # Kill if (WebTrash OR HashSuiteNoise) AND No Correlation
         should_die = (is_web_trash | is_hash_suite_noise) & (~has_correlation)
         
         df_ghosts = df_ghosts.with_columns([
@@ -183,9 +180,72 @@ class PandoraEngine:
         return df_ghosts.drop(["Ghost_Key", "Chronos_Boost", "Herc_Boost"])
 
     def _apply_logic_layer(self, df):
-        print("    -> [Pandora] Applying Masquerade & Noise Logic (Normalized)...")
+        print("    -> [Pandora] Applying Masquerade & Noise Logic (Inverted Tool Filter)...")
         
-        # 1. Normalize Path
+        df = df.with_columns([
+            pl.col("ParentPath").fill_null("").str.to_lowercase().alias("_pp"),
+            pl.col("Ghost_FileName").fill_null("").str.to_lowercase().alias("_fn")
+        ])
+        
+        # Normalize Path
+        df = df.with_columns(
+            pl.concat_str([pl.col("_pp"), pl.lit("/"), pl.col("_fn")])
+            .str.replace_all(r"\\", "/")
+            .alias("_full_path")
+        )
+
+        # ==========================================
+        # 🔨 SLEDGEHAMMER (Files to Kill)
+        # ==========================================
+        file_kill_list = [
+            "safe browsing", "bistats.lock", ".qml", 
+            "edb.log", "edb00", "thumbs.db", "iconcache", 
+            "gdipfontcache", "ntuser.dat", "usrclass.dat",
+            # [NEW] Plan I Targets
+            ".ldb", "-journal", ".sys", ".lst", ".cab", ".pyd", 
+            "0000", ".lock"
+        ]
+        
+        path_kill_list = [
+            "dropbox", "onedrive", "assembly", "servicing",
+            "microsoft.net", "windowsapps", "winsxs",
+            "windows/filemanager/assets"
+        ]
+
+        # ==========================================
+        # ⚡ DUAL-USE TRAP (Inverted Logic)
+        # ==========================================
+        dual_use_folders = [
+            "nmap", "wireshark", "python", "tcl", "ruby", "perl", "java", "jdk", "jre"
+        ]
+        
+        protected_binaries = [
+            "nmap.exe", "zenmap.exe", "ncat.exe", 
+            "wireshark.exe", "tshark.exe", "capinfos.exe", "dumpcap.exe",
+            "python.exe", "pythonw.exe", "pip.exe",
+            "java.exe", "javaw.exe", "javac.exe",
+            "ruby.exe", "perl.exe"
+        ]
+
+        is_noise = pl.lit(False)
+        for kw in file_kill_list:
+            is_noise = is_noise | pl.col("_fn").str.contains(kw, literal=True)
+            
+        for kw in path_kill_list:
+            # 救済措置: Pathがマッチしても、拡張子が .exe, .crx, .lnk なら殺さない
+            is_match = pl.col("_full_path").str.contains(kw, literal=True)
+            is_protected = pl.col("_fn").str.ends_with(".exe") | pl.col("_fn").str.ends_with(".crx") | pl.col("_fn").str.ends_with(".lnk") | pl.col("_fn").str.ends_with(".bat")
+            is_noise = is_noise | (is_match & ~is_protected)
+
+        # Apply Inverted Logic
+        is_tool_folder = pl.lit(False)
+        for tool in dual_use_folders:
+            is_tool_folder = is_tool_folder | pl.col("_full_path").str.contains(tool, literal=True)
+        
+        is_protected_binary = pl.col("_fn").is_in(protected_binaries)
+        is_noise = is_noise | (is_tool_folder & (~is_protected_binary))
+
+        # 既存のロジック用 Normalized Path
         df = df.with_columns(
             pl.concat_str([pl.col("ParentPath"), pl.lit("/"), pl.col("Ghost_FileName")])
             .str.to_lowercase()
@@ -194,43 +254,16 @@ class PandoraEngine:
             .alias("Normalized_Path")
         )
 
-        noise_keywords = [
-            r"lang-.*\.dll$", r"/[a-z]{2}-[a-z]{2}/",
-            r"\.pyc$", r"__pycache__", r"jsbytecodecache",
-            r"\.msi$", r"windows/installer", r"\.cab$", r"kb\d{7}",
-            r"api-ms-win-", r"rootkitrevealer", 
-            r"tabviewstyle\.qml", r"microsoft/windows/systemdata",
-            r"programdata/microsoft/office/uicaptions", r"windows/shellnew",
-            r"fm20.*\.dll", r"ven2232\.olb", r"windows/py(w)?\.exe$", r"windows/bcuninstall\.exe",
-            r"mofygdvh\.mcp", r"shatbbms\.dif", r"vkorppvhkxuvqcvj",
-            r"tmpidcrl\.dll", r"mcafee\.truekey", r"userinfo\.dll", 
-            r"qquicklayoutsplugin\.dll", r"wixstdba\.dll", r"acrord32\.dll",
-            r"setup\.exe", r"install\.exe",
-            r"presentationframework", r"system\.runtime", r"microsoft\.visualbasic",
-            r"windows/system32/config", r"windows/serviceprofiles",
-            r"skype/.*/(dc\.lock|bistats\.db|main\.db-journal|media_messaging|statistics)", 
-            r"crashpad/reports", r"/wer/reportqueue",
-            r"googleupdate", r"goopdate", r"adobexmp", r"adobecollabsync",
-            r"program files.*/nmap", r"program files.*/java",
-            r"python.*/lib/test", r"\.tmp$", r"recycle\.bin",
-            r"jetico/.*/(uninstall\.log|langfile2\.dll)"
-        ]
-        noise_pattern = "|".join(noise_keywords)
-        
         is_adobe_masquerade = (pl.col("Normalized_Path").str.contains("adobe") & pl.col("Normalized_Path").str.ends_with(".crx"))
         is_lnk_phish = (pl.col("Normalized_Path").str.ends_with(".lnk") & (pl.col("Normalized_Path").str.contains(r"\.jpg\.lnk|\.pdf\.lnk|\.doc\.lnk") | pl.col("Normalized_Path").str.contains(r"cute|cat|kitten|invoice|urgent|receipt|payment|hqdefault|promo|crop")))
         is_skype_xml = (pl.col("Ghost_FileName").str.to_lowercase() == "shared.xml")
-        
-        is_hash_cracker = (
-            pl.col("Normalized_Path").str.contains("hash_suite_free") & 
-            pl.col("Normalized_Path").str.ends_with(".exe")
-        )
-        
+        is_hash_cracker = (pl.col("Normalized_Path").str.contains("hash_suite_free") & pl.col("Normalized_Path").str.ends_with(".exe"))
         is_wiper = ((pl.col("Normalized_Path").str.contains("bcwipe") | pl.col("Normalized_Path").str.contains("jetico")) & pl.col("Normalized_Path").str.ends_with(".exe"))
 
-        is_noise = pl.col("Normalized_Path").str.contains(noise_pattern)
+        # [NEW] YAML Noise Rules Integration
+        dynamic_noise_expr = self.loader.get_noise_filter_expr(df.collect_schema().names())
         
-        should_kill = is_noise & (~is_adobe_masquerade) & (~is_lnk_phish) & (~is_skype_xml) & (~is_hash_cracker) & (~is_wiper)
+        should_kill = (is_noise | dynamic_noise_expr) & (~is_adobe_masquerade) & (~is_lnk_phish) & (~is_skype_xml) & (~is_hash_cracker) & (~is_wiper)
         
         tag_expr = pl.col("Threat_Tag")
         score_expr = pl.col("Threat_Score")
@@ -256,7 +289,7 @@ class PandoraEngine:
         return df.with_columns([
             tag_expr.alias("Threat_Tag"),
             score_expr.alias("Threat_Score")
-        ]).drop("Normalized_Path")
+        ]).drop(["Normalized_Path", "_pp", "_fn", "_full_path"])
 
     def run_gap_analysis_full(self, start_date, end_date):
         print("[*] Phase 1: Running Physical Gap Analysis...")
@@ -314,7 +347,7 @@ def auto_detect_ntfs(target_dir):
 
 def main(argv=None):
     print_logo()
-    parser = argparse.ArgumentParser(description="SH_PandorasLink v17.31")
+    parser = argparse.ArgumentParser(description="SH_PandorasLink v18.14")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("-d", "--dir", help="Auto-detect CSVs")
     group.add_argument("--manual", action="store_true")
@@ -323,7 +356,7 @@ def main(argv=None):
     parser.add_argument("--chaos"); parser.add_argument("--pf"); parser.add_argument("--shim")
     parser.add_argument("--chronos", help="Chronos CSV for Correlation")
     parser.add_argument("--hercules", help="Hercules CSV for Correlation")
-    parser.add_argument("--out", default="pandora_result_v17.31.csv")
+    parser.add_argument("--out", default="pandora_result_v18.14.csv")
     args = parser.parse_args(argv)
     
     mft_path = args.mft

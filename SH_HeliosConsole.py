@@ -8,27 +8,24 @@ import json
 from datetime import datetime
 
 # ============================================================
-#  SH_HeliosConsole v4.9 [Logical Flow Fix]
+#  SH_HeliosConsole v4.11 [The Correct Integration]
 #  Mission: Coordinate all modules & Measure Performance.
-#  Updates:
-#    - Reordered Pipeline: Artifacts (Chronos/Pandora) -> Events (Hercules)
-#    - Fixed Dependency Deadlock
+#  Updates: Implemented 2-Pass Pandora execution for deadlock resolution.
 # ============================================================
 
 def print_logo():
-    os.system('cls' if os.name == 'nt' else 'clear')
     print(r"""
-           , - ~ ~ ~ - ,
-       , '   _ _ _ _   ' ,
-      ,     |_______|      ,
-     ,       _______        ,  < SKIA HELIOS >
-    ,       |_______|        ,  v4.9 - Logical Flow
-    ,       _______          ,
-     ,      |_______|       ,
-      ,                    ,
-       , _ _ _ _ _ _ _ _ ,
-           ' - _ _ - '
-     "Illuminating Identity, Authority, Intent, and Velocity."
+       , - ~ ~ ~ - ,
+   , '   _ _ _ _   ' ,
+  ,     |_______|      ,
+ ,       _______        ,  < SKIA HELIOS >
+,       |_______|        ,  v4.11 - Two-Pass Strategy
+,       _______          ,
+ ,      |_______|       ,
+  ,                    ,
+   , _ _ _ _ _ _ _ _ ,
+       ' - _ _ - '
+ "Illuminating Identity, Authority, Intent, and Velocity."
     """)
 
 class HeliosCommander:
@@ -133,15 +130,8 @@ class HeliosCommander:
         chaos_out = case_dir / "Master_Timeline.csv"
         self.run_module("chaos", ["-d", csv_dir, "-o", str(chaos_out)])
 
-        # 3. Pandora (Ghost Hunting - MFT/USN)
-        pandora_out = case_dir / "Ghost_Report.csv"
-        p_start = start_date if start_date else "2000-01-01"
-        p_end = end_date if end_date else "2099-12-31"
-        self.run_module("pandora", ["-d", csv_dir, "--start", p_start, "--end", p_end, "--out", str(pandora_out)])
-
-        # 4. Chronos (Time Anomalies - MFT) - [MOVED UP]
-        # Chronos needs MFT but works independently of Event Logs. 
-        # Running it here ensures 'Time_Anomalies.csv' exists for Hercules.
+        # 3. Chronos (Time Anomalies - MFT)
+        # Hestia-Integrated Chronos runs here.
         mft_raw = next(Path(csv_dir).rglob("*$MFT_Output.csv"), None)
         chronos_out = case_dir / "Time_Anomalies.csv"
         if mft_raw:
@@ -150,40 +140,54 @@ class HeliosCommander:
                 chronos_args.append("--legacy")
             self.run_module("chronos", chronos_args)
 
-        # 5. AION (Persistence) - [MOVED UP]
-        # AION scans Registry/MFT. Can run early.
-        aion_out = case_dir / "Persistence_Report.csv"
-        # Ideally AION uses the judged timeline, but using Chaos (raw) is safer to avoid circular logic for now.
-        # Or we can re-run/update later. Using Chaos is fine for basic persistence checks.
-        aion_args = ["--dir", csv_dir, "--mft", str(mft_raw if mft_raw else chaos_out), "-o", str(aion_out)]
-        if mount_point: aion_args.extend(["--mount", mount_point])
-        self.run_module("aion", aion_args)
+        # 4. Pandora Phase 1 (Initial Ghost Hunt)
+        # Hestia-Integrated Pandora runs Pass 1 (without Hercules).
+        pandora_out = case_dir / "Ghost_Report.csv"
+        p_start = start_date if start_date else "2000-01-01"
+        p_end = end_date if end_date else "2099-12-31"
+        
+        self.run_module("pandora", ["-d", csv_dir, "--start", p_start, "--end", p_end, "--out", str(pandora_out), "--chronos", str(chronos_out)])
 
         # ==================================================
         # Phase 2: Event Analysis & Cross-Correlation
         # ==================================================
 
-        # 6. Hercules (Event Logs & Correlation)
-        # Now that Pandora and Chronos have run, Hercules can use their outputs.
+        # 5. Hercules (Event Logs & Correlation)
+        # Hercules reads Pandora's Pass 1 output to filter events.
         judged_out = case_dir / "Hercules_Judged_Timeline.csv"
         hercules_success = self.run_module("hercules", [
             "--timeline", str(chaos_out), 
             "--kape", csv_dir, 
             "--out", str(judged_out), 
             "--ghosts", str(pandora_out) 
-            # Note: Hercules v3.20 auto-detects 'Time_Anomalies.csv' in the same dir 
-            # if we adhere to standard output structure, but passing it explicitly would be cleaner in v5.
         ])
         
+        # 6. Pandora Phase 2 (Enrichment & Update)
+        # Pandora runs Pass 2, now with Hercules output to boost scores and finalize filtering via Hestia.
+        if hercules_success and judged_out.exists():
+            print("\n>>> [PIPELINE] Re-running Pandora for Cross-Correlation (Phase 2)...")
+            self.run_module("pandora", [
+                "-d", csv_dir, "--start", p_start, "--end", p_end, 
+                "--out", str(pandora_out), 
+                "--chronos", str(chronos_out), 
+                "--hercules", str(judged_out) # Feed Hercules back to Pandora
+            ])
+
         # Determine the definitive timeline for Hekate
         timeline_target = str(judged_out) if (hercules_success and judged_out.exists()) else str(chaos_out)
 
-        # 7. Plutos (Network/Lateral)
+        # 7. AION (Persistence)
+        aion_out = case_dir / "Persistence_Report.csv"
+        aion_args = ["--dir", csv_dir, "--mft", str(mft_raw if mft_raw else chaos_out), "-o", str(aion_out)]
+        if mount_point: aion_args.extend(["--mount", mount_point])
+        self.run_module("aion", aion_args)
+
+        # 8. Plutos (Network/Lateral)
         plutos_out = case_dir / "Exfil_Report.csv"
         plutos_net_out = case_dir / "Exfil_Report_Network.csv"
         self.run_module("plutos", ["--dir", csv_dir, "--pandora", str(pandora_out), "-o", str(plutos_out), "--net-out", str(plutos_net_out)] + time_args)
 
-        # 8. Sphinx (Encoded Commands)
+        # 9. Sphinx (Encoded Commands)
         sphinx_out = case_dir / "Sphinx_Decoded.csv"
         evtx_raw = next(Path(csv_dir).rglob("*EvtxECmd_Output.csv"), None)
         if evtx_raw:
@@ -193,7 +197,7 @@ class HeliosCommander:
         # Phase 3: Synthesis & Reporting
         # ==================================================
 
-        # 9. Sirenhunt (Execution Evidence)
+        # 10. Sirenhunt (Execution Evidence)
         prefetch_raw = next(Path(csv_dir).rglob("*PECmd_Output.csv"), None)
         amcache_raw = next(Path(csv_dir).rglob("*Amcache_UnassociatedFileEntries.csv"), None)
         siren_json = case_dir / "Sirenhunt_Results.json"
@@ -202,7 +206,7 @@ class HeliosCommander:
         if amcache_raw: siren_cmd.extend(["--amcache", str(amcache_raw)])
         self.run_module("siren", siren_cmd)
 
-        # 10. Hekate & Midas (Reporting)
+        # 11. Hekate & Midas (Reporting)
         for lang in ["jp", "en"]:
             report_path = case_dir / f"Grimoire_{case_name}_{lang}.md"
             self.run_module("hekate", [
@@ -220,7 +224,7 @@ class HeliosCommander:
                 "--case", case_name
             ])
 
-            # 11. MidasTouch (Docx)
+            # MidasTouch (Docx)
             if docx_mode and report_path.exists():
                 midas_args = [str(report_path)]
                 if ref_doc:
@@ -246,7 +250,7 @@ class HeliosCommander:
 
 def main():
     if len(sys.argv) > 1:
-        parser = argparse.ArgumentParser(description="SH_HeliosConsole v4.9 [Logical Flow]")
+        parser = argparse.ArgumentParser(description="SH_HeliosConsole v4.11 [The Correct Integration]")
         parser.add_argument("--dir", required=True, help="Parsed CSV Directory")
         parser.add_argument("--raw", help="Raw Artifact Directory")
         parser.add_argument("--mount", help="Mount Point")

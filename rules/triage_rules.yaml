@@ -20,6 +20,117 @@ persistence_targets:
     pattern: "ScheduledTasks"
 
 # ==========================================
+# 🛠️ Dual-Use / Admin Tools Configuration (Expanded)
+# ==========================================
+# 攻撃者にも管理者にも使われるツール群。
+# これらは「ノイズとして消去せず」、必ず報告書（Lachesis）のリストに加えます。
+dual_use_tools:
+  # [1] ネットワークスキャン & 偵察
+  - name: "Network Scanner"
+    keywords: 
+      - "nmap"
+      - "zenmap"
+      - "masscan"
+      - "angryip"
+      - "advanced_ip_scanner"
+      - "netscan"
+    noise_paths: ["nmap/scripts", "nmap/nselib", "nmap/docs"]
+
+  # [2] パケットキャプチャ & 解析
+  - name: "Packet Capture"
+    keywords: 
+      - "wireshark"
+      - "tshark"
+      - "capinfos"
+      - "tcpdump"
+      - "windump"
+      - "winpcap"
+      - "npcap"
+    noise_paths: ["wireshark/snmp", "wireshark/radius", "wireshark/help", "wireshark/dtds", "wireshark/profiles"]
+
+  # [3] リモートアクセス & 横展開 (Lateral Movement)
+  - name: "Remote Admin / Lateral"
+    keywords: 
+      - "psexec"
+      - "paexec"
+      - "winscp"
+      - "putty"
+      - "plink"      # PuttyのCUI版（トンネリングによく使われる）
+      - "teamviewer" # 正規RATとして悪用多し
+      - "anydesk"
+      - "logmein"
+      - "screenconnect"
+      - "radmin"
+      - "vnc"        # RealVNC, TightVNC, UltraVNC
+      - "mstsc"      # RDP (ログに残ることは稀だが念のため)
+    noise_paths: ["teamviewer/version", "anydesk/ad_printer"]
+
+  # [4] ネットワークツール & トンネリング
+  - name: "Net Tool / Tunneling"
+    keywords: 
+      - "netcat"
+      - "nc.exe"
+      - "ncat"
+      - "socat"
+      - "ngrok"      # 外部公開ツール
+      - "frp"        # Fast Reverse Proxy (攻撃者御用達)
+      - "chisel"
+      - "termite"
+      - "proxifier"
+    noise_paths: []
+
+  # [5] Active Directory 偵察 & 認証情報窃取
+  - name: "Recon / Credential"
+    keywords: 
+      - "adfind"     # AD情報収集の定番
+      - "bloodhound"
+      - "sharphound"
+      - "powerview"
+      - "mimikatz"
+      - "lazagne"    # パスワード復元ツール
+      - "procdump"   # LSASSダンプに悪用される正規ツール
+      - "hashcat"
+      - "john"       # John the Ripper
+    noise_paths: []
+
+  # [6] データ持ち出し (Exfiltration) & 圧縮
+  - name: "Exfiltration / Archiver"
+    keywords: 
+      - "rclone"     # クラウドストレージへの転送によく使われる
+      - "megasync"
+      - "7za.exe"    # 7-ZipのCUI版
+      - "rar.exe"    # WinRARのCUI版
+      - "winrar"
+    noise_paths: []
+
+  # [7] 匿名化 & Webアクセス
+  - name: "Anonymity / Tor"
+    keywords: 
+      - "tor.exe"
+      - "tor browser"
+      - "onion"
+    noise_paths: ["tor/pluggabletransports", "browser/torbrowser/data"]
+
+  # [8] 開発言語 & スクリプトエンジン (環境寄生型攻撃)
+  - name: "Dev / Scripting"
+    keywords: 
+      - "python"
+      - "pip"
+      - "perl"
+      - "ruby"
+      - "lua"
+      - "autoit"     # マルウェアのパッカーとしてよく使われる
+      - "powershell_ise"
+    noise_paths: 
+      - "python/lib"
+      - "python/tcl"
+      - "python/include"
+      - "lib/test"
+      - "lib/site-packages"
+      - "perl/lib"
+      - "ruby/lib"
+    
+# ==========================================
 # 🛡️ NOISE FILTERS (Ignored Artifacts)
 # ==========================================
 noise_filters:
@@ -59,6 +170,56 @@ noise_filters:
     target: "FileName"
     condition: "regex"
     pattern: "(?i)^(Microsoft|Windows|Internet Explorer|Quick Launch)$"
+
+# ==========================================
+# 🛡️ TUNING: Additional Noise Filters (Case2_56 Fixed)
+# ==========================================
+
+  # [1] CryptnetUrlCache (証明書キャッシュ)
+  # 区切り文字を「.」にすることで \ も / も無視してヒットさせる
+  - name: 'Cryptnet Cache'
+    target: 'ParentPath'
+    condition: 'regex'
+    pattern: '(?i)Microsoft.CryptnetUrlCache'
+
+  # [2] Google Drive & Chrome Cache
+  # 途中の階層も .* で柔軟にスキップ
+  - name: 'Google App Caches'
+    target: 'ParentPath'
+    condition: 'regex'
+    pattern: '(?i)Google.(Drive|Chrome).*(Cache|HttpCache|TempData)'
+
+  # [3] Skype Media Cache (サムネイル等)
+  - name: 'Skype Cache'
+    target: 'ParentPath'
+    condition: 'regex'
+    pattern: '(?i)Skype.*(media_messaging|thmanager|emo_cache)'
+
+  # [4] CLR Usage Logs (.NET実行ログ)
+  # バックスラッシュを [\\/] で明示的に指定して回避
+  - name: 'CLR Usage Logs'
+    target: 'ParentPath'
+    condition: 'regex'
+    pattern: '(?i)Microsoft.CLR_v4\.0.[\\/]UsageLogs'
+
+  # [5] Python Standard Lib (ライブラリファイル)
+  - name: 'Python Standard Lib'
+    target: 'ParentPath'
+    condition: 'regex'
+    pattern: '(?i)AppData.Local.Programs.Python.Python[0-9]+'
+
+  # [6] Windows Error Reporting (WER)
+  - name: 'Windows Error Reporting'
+    target: 'ParentPath'
+    condition: 'regex'
+    pattern: '(?i)Microsoft.Windows.WER.(ReportQueue|ReportArchive|ERC)'
+
+  # [7] Windows Explorer Thumbnails (サムネイルDB)
+  # ファイル名そのものをターゲットにするため変更なし（正規表現は安全）
+  - name: 'Explorer Thumbs'
+    target: 'FileName'
+    condition: 'regex'
+    pattern: '(?i)^thumbcache_.*\.db$'
 
 # --- [User Artifacts Noise (Expanded)] ---
   - name: "Windows User Folders"
@@ -256,3 +417,30 @@ threat_signatures:
     target: "FileName"
     condition: "regex"
     pattern: "(?i)^(winword\\.exe|excel\\.exe|powerpnt\\.exe|outlook\\.exe)$"
+
+    # ==========================================
+# 🛠️ Dual-Use / Admin Tools Configuration
+# ==========================================
+# これらのツールは「攻撃にも使われる」ため、ゴミは消しつつ、
+# 実行痕跡（EXEなど）は必ず報告書（Lachesis）に残します。
+dual_use_tools:
+  - name: "Nmap"
+    keywords: ["nmap", "zenmap"]
+    # 以下のパスに含まれるファイルは「ノイズ」としてChronos/Pandoraで除外する
+    noise_paths: ["nmap/scripts", "nmap/nselib", "nmap/docs"]
+
+  - name: "Wireshark"
+    keywords: ["wireshark", "tshark", "capinfos"]
+    noise_paths: ["wireshark/snmp", "wireshark/radius", "wireshark/help", "wireshark/dtds"]
+
+  - name: "Python / Dev Tools"
+    keywords: ["python", "pip", "perl", "ruby"]
+    noise_paths: ["python/lib", "python/tcl", "python/include", "lib/test", "lib/site-packages"]
+
+  - name: "Remote Admin / Lateral"
+    keywords: ["psexec", "paexec", "winscp", "putty", "netcat", "nc.exe"]
+    noise_paths: [] # ノイズパスなし（見つけたら即報告）
+
+  - name: "Anonymity / Tor"
+    keywords: ["tor.exe", "tor browser"]
+    noise_paths: ["tor/pluggabletransports"]

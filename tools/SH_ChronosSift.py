@@ -2,140 +2,186 @@ import polars as pl
 import argparse
 import sys
 import os
-import re
-from pathlib import Path
 from tools.SH_ThemisLoader import ThemisLoader
+from tools.SH_HestiaCensorship import Hestia
 
 # ============================================================
-#  SH_ChronosSift v22.7 [Normalized Override]
-#  Mission: Detect Time Anomalies with surgical precision.
-#  Update: Reverted to Normalization + Trash Override Logic.
+#  SH_ChronosSift v23.15 [Final Polish Mk.III]
+#  Mission: Detect Time Anomalies.
+#  Update: Crushed remaining Win8.1/Intel/IME noise.
 # ============================================================
 
 def print_logo():
     print(r"""
        (   )
       (  :  )   < CHRONOS SIFT >
-       (   )     v22.7 - Normalized Override
+       (   )     v23.15 - Final Polish Mk.III
         " "      "Time bows to the Law."
     """)
 
 class ChronosEngine:
     def __init__(self, tolerance=10.0):
         self.tolerance = tolerance
-
-    def _calc_score(self, x):
-        if x["Threat_Tag"] == "NOISE_ARTIFACT": return 0
-        if x["Anomaly_Time"] == "LEGACY_BUILD": return 10
-        if x["Anomaly_Time"] == "CRITICAL_ARTIFACT": return 200
-        if x["Anomaly_Time"] == "TIMESTOMP_BACKDATE": return 100
-        if x["Anomaly_Time"] == "FALSIFIED_FUTURE": return 80
-        if x["Anomaly_Zero"] == "ZERO_PRECISION": return 50
-        return 0
+        self.hestia = Hestia()
 
     def _apply_safety_filters(self, df):
-        print("    -> [Chronos] Applying Safety Filters (Normalized)...")
+        print("    -> [Chronos] Applying Safety Filters (Inverted Shield Mk.III)...")
         
-        # 1. Normalize Path (Lower + Forward Slash)
-        # This is the most reliable way to handle path variations.
+        df = df.with_columns([
+            pl.col("ParentPath").fill_null("").str.to_lowercase().alias("_pp"),
+            pl.col("FileName").fill_null("").str.to_lowercase().alias("_fn")
+        ])
+        
+        # Normalize Path
         df = df.with_columns(
-            pl.concat_str([pl.col("ParentPath"), pl.lit("/"), pl.col("FileName")])
-            .str.to_lowercase()
+            pl.concat_str([pl.col("_pp"), pl.lit("/"), pl.col("_fn")])
             .str.replace_all(r"\\", "/")
-            .str.replace(r"^\./", "")
-            .alias("Normalized_Path")
+            .alias("_full_path")
         )
 
-        # 2. Allowlist (Standard System Paths)
-        absolute_allowlist = [
-            r"mofygdvh\.mcp$", r"shatbbms\.dif$", r"vkorppvhkxuvqcvj$",
-            r"windows/system32/fm20.*\.dll$", r"windows/system32/ven2232\.olb$",
-            r"jetico/.*/(uninstall\.log|langfile2\.dll)$",
-            r"programdata/microsoft/office/uicaptions",
-            r"windows/shellnew",
-            r"programdata/regid\.1991-06\.com\.microsoft",
-            r"windows/py(w)?\.exe$", r"windows/bcuninstall\.exe",
-            r"program files.*/microsoft office", r"program files.*/common files/microsoft shared",
-            r"windows/system32/catroot", r"windows/inf", r"windows/immersivecontrolpanel",
-            r"windows/diagnostics", r"windows/policydefinitions", 
-            r"program files.*/nmap", r"program files.*/wireshark",
-            r"windows/system32/migwiz", r"windows/system32/windowspowershell",
-            r"python.*/", r"/tcl/", r"/tk/", 
-            r"windows/servicing/packages", r"windows/winsxs", r"windows/servicing",
-            r"microsoft\.system\.package\.metadata", r"programdata/microsoft/windows/apprepository",
-            r"windows/system32/(drivers|wbem|en-us|zh-cn|ja-jp|driverstore|cursors)",
-            r"windows/syswow64", r"windows/assembly", r"windows/microsoft\.net", r"windows/fonts",
-            r"windows/system32/.*\.dll$", r"windows/system32/catroot",
-            r"program files/windowsapps", r"windows/systemapps",
-            r"/crashpad/", r"/mptelemetrysubmit/",
-            r"windows/vpnplugins/juniper", r"appdata/locallow/sun/java"
-        ]
-
-        # 3. High Risk Zones
-        high_risk_zones = [
-            r"users/.*/appdata/local/temp",
-            r"windows/temp",
-            r"users/public",
-            r"downloads", 
-            r"inetcache", r"inetcookies", # Added here but overridden by trash logic
-            r"notifications", 
-            r"users/.*/appdata/local/microsoft/windows/notifications" 
+        # ---------------------------------------------------------
+        # 1. 🔨 GLOBAL HAMMER (Safe to kill)
+        # ---------------------------------------------------------
+        kill_keywords = [
+            "jetico", "bcwipe", "ccleaner", "dropbox", 
+            "skype", "onedrive",
+            "adobe/acrobat", "adobe/reader", 
+            "google/chrome", "google/update",
+            "mozilla", "firefox",
+            "vbox", "virtualbox",
+            "notepad++",
+            # [NEW] Intel / McAfee Noise
+            "intel/bca", "intel security", "true key",
+            # [NEW] SQL / Analysis Services
+            "microsoft analysis services", "as oledb"
         ]
         
-        allow_pattern = "|".join(absolute_allowlist)
-        risk_pattern = "|".join(high_risk_zones)
+        # ---------------------------------------------------------
+        # 2. ⚡ DUAL-USE TRAP (Inverted Logic)
+        # ---------------------------------------------------------
+        dual_use_folders = [
+            "nmap", "wireshark", "python", "tcl", "ruby", "perl", "java", "jdk", "jre",
+            "tor browser"
+        ]
         
-        # 4. Logic Execution
-        is_allow = pl.col("Normalized_Path").str.contains(allow_pattern)
-        is_risk = pl.col("Normalized_Path").str.contains(risk_pattern)
-        
-        # [NEW] TRASH LOGIC (The Overrides)
-        # These are noise even if they are in Risk Zones.
-        
-        # A. Hash Suite Noise: Path contains hash_suite_free AND NOT .exe
-        is_hash_suite_noise = (
-            pl.col("Normalized_Path").str.contains("hash_suite_free") & 
-            (~pl.col("Normalized_Path").str.ends_with(".exe"))
-        )
-        
-        # B. Web Cache Nuke
-        is_web_trash = pl.col("Normalized_Path").str.contains(r"/inetcache/|/inetcookies/|/history/")
+        protected_binaries = [
+            "nmap.exe", "zenmap.exe", "ncat.exe", 
+            "wireshark.exe", "tshark.exe", "capinfos.exe", "dumpcap.exe",
+            "python.exe", "pythonw.exe", "pip.exe",
+            "java.exe", "javaw.exe", "javac.exe",
+            "ruby.exe", "perl.exe",
+            "tor.exe", "firefox.exe"
+        ]
 
-        # [FINAL DECISION]
-        # Safe if: (Allowed AND Not Risk) OR (Is Trash)
-        is_safe = (is_allow & (~is_risk)) | is_hash_suite_noise | is_web_trash
-        
-        clean_expr = pl.col("Threat_Tag")
-        threat_score_expr = pl.col("Threat_Score")
-        
-        clean_expr = pl.when(is_safe).then(pl.lit("NOISE_ARTIFACT")).otherwise(clean_expr)
-        threat_score_expr = pl.when(is_safe).then(0).otherwise(threat_score_expr)
+        # ---------------------------------------------------------
+        # 3. 🛡️ SYSTEM SHIELD (Expanded)
+        # ---------------------------------------------------------
+        system_keywords = [
+            "users/default", 
+            "windows/servicing", "windows/winsxs",
+            "windows/assembly", "windows/microsoft.net",
+            "program files/windowsapps", "windows/systemapps",
+            "windows/system32", "windows/syswow64",
+            "windows/inf", "windows/fonts",
+            "windows/immersivecontrolpanel",
+            "windows/diagnostics", "windows/policydefinitions",
+            "program files/microsoft office", 
+            "program files (x86)/microsoft office",
+            "program files/common files",
+            "program files (x86)/common files",
+            "programdata/microsoft/windows/apprepository",
+            "programdata/microsoft/windows/caches",
+            "appdata/local/microsoft/windows/history",
+            "appdata/local/microsoft/windows/inetcache",
+            "appdata/local/microsoft/windows/webcache",
+            "appdata/local/temp",
+            # [Previous]
+            "windows/winstore", "windows/media",
+            "program files/internet explorer",
+            "program files (x86)/internet explorer",
+            "windows/installer", "windows/camera",
+            "windows/bitlockerdiscoveryvolumecontents",
+            "windows/boot", "windows/adfs",
+            "windows/rescache", "windows/filemanager",
+            "windows/systemresources", "windows/globalization",
+            "windows/vpnplugins",
+            "program files/windows defender", "program files (x86)/windows defender",
+            "program files/windows media player", "program files (x86)/windows media player",
+            "windows/speech", "windows/schemas", "windows/pla",
+            "windows/desktoptileresources", "windows/apppatch",
+            "programdata/microsoft/windows/start menu/programs/administrative tools",
+            # [NEW] Targeted from Final Top 20 Analysis
+            "windows/toastdata", "windows/inputmethod",
+            "windows/performance/winsat", "windows/l2schemas",
+            "windows/serviceprofiles", # WinX menus hidden here
+            "program files/windows journal", # Deprecated feature
+            "programdata/microsoft/windows/start menu/programs", # Shortcuts
+            "programdata/microsoft/windows/start menu/programs/accessories"
+        ]
 
-        return df.with_columns([
-            clean_expr.alias("Threat_Tag"),
-            threat_score_expr.alias("Threat_Score")
-        ]).drop("Normalized_Path")
+        file_kill_list = [
+            "fm20.dll", "ven2232.olb", "mofygdvh.mcp", 
+            "shatbbms.dif", "vkorppvhkxuvqcvj",
+            "desktop.ini", "thumbs.db", "iconcache.db",
+            "ntuser.dat", "usrclass.dat", 
+            "edb.log", "edb.chk", "edb0",
+            "gdipfontcache"
+        ]
+
+        # Logic
+        is_noise = pl.lit(False)
+        
+        # A. Global Hammer & System Shield
+        for kw in kill_keywords + system_keywords:
+            is_noise = is_noise | pl.col("_full_path").str.contains(kw, literal=True)
+
+        # B. File Kill List
+        for kw in file_kill_list:
+            is_noise = is_noise | pl.col("_fn").str.contains(kw, literal=True)
+
+        # C. Dual-Use Inverted Trap
+        is_tool_folder = pl.lit(False)
+        for tool in dual_use_folders:
+            is_tool_folder = is_tool_folder | pl.col("_full_path").str.contains(tool, literal=True)
+            
+        is_protected_binary = pl.col("_fn").is_in(protected_binaries)
+        is_noise = is_noise | (is_tool_folder & (~is_protected_binary))
+
+        # D. Adobe/Google Precision
+        is_adobe_google = pl.col("_full_path").str.contains("adobe", literal=True) | pl.col("_full_path").str.contains("google", literal=True)
+        is_safe_ext = pl.col("_fn").str.ends_with(".dll") | pl.col("_fn").str.ends_with(".pak") | pl.col("_fn").str.ends_with(".png")
+        is_noise = is_noise | (is_adobe_google & is_safe_ext)
+
+        # Apply
+        df = df.with_columns([
+            pl.when(is_noise).then(pl.lit("NOISE_ARTIFACT")).otherwise(pl.col("Threat_Tag")).alias("Threat_Tag"),
+            pl.when(is_noise).then(0).otherwise(pl.col("Threat_Score")).alias("Threat_Score")
+        ])
+
+        return df.drop(["_pp", "_fn", "_full_path"])
 
     def analyze(self, args):
         mode_str = "LEGACY" if args.legacy else "STANDARD"
-        print(f"[*] Chronos v22.7 awakening... Mode: {mode_str}")
+        print(f"[*] Chronos v23.15 awakening... Mode: {mode_str}")
         try:
             loader = ThemisLoader(["rules/triage_rules.yaml", "rules/sigma_file_event.yaml"])
             lf = pl.scan_csv(args.file, ignore_errors=True, infer_schema_length=0)
             
-            print("    -> Applying Scope Filters...")
             print("    -> Applying Themis Threat Scoring...")
             lf = loader.apply_threat_scoring(lf)
-            lf = self._apply_safety_filters(lf)
+            
+            if "Threat_Score" in lf.collect_schema().names():
+                lf = lf.with_columns(pl.col("Threat_Score").cast(pl.Int64, strict=False).fill_null(0))
 
-            # Date Calculation
+            lf = self._apply_safety_filters(lf)
+            
             cols = lf.collect_schema().names()
             si_cr = "si_dt" if "si_dt" in cols else "Created0x10"
             fn_cr = "fn_dt" if "fn_dt" in cols else "Created0x30"
             
             for col_name in [si_cr, fn_cr]:
                 if col_name in cols:
-                     lf = lf.with_columns(pl.col(col_name).str.replace("T", " "))
+                      lf = lf.with_columns(pl.col(col_name).str.replace("T", " "))
             
             lf = lf.with_columns([
                 pl.col(si_cr).str.to_datetime(format="%Y-%m-%d %H:%M:%S%.f", strict=False).alias("si_dt"),
@@ -144,7 +190,6 @@ class ChronosEngine:
 
             lf = lf.with_columns((pl.col("fn_dt") - pl.col("si_dt")).dt.total_seconds().alias("diff_sec"))
 
-            # Anomaly Tagging
             lf = lf.with_columns([
                 pl.when((pl.col("Threat_Score") >= 80) & (pl.col("Threat_Tag") != "NOISE_ARTIFACT"))
                   .then(pl.lit("CRITICAL_ARTIFACT"))
@@ -159,13 +204,11 @@ class ChronosEngine:
                   .otherwise(pl.lit("")).alias("Anomaly_Zero")
             ])
             
-            # Legacy & Fixed Pattern Filtering
             is_legacy_date = (
                 (pl.col("fn_dt").dt.year() < 2012) |
                 (pl.col("fn_dt").dt.year().is_in([1601, 1980, 2000, 1986])) |
                 (pl.col("fn_dt").dt.strftime("%m-%d") == "04-30")
             )
-
             lf = lf.with_columns(
                 pl.when(is_legacy_date & (pl.col("Anomaly_Time") == "FALSIFIED_FUTURE"))
                 .then(pl.lit("LEGACY_BUILD"))
@@ -173,14 +216,21 @@ class ChronosEngine:
                 .alias("Anomaly_Time")
             )
             
-            lf = lf.with_columns(
-                pl.struct(["Anomaly_Time", "Anomaly_Zero", "Threat_Tag"]).map_elements(
-                    self._calc_score, 
-                    return_dtype=pl.Int64
-                ).alias("Chronos_Score")
+            score_expr = (
+                pl.when(pl.col("Threat_Tag") == "NOISE_ARTIFACT").then(0)
+                .when(pl.col("Anomaly_Time") == "LEGACY_BUILD").then(10)
+                .when(pl.col("Anomaly_Time") == "CRITICAL_ARTIFACT").then(200)
+                .when(pl.col("Anomaly_Time") == "TIMESTOMP_BACKDATE").then(100)
+                .when(pl.col("Anomaly_Time") == "FALSIFIED_FUTURE").then(80)
+                .when(pl.col("Anomaly_Zero") == "ZERO_PRECISION").then(50)
+                .otherwise(0)
             )
 
+            lf = lf.with_columns(score_expr.alias("Chronos_Score"))
+            
             df = lf.filter(pl.col("Chronos_Score") > 0).collect()
+
+            df = self.hestia.apply_censorship(df, "ParentPath", "FileName")
             
             if df.height > 0:
                 df = df.sort("Chronos_Score", descending=True)

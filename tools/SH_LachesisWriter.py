@@ -5,11 +5,12 @@ import os
 from pathlib import Path
 import json
 import re
+from tools.SH_ThemisLoader import ThemisLoader # Loaderをインポート
 
 # ============================================================
-#  SH_LachesisWriter v3.12 [Final Report Polish]
+#  SH_LachesisWriter v3.15 [Final Report Polish]
 #  Mission: Weave the Grimoire with Summarized Findings.
-#  Update: Refined Statistics & Score Filters for Final Output.
+#  Update: Plan G - Force include Dual-Use Tools regardless of score.
 # ============================================================
 
 TEXT_RES = {
@@ -49,9 +50,14 @@ class LachesisWriter:
         self.case_name = case_name
         self.visual_iocs = []
         self.infra_ips_found = set()
+        
+        # [NEW] Load Dual-Use Keywords from YAML
+        self.loader = ThemisLoader(["rules/triage_rules.yaml"])
+        self.dual_use_keywords = self.loader.get_dual_use_keywords()
+        print(f"[*] Lachesis loaded {len(self.dual_use_keywords)} dual-use keywords from YAML.")
 
     def weave_report(self, analysis_result, output_path, dfs_for_ioc, hostname, os_info, primary_user):
-        print(f"[*] Lachesis v3.12 is weaving the refined report into {output_path}...")
+        print(f"[*] Lachesis v3.15 is weaving the refined report into {output_path}...")
         self.hostname = hostname 
         valid_events = analysis_result["events"]
         phases = analysis_result["phases"]
@@ -88,38 +94,54 @@ class LachesisWriter:
     def _is_noise(self, name, path=""):
         name = str(name).lower()
         path = str(path).lower()
+        # [NEW] Check if it is a Dual-Use tool FIRST. If so, it is NEVER noise.
+        if self._is_dual_use(name): return False
+
         noise_keywords = [
             "desktop.ini", "thumbs.db", "safe browsing", "inputpersonalization", "traineddatastore",
             "customdestinations", "automaticdestinations", "inetcookies", "browsermetrics", 
             "mptelemetry", "crashpad", "watson", "wer", "favorites", "edge", "bing",
-            # Hercules Noise 
-            "tmpidcrl.dll", "bcwipe", "bcwipesvc", "vbox", "java auto updater"
+            # [Plan G] Safe Tool Noise (Excluded by folder in other tools, but listed here for safety)
+            "tmpidcrl.dll", "bcwipe", "bcwipesvc", "vbox", "java auto updater",
+            "jetico", "ccleaner", "dropbox", "skype"
         ]
+        # Dual-Use tools are protected from Noise list (handled by early return above)
+
         noise_paths = [
             "winsxs", "servicing", "msocache", "program files", "appdata\\local\\programs\\python", 
             "lib\\test", "windows\\assembly", "windows\\fonts", "windows\\installer",
-            "python27\\tcl", "python27\\lib", "program files (x86)\\google"
+            "python27\\tcl", "python27\\lib"
         ]
         
-        suspicious_keywords = ["hash_suite", "nmap", "mimikatz", "tor browser", "psexec", "pwdump", "wireshark"]
-        if any(s in path or s in name for s in suspicious_keywords): return False
-
         if any(k in name for k in noise_keywords): return True
         if any(p in path for p in noise_paths): return True
         return False
+
+    def _is_dual_use(self, name):
+        # [NEW] Use dynamic list from YAML
+        name_lower = str(name).lower()
+        return any(k in name_lower for k in self.dual_use_keywords)
 
     def _extract_visual_iocs_from_pandora(self, dfs):
         if dfs.get('Pandora') is not None:
             df = dfs['Pandora']
             if "Threat_Score" in df.columns:
                 try:
-                    threats = df.filter(pl.col("Threat_Score").cast(pl.Int64, strict=False) >= 80).unique(subset=["Ghost_FileName"])
+                    # Score >= 80 OR Dual-Use Tool
+                    threats = df.filter(
+                        (pl.col("Threat_Score").cast(pl.Int64, strict=False) >= 80) |
+                        (pl.col("Ghost_FileName").str.to_lowercase().str.contains("nmap|wireshark|netcat|psexec"))
+                    ).unique(subset=["Ghost_FileName"])
+                    
                     for row in threats.iter_rows(named=True):
                         fname = row.get("Ghost_FileName", "")
                         if self._is_noise(fname, row.get("ParentPath")): continue
                         if "lnk" in fname.lower() or "url" in fname.lower(): continue
                         ioc_type = row.get("Threat_Tag", "SUSPICIOUS")
                         if not ioc_type: ioc_type = row.get("Risk_Tag", "ANOMALY")
+                        
+                        if self._is_dual_use(fname): ioc_type = "DUAL_USE_TOOL"
+                        
                         clean_name = fname.split("] ")[-1]
                         self._add_unique_visual_ioc({
                             "Type": ioc_type, "Value": clean_name, "Path": row.get("ParentPath", ""), "Note": "File Artifact (Pandora)"
@@ -131,12 +153,18 @@ class LachesisWriter:
             df = dfs['Chronos']
             if "Chronos_Score" in df.columns:
                 try:
-                    threats = df.filter(pl.col("Chronos_Score").cast(pl.Int64, strict=False) >= 80)
+                    # Score >= 80 OR Dual-Use Tool
+                    threats = df.filter(
+                        (pl.col("Chronos_Score").cast(pl.Int64, strict=False) >= 80) |
+                        (pl.col("FileName").str.to_lowercase().str.contains("nmap|wireshark|netcat|psexec"))
+                    )
                     for row in threats.iter_rows(named=True):
                         name = row.get("FileName")
                         path = row.get("ParentPath")
                         if self._is_noise(name, path): continue
                         anomaly = row.get("Anomaly_Time", "TIME_ANOMALY")
+                        if self._is_dual_use(name): anomaly = "DUAL_USE_TOOL"
+                        
                         self._add_unique_visual_ioc({
                             "Type": anomaly, "Value": name, "Path": path, "Note": f"Timestomp Detected (Chronos)"
                         })
@@ -147,7 +175,7 @@ class LachesisWriter:
             df = dfs['AION']
             if "AION_Score" in df.columns:
                 try:
-                    threats = df.filter(pl.col("AION_Score").cast(pl.Int64, strict=False) >= 50)
+                    threats = df.filter(pl.col("AION_Score").cast(pl.Int64, strict=False) >= 80)
                     for row in threats.iter_rows(named=True):
                         name = row.get("Target_FileName")
                         path = row.get("Full_Path")
@@ -191,13 +219,16 @@ class LachesisWriter:
                     "Type": "IP_TRACE", "Value": ip, "Path": "Network", "Note": f"Detected in {ev['Source']}"
                 })
             
-            if ev['Criticality'] >= 90 and ev['Category'] == 'EXEC':
+            # High Crit OR Dual Use
+            is_dual = self._is_dual_use(ev.get('Summary', ''))
+            if (ev['Criticality'] >= 90 or is_dual) and ev['Category'] == 'EXEC':
                 kws = ev.get('Keywords', [])
                 if kws:
                     kw = str(kws[0]).lower()
                     if not self._is_noise(kw) and kw not in ignore_execs:
+                        type_label = "DUAL_USE_TOOL" if is_dual else "EXECUTION"
                         self._add_unique_visual_ioc({
-                            "Type": "EXECUTION", "Value": kws[0], "Path": "Process", "Note": f"High Crit Execution ({ev['Source']})"
+                            "Type": type_label, "Value": kws[0], "Path": "Process", "Note": f"Execution ({ev['Source']})"
                         })
 
     def _add_unique_visual_ioc(self, ioc_dict):
@@ -274,7 +305,9 @@ class LachesisWriter:
             for ev in phase:
                 if self._is_noise(ev['Summary']): continue
                 
-                if ev['Criticality'] >= 80:
+                # Report only High Criticality OR Dual Use
+                is_dual = self._is_dual_use(ev.get('Summary', ''))
+                if ev['Criticality'] >= 80 or is_dual:
                     insight = self._generate_insight(ev, created_files) 
                     if insight not in grouped_events:
                         grouped_events[insight] = []
@@ -314,6 +347,7 @@ class LachesisWriter:
         ips = [i for i in self.visual_iocs if "IP_TRACE" in i["Type"]]
         execs = [i for i in self.visual_iocs if "EXECUTION" in i["Type"]]
         malware = [i for i in self.visual_iocs if "CRITICAL" in i["Type"] or "CREDENTIALS" in i["Type"]]
+        dual_use = [i for i in self.visual_iocs if "DUAL_USE" in i["Type"]]
 
         if webshells:
             for item in webshells[:3]:
@@ -337,6 +371,11 @@ class LachesisWriter:
              for item in malware[:3]:
                 m = item["Value"]
                 chart += f"    {parent} -->|Malware/Tool| MW_{abs(hash(m))}[\"{m}\"]\n"
+        
+        if dual_use:
+             for item in dual_use[:3]:
+                d = item["Value"]
+                chart += f"    {parent} -->|Admin Tool?| DT_{abs(hash(d))}[\"{d}\"]\n"
 
         if ips:
             for item in ips[:5]:
@@ -417,13 +456,16 @@ class LachesisWriter:
     def _write_timeline_visual(self, f, phases):
         t = self.txt
         f.write(f"## {t['h1_time']}\n")
-        f.write("以下に、検知された脅威イベントを時系列で示します。（重要度の低いイベントは折りたたまれています）\n\n")
+        # [MODIFIED] High Confidence Only
+        f.write("以下に、検知された脅威イベントを時系列で示します。（重要度スコア80以上のイベントのみ抽出）\n\n")
+        
         for idx, phase in enumerate(phases):
             if not phase: continue
             date_str = str(phase[0]['Time']).replace('T', ' ').split(' ')[0]
+            
             f.write(f"### 📅 Phase {idx+1} ({date_str})\n")
             f.write(f"| Time (UTC) | Category | Event Summary (Command / File) | Source |\n|---|---|---|---|\n") 
-            noise_buffer = []
+            
             for ev in phase:
                 time_display = str(ev['Time']).replace('T', ' ').split('.')[0]
                 cat_name = t['cats'].get(ev['Category'], ev['Category'])
@@ -431,26 +473,19 @@ class LachesisWriter:
                 if len(summary) > 120: summary = summary[:115] + "..."
                 source = ev['Source']
                 if self._is_noise(summary) or self._is_noise(str(ev.get('Detail', ''))): continue
-                is_critical = ev['Criticality'] >= 80 or "CRITICAL" in summary or "WEBSHELL" in summary or "ROOTKIT" in summary
                 
-                if ev['Category'] == 'EXEC': row_str = f"| {time_display} | {cat_name} | `{summary}` | {source} |"
-                else: row_str = f"| {time_display} | {cat_name} | **{summary}** | {source} |"
-
+                # Criticality >= 80 ONLY, UNLESS it's a dual-use tool
+                is_dual = self._is_dual_use(summary)
+                is_critical = ev['Criticality'] >= 80 or "CRITICAL" in summary or "WEBSHELL" in summary or "ROOTKIT" in summary or is_dual
+                
                 if is_critical:
-                    if noise_buffer:
-                        self._write_noise_buffer(f, noise_buffer)
-                        noise_buffer = []
+                    prefix = "⚠️ " if is_dual else ""
+                    if ev['Category'] == 'EXEC': row_str = f"| {time_display} | {cat_name} | `{prefix}{summary}` | {source} |"
+                    else: row_str = f"| {time_display} | {cat_name} | **{prefix}{summary}** | {source} |"
                     f.write(f"{row_str}\n")
-                else: noise_buffer.append(f"| {time_display} | {cat_name} | {summary} | {source} |")
-            if noise_buffer: self._write_noise_buffer(f, noise_buffer)
+            
             if idx < len(phases)-1: f.write("\n*( ... Time Gap ... )*\n\n")
         f.write("\n")
-
-    def _write_noise_buffer(self, f, buffer):
-        f.write(f"\n<details><summary>🔽 Low Priority Events ({len(buffer)} records)</summary>\n\n")
-        f.write(f"| Time (UTC) | Category | Event Summary | Source |\n|---|---|---|---|\n")
-        for line in buffer: f.write(f"{line}\n")
-        f.write(f"\n</details>\n\n")
 
     def _embed_chimera_tags(self, f, primary_user):
         f.write("\n\n")
@@ -488,11 +523,9 @@ class LachesisWriter:
         f.write("これらの中には、攻撃の予兆やラテラルムーブメントの痕跡が含まれる可能性があります。\n\n")
         f.write("| Category | Detection Type | Count | Reference CSV |\n|---|---|---|---|\n")
         
-        # [UPDATED] Summarized Stats
         if dfs.get('Chronos') is not None:
             df = dfs['Chronos']
             if "Chronos_Score" in df.columns:
-                # Cast to Int64 safely before comparison
                 stats = df.filter(pl.col("Chronos_Score").cast(pl.Int64, strict=False) > 0) \
                           .group_by("Anomaly_Time").count().sort("count", descending=True)
                 for row in stats.iter_rows(named=True):
@@ -503,7 +536,6 @@ class LachesisWriter:
         if dfs.get('Pandora') is not None:
             df = dfs['Pandora']
             if "Threat_Score" in df.columns:
-                # Cast to Int64 safely
                 stats = df.filter(pl.col("Threat_Score").cast(pl.Int64, strict=False) >= 0) \
                           .group_by("Risk_Tag").count().sort("count", descending=True)
                 for row in stats.iter_rows(named=True):
@@ -514,7 +546,6 @@ class LachesisWriter:
         if dfs.get('Hercules') is not None:
              df = dfs['Hercules']
              if "Threat_Score" in df.columns:
-                 # Cast to Int64 safely
                  stats = df.filter((pl.col("Threat_Score").cast(pl.Int64, strict=False) < 80) & \
                                    (pl.col("Threat_Score").cast(pl.Int64, strict=False) > 0)) \
                            .group_by("Threat_Tag").count().sort("count", descending=True)
@@ -600,6 +631,10 @@ class LachesisWriter:
         summary = ev['Summary'].lower()
         src = ev['Source'].lower()
         
+        # Dual-Use Insight
+        if self._is_dual_use(summary):
+            return "攻撃にも転用可能な管理者ツール（Dual-Use Tool）の存在/実行を確認しました。"
+
         if re.search(r'\[\d+\]\.(htm|html|js|php|jsp)', summary):
             is_cache_path = any(x in summary for x in ['cache', 'temp', 'history', 'appdata'])
             is_high_confidence = ev.get('Criticality', 0) >= 90

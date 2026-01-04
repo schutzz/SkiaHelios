@@ -1,4 +1,4 @@
-つ# SkiaHelios v2.7 - AION-Sigma (Intelligence & Midas Edition)
+# SkiaHelios v4.12 - The Silencer & The Inverted Filter (Noise Kill Strategy)
 
 ![SkiaHelios CI](https://github.com/schutzz/SkiaHelios/actions/workflows/test.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
@@ -12,24 +12,27 @@
 
 **SkiaHelios** is a high-resolution, modular DFIR (Digital Forensics & Incident Response) framework built for **speed**, **causality**, and **visual narrative**.
 
-Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** to deconstruct artifacts, trace physical execution chains, and weave a cohesive narrative across multiple hosts.
+Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** supported by **"Hestia" (The Gatekeeper)** to deconstruct artifacts, trace physical execution chains, and weave a cohesive narrative across multiple hosts.
 
-**Current Version:** v2.7 (AION-Sigma Integration / Intelligent Summarization / Midas Touch)
+**Current Version:** v4.12 (System Silencer / Inverted Tool Filter / YAML Config / Noise Chain Break)
 
 ---
 
-## ⚡ Key Features (v2.7 Updates)
+## ⚡ Key Features (v4.12 Updates)
 
-* **🧠 AION-Sigma Pipeline:** [NEW] Bridges world-standard **Sigma Rules** (YAML) directly into AION's physical regex engine via `CharonBridge`.
-* **📉 Intelligent Noise Reduction:** [NEW] Implemented **Strict Confidence Thresholds** (Score >= 80). Low-confidence events are automatically summarized into **"Detection Statistics"** tables to prevent alert fatigue.
-* **👑 Midas Touch (Docx/PDF):** Automatically converts Markdown reports into **Executive Docx** files. Renders **Mermaid diagrams** into high-res PNGs and embeds them seamlessly.
-* **🦁 Team Sync Mode:** Packages all evidence (CSVs, Source Code, Reports) into a **Hash-verified Zip** (`manifest.json` included) for forensic soundness and team collaboration.
-* **🏹 Omni-Visual Attack Flow:** Lachesis generates **Mermaid diagrams** that visualize not just files, but **Network IPs** and **Critical Executions** extracted by Atropos.
-* **⚖️ Themis Rule Engine:** Multi-Bank Loading support. Dynamically loads specialized rules (Process, File, Registry) for each module. Features **Tag Normalizer** to translate complex Sigma IDs into readable tags (e.g., `WEBSHELL`).
-* **🛡️ Golden Rule Logic:** Implemented "Threat > Noise" logic. Critical artifacts (e.g., WebShells in Cache) pierce through noise filters.
-* **✂️ Nemesis Tracer:** Modularized logic to aggressively deduplicate USN/MFT events and trace artifact lifecycles with sub-second precision.
-* **🕰️ Hybrid Time Logic:** Specialized **`--legacy` mode** for older OS environments to eliminate install-time noise.
-* **🔥 Chimera Fusion:** Correlates Lateral Movement across multiple hosts to visualize the entire campaign.
+* **🛡️ Inverted Tool Filter (逆転フィルタ - Plan H):** A paradigm shift in noise reduction.
+    * Instead of blacklisting "garbage" inside tool folders (Nmap, Python, Wireshark), Chronos now **whitelists only the binaries (EXE)** and nukes everything else.
+    * Result: 10,000+ library files vanished, leaving only the execution evidence.
+* **🤫 System Silencer (システム黙殺 - Plan I):** Breaks the "Negative Chain" of false positives.
+    * **Hercules Update:** Excludes `LocalSystem (S-1-5-18)`, `LocalService`, and `NetworkService` from timeline correlation logic.
+    * Prevents harmless background system activity from being flagged as "Sniper Hits" when coincidental timestamp matches occur.
+* **🧹 Junk Killer (ゴミ掃除):** Pandora now aggressively purges browser/app artifacts like `.ldb`, `-journal`, `.log`, and `.lock` to prevent them from being misidentified as "Credentials".
+* **⚙️ Externalized Dual-Use Config:** Moved "Dual-Use Tool" definitions (Nmap, PsExec, etc.) from Python code to `triage_rules.yaml` for easier updates without touching the core engine.
+* **🏛️ Two-Pass Strategy (往復ビンタ方式):** Resolves the "Chicken and Egg" problem.
+    * **Pass 1:** Pandora identifies "Ghost" files.
+    * **Sniper Mode:** Hercules targets specific logs based on Ghosts.
+    * **Pass 2:** Pandora re-runs to boost scores for correlated artifacts.
+* **👑 Midas Touch (Docx/PDF):** Automatically converts Markdown reports into **Executive Docx** files with embedded high-res Mermaid diagrams.
 
 ---
 
@@ -43,14 +46,14 @@ Get started immediately. No complex databases, just pure Python & Polars power.
 git clone [https://github.com/schutzz/SkiaHelios.git](https://github.com/schutzz/SkiaHelios.git)
 cd SkiaHelios
 
-# Install dependencies
+# Install dependencies (Rust/Polars required)
 pip install -r requirements.txt
 
 # [Optional] For Docx & Diagram generation:
 # Install Pandoc & Mermaid-CLI (npm install -g @mermaid-js/mermaid-cli)
 ```
 
-### 2. Sigma Integration Setup (Optional) 🆕
+### 2. Sigma Integration Setup (Optional)
 Import global threat intelligence (Sigma Rules) into AION's brain.
 
 ```bash
@@ -74,11 +77,11 @@ python SH_HeliosConsole.py
 ### 4. Command Line Mode (Automation)
 Ideal for CI/CD pipelines or scripted analysis.
 
-**Standard Scan + Golden Report:**
+**Standard Scan + Two-Pass Mode:**
 ```bash
 python SH_HeliosConsole.py \
   --dir "C:\Cases\Case_001\KAPE_Output" \
-  --case "Ransomware_Inv" \
+  --case "Case2_52" \
   --docx
 ```
 
@@ -86,26 +89,16 @@ python SH_HeliosConsole.py \
 *Use this flag to ignore System32/Program Files timestamps and focus on User/Web spaces.*
 ```bash
 python SH_HeliosConsole.py \
-  --dir "C:\Cases\GrrCON_2014\KAPE_Output" \
-  --case "Legacy_Breach" \
+  --dir "C:\Cases\Legacy_Breach\KAPE_Output" \
+  --case "Legacy_Inv" \
   --legacy
-```
-
-### 5. Operation Chimera (Multi-Host Fusion)
-Combine reports from multiple hosts to visualize the entire campaign.
-
-```bash
-# Point to the directory containing multiple Grimoire_*.json files
-python tools/SH_ChimeraFusion.py \
-  -d "Helios_Output/" \
-  -o "Helios_Output/Campaign_Master_Report.md"
 ```
 
 ---
 
-## 🏛️ Architecture (The Triad + Midas + Sigma)
+## 🏛️ Architecture (The Triad + Hestia + Two-Pass)
 
-SkiaHelios separates concerns into divine roles to ensure modularity and logic isolation.
+SkiaHelios separates concerns into divine roles to ensure modularity, logic isolation, and deadlock resolution.
 
 ```mermaid
 graph TD
@@ -117,126 +110,104 @@ graph TD
     classDef outputClass fill:#2F1B3A,stroke:#BA55D3,stroke-width:2px,color:#DDA0DD;
     classDef fusionClass fill:#1A0033,stroke:#FF69B4,stroke-width:3px,color:#FFB6C1;
     classDef goldClass fill:#B8860B,stroke:#FFD700,stroke-width:3px,color:#FFFFFF;
-    classDef ruleClass fill:#4B0082,stroke:#FFD700,stroke-width:2px,color:#FFFFFF,stroke-dasharray: 5 5;
+    classDef hestiaClass fill:#ff4444,stroke:#333,stroke-width:2px,color:#FFFFFF;
 
     %% Title Node
-    Title["⚡️ SkiaHelios v2.7 Architecture ⚡️<br/>God Mode: AION-Sigma & Midas"]:::inputClass
+    Title["⚡️ SkiaHelios v4.12 Architecture ⚡️<br/>System Silencer & Inverted Filters"]:::inputClass
 
     %% Input
-    Evidence["📂 Raw Artifacts<br/>KAPE CSVs / EVTX / MFT / Prefetch"]:::inputClass
-    SigmaRules["📜 Sigma Rules (YAML)"]:::ruleClass
-    ThemisFile["📜 triage_rules.yaml<br/>External Logic"]:::ruleClass
-
-    %% Phase 0: Charon
-    subgraph Phase0 ["🌉 Phase 0: Charon (The Ferryman) - Rule Ingestion"]
-        Charon["SH_CharonBridge<br/>Sigma to AION Conversion"]:::coreClass
+    Evidence["📂 Raw Artifacts<br/>KAPE CSVs / EVTX / MFT"]:::inputClass
+    
+    %% Phase 0: Hestia (The Gatekeeper)
+    subgraph Phase0 ["🔥 Phase 0: Hestia (The Gatekeeper) - Censorship"]
+        Hestia["SH_HestiaCensorship<br/>Zone of Death Filtering"]:::hestiaClass
     end
 
-    %% Phase 1: Clotho
-    subgraph Phase1 ["🧶 Phase 1: Clotho (The Spinner) - Ingestion & Enrichment"]
-        Clotho["SH_ClothoReader<br/>Universal Ingestion<br/>5W1H Enrichment"]:::coreClass
-        Hunters["🐍 Specialized Hunters<br/>• PlutosGate • HerculesReferee<br/>• Pandora • ChronosSift<br/>• Sirenhunt • Sphinx • AION"]:::moduleClass
+    %% Phase 1: Clotho & Physical
+    subgraph Phase1 ["🧶 Phase 1: Clotho & Physical Analysis"]
+        Clotho["SH_ClothoReader<br/>Identity Aware (v2.2)"]:::coreClass
+        Chronos["SH_ChronosSift<br/>Inverted Tool Filter (Plan H)"]:::moduleClass
+        Pandora1["SH_PandorasLink (Pass 1)<br/>Junk Killer (Plan I)"]:::moduleClass
     end
 
-    %% Phase 2: Atropos
-    subgraph Phase2 ["✂️ Phase 2: Atropos (The Thinker) - Correlation & Judgment"]
-        Atropos["SH_AtroposThinker<br/>Physics Time Sort<br/>Heat Correlation"]:::coreClass
-        Nemesis["Nemesis Tracer Standalone<br/>Deep Lifecycle & Dedup"]:::moduleClass
-        Themis["⚖️ Themis Loader<br/>Multi-Bank Rule Engine"]:::moduleClass
+    %% Phase 2: Event Logic (Hercules)
+    subgraph Phase2 ["⚔️ Phase 2: Hercules (Sniper Mode)"]
+        Hercules["SH_HerculesReferee<br/>System Silencer (S-1-5-18 Ignore)"]:::moduleClass
+        Pandora2["SH_PandorasLink (Pass 2)<br/>Cross-Correlation Feedback"]:::moduleClass
     end
 
-    %% Phase 3: Lachesis
-    subgraph Phase3 ["✍️ Phase 3: Lachesis (The Allotter) - Reporting"]
-        Lachesis["SH_LachesisWriter<br/>Omni-Visual Reporting<br/>Detection Statistics"]:::coreClass
+    %% Phase 3: Lachesis (Reporting)
+    subgraph Phase3 ["✍️ Phase 3: Lachesis (The Editor) - Narrative"]
+        AION["SH_AIONDetector<br/>Persistence"]:::moduleClass
+        Lachesis["SH_LachesisWriter<br/>YAML Configured Reporting"]:::coreClass
         Report["📜 Grimoire Report<br/>Visual Markdown"]:::outputClass
-        JSONData["📊 Structured JSON Dump<br/>Machine-Readable Evidence"]:::outputClass
-    end
-
-    %% Phase 4: Chimera
-    subgraph Phase4 ["🦁 Phase 4: Chimera (The Beast) - Multi-Host Fusion"]
-        Chimera["SH_ChimeraFusion<br/>Campaign-Level Integration"]:::fusionClass
-        Campaign["🏛️ Campaign Report<br/>Cross-Host Attack Narrative"]:::outputClass
     end
 
     %% Phase 5: Midas
-    subgraph Phase5 ["👑 Phase 5: Midas (The Alchemist) - Final Polish"]
-        Midas["SH_MidasTouch<br/>Docx Converter & Evidence Packager"]:::goldClass
+    subgraph Phase5 ["👑 Phase 5: Midas (The Alchemist)"]
+        Midas["SH_MidasTouch<br/>Docx Converter"]:::goldClass
         GoldReport["🏆 Golden Docx Report"]:::goldClass
-        SyncPack["📦 Team Sync Zip<br/>(Hash Verified)"]:::goldClass
     end
-
-    %% Footer Node
-    Footer["Powered by Python • Polars • Pure Logic<br/>© schutzz - v2.7 Complete"]:::inputClass
 
     %% Flow
     Title --> Evidence
-    Title --> SigmaRules
-
-    SigmaRules --> Charon
-    Charon --> ThemisFile
+    Evidence --> Hestia
+    Hestia --> Clotho
     
-    Evidence --> Clotho
-    ThemisFile -.->|Inject Rules| Themis
-    Themis -.->|Filter & Score| Atropos
+    Clotho --> Chronos
+    Clotho --> Pandora1
     
-    Clotho -->|Enriched Data| Atropos
-    Clotho --> Hunters
-    Atropos --> Nemesis
-    Atropos --> Lachesis
+    Pandora1 --> Hercules
+    Hercules -->|Feedback Loop| Pandora2
+    
+    Pandora2 --> AION
+    Hercules --> AION
+    AION --> Lachesis
     Lachesis --> Report
-    Lachesis --> JSONData
-    JSONData --> Chimera
-    Chimera --> Campaign
-
-    %% Midas Connections
     Report --> Midas
-    Campaign --> Midas
     Midas --> GoldReport
-    Midas --> SyncPack
 
     %% Overall Layout
-    Phase0 --> Phase1 --> Phase2 --> Phase3 --> Phase4 --> Phase5
-    Phase5 --> Footer
+    Phase0 --> Phase1 --> Phase2 --> Phase3 --> Phase5
 
     %% Phase Styling
-    class Phase0,Phase1,Phase2,Phase3,Phase4,Phase5 phaseClass;
+    class Phase0,Phase1,Phase2,Phase3,Phase5 phaseClass;
 ```
 
 ---
 
 ## 🧩 Module Breakdown
 
-| Module | Role | Functionality |
-| :--- | :--- | :--- |
-| **Charon** | The Ferryman | **[NEW]** Converts external **Sigma Rules** (YAML) into AION's internal regex format. |
-| **Themis** | The Law | **[UPDATE]** Multi-Bank Logic Engine. Loads specialized rulesets for Process, File, and Registry. Includes **Tag Normalizer**. |
-| **Lachesis** | The Weaver | **[UPDATE]** Omni-Visual reporting with **Detection Statistics** (Low-confidence summaries) and **Aggregated Findings**. |
-| **Midas** | The Alchemist | Converts MD to Docx, renders Mermaid to PNG, and creates Evidence Packages (Team Sync). |
-| **Atropos** | The Thinker | "Golden Rule" logic (Threat > Noise). Aggressive deduplication of USN/MFT events. |
-| **Nemesis** | The Tracer | Standalone module for tracing artifact lifecycles (Birth -> Rename -> Death) and command-line seeds. |
-| **Pandora** | The Link | Recovers deleted "Ghosts". Implements **Score >= 80** strict threshold to separate Criticals from Medium noise. |
-| **Chronos** | Time Lord | Hybrid Logic. Detects **Timestomping** ($SI < $FN) with ms-level precision. |
-| **Hercules** | The Referee | Event Log analysis. Now integrates **Sigma Process Creation** rules via Themis. |
-| **Plutos** | Gatekeeper | Network & SRUM analysis. Detects C2 and Lateral Movement using "Heat Scores". |
-| **Sphinx** | Decipherer | Decodes obfuscated command lines (Base64, PowerShell) and extracts IOCs. |
-| **AION** | The Eye | Persistence detection (RunKeys, Services) fully powered by Themis rules. |
+| Module | Role | Functionality | v4.12 Update |
+| :--- | :--- | :--- | :--- |
+| **Hestia** | The Gatekeeper | Centralized noise censorship. Defines "Zone of Death". | **v1.2:** Expanded Windows/Intel noise lists. |
+| **Clotho** | The Spinner | Ingestion & Enrichment. | **v2.2:** Identity Aware (OS/User extraction). |
+| **Pandora** | The Link | File System (MFT/USN) analysis. Recovers "Ghosts". | **v18.14:** **Plan I:** Explicitly kills `.ldb`/`.log` junk to prevent Credential false positives. |
+| **Hercules** | The Referee | Event Log analysis. Integrates Sigma Rules. | **v4.6:** **Plan I:** System Silencer. Ignores S-1-5-18 correlation to break noise chains. |
+| **Chronos** | Time Lord | Detects Timestomping ($SI < $FN). | **v23.15:** **Plan H:** Inverted Tool Filter. Protects EXEs, nukes libraries. |
+| **Lachesis** | The Weaver | Omni-Visual Reporting & Summarization. | **v3.16:** **External Config:** Reads `dual_use_tools` from YAML. |
+| **AION** | The Eye | Persistence detection (RunKeys, Services). | **v14.1:** Scans Registry & MFT powered by Themis rules. |
+| **Themis** | The Lawgiver | Rule Loader & Config Manager. | **v2.8:** Added `Dual-Use` tool configuration parsing. |
+| **Plutos** | Gatekeeper | Network & SRUM analysis. Detects C2/Lateral Movement. | (Stable) |
+| **Sphinx** | Decipherer | Decodes obfuscated command lines (Base64, PowerShell). | (Stable) |
+| **Midas** | The Alchemist | Converts MD to Docx, renders Mermaid to PNG. | (Stable) |
 
 ---
 
 ## 📊 Report Sample (Grimoire)
 
 SkiaHelios generates a `Grimoire_[CaseName]_jp.md` that renders beautifully in VS Code or GitHub.
+**v4.1 Update:** Now includes auto-generated Mermaid Attack Flow charts.
 
 ```mermaid
 graph TD
-    %% [Visual Style v2.5 - Omni-Visual]
+    %% [Visual Style v4.1 - Attack Flow]
     Attacker[🦁 Attacker] -->|Exploit/Access| Initial[Initial Access]
     
     Initial -->|Drop/Upload| WS_1["c99.php"]
     WS_1 -->|Exec| Cmd_1((Shell))
     
-    Initial -->|Drop/Upload| WS_2["tmpudvfh.php"]
-    WS_2 -->|Exec| Cmd_2((Shell))
+    Initial -->|Timestomp| TS_1["hash_suite.exe<br/>(Time Forged)"]
     
     Cmd_1 -->|Persistence| RK_1["mxdwdui.BUD <br/>(Rootkit)"]
     
@@ -244,8 +215,31 @@ graph TD
 
     %% Styles
     classDef threat fill:#f96,stroke:#333,stroke-width:2px;
-    class Attacker,Initial,WS_1,WS_2,RK_1,IP_1 threat;
+    class Attacker,Initial,WS_1,TS_1,RK_1,IP_1 threat;
 ```
+
+---
+
+## 🛠️ Development History (Case2 Strategy Log)
+
+Significant milestones in overcoming legacy environment challenges and noise floods.
+
+### 1. Radical Noise Filtering (The Hestia Protocol)
+Overcoming the flood of 100k+ noise artifacts in legacy environments.
+* **Zone of Death Strategy:** Defined structural noise zones (Web Cache, Temp, Tool Samples) where files are nuked unless correlated.
+* **Safety Valve:** Implemented strict whitelisting for Windows/Python system files.
+
+### 2. The Silence of the Logs (Plan H & I)
+**v4.12 Breakthrough:** Addressed the "Dual-Use Tool" dilemma where legitimate admin tools (Nmap, Wireshark) generated thousands of false positives.
+* **Plan H (Inverted Filter):** Switched from "Blacklisting garbage" to "Whitelisting Binaries" inside tool folders. Result: 95% noise reduction in Chronos.
+* **Plan I (System Silencer):** Identified a "Noise Chain" where Pandora's false positives (Chrome .ldb) were being correlated with Hercules' System events. Implemented `S-1-5-18` ignore rules to sever this link.
+
+### 3. Identity & Context Awareness
+* **Clotho v2.2:** Now parses `SOFTWARE` hive for ProductName and analyzes Event Logs to infer Hostname/User, drastically reducing manual context entry and eliminating "N/A".
+
+### 4. Narrative Reporting (Lachesis v4.1)
+* **The Editor:** Transformed the report from a "Phonebook of Logs" to an "Intelligence Brief".
+* **External Config:** Dual-Use tools are now defined in `triage_rules.yaml`, ensuring reports capture "Living off the Land" binaries without code changes.
 
 ---
 
@@ -254,13 +248,12 @@ graph TD
 * [x] **v1.0:** Core Logic (Clotho/Atropos/Lachesis)
 * [x] **v1.9:** Internal Scout & Lateral Movement Logic (Chimera)
 * [x] **v2.0:** Visual Reporting (Mermaid Integration)
-* [x] **v2.1:** Legacy OS Support & Threat Intelligence
-* [x] **v2.2:** Interactive Mode & Syntax Guards
-* [x] **v2.5:** Modular Architecture (Nemesis/Themis) & Omni-Visual Reporting
-* [x] **v2.6:** Midas Touch (Docx Generation & Evidence Packaging)
-* [x] **v2.7:** **AION-Sigma Integration & Intelligent Summarization**
-* [ ] **v3.0:** Volatility 3 Integration (Memory Forensics)
-* [ ] **v4.0:** Rust Rewrite (Project: *Ares*)
+* [x] **v2.5:** Modular Architecture (Nemesis/Themis)
+* [x] **v2.7:** AION-Sigma Integration & Midas Touch (Docx)
+* [x] **v4.0:** **Hestia Censorship & Two-Pass Strategy** (Deadlock Resolution)
+* [x] **v4.11:** **SIMD Optimization & Identity Aware** (Speed)
+* [x] **v4.12:** **System Silencer & Inverted Tool Filters** (Noise Kill)
+* [ ] **v5.0:** Real-time Triage Mode (Live Response)
 
 ---
 

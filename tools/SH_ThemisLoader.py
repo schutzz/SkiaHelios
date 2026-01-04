@@ -20,6 +20,10 @@ class ThemisLoader:
         self.noise_rules = []
         self.threat_rules = []
         self.persistence_targets = []
+        self.dual_use_config = {
+            "keywords": [],      # Lachesis/Chronos 用
+            "noise_paths": []    # Chronos/Pandora 用
+        }
         
         # [NEW] Tag Mapping Dictionary
         self.tag_map = {
@@ -56,6 +60,13 @@ class ThemisLoader:
                         self.noise_rules.extend(data.get("noise_filters", []))
                         self.threat_rules.extend(data.get("threat_signatures", []))
                         self.persistence_targets.extend(data.get("persistence_targets", []))
+                        
+                        # [NEW] Load Dual-Use Tools Configuration
+                        if "dual_use_tools" in data:
+                            for tool in data["dual_use_tools"]:
+                                self.dual_use_config["keywords"].extend([k.lower() for k in tool.get("keywords", [])])
+                                self.dual_use_config["noise_paths"].extend([p.lower() for p in tool.get("noise_paths", [])])
+                        
                         total_loaded += 1
             except Exception as e:
                 print(f"[!] Themis Error: Failed to load {p} ({e})")
@@ -96,6 +107,16 @@ class ThemisLoader:
             exprs.append(expr)
         if not exprs: return pl.lit(False)
         return pl.any_horizontal(exprs)
+
+    # --- [NEW] Helper Methods for Dual-Use ---
+    
+    def get_dual_use_keywords(self):
+        """報告書に強制掲載すべきキーワードリストを返す"""
+        return list(set(self.dual_use_config["keywords"]))
+
+    def get_tool_noise_paths(self):
+        """ツールごとの除外すべきゴミフォルダリストを返す"""
+        return list(set(self.dual_use_config["noise_paths"]))
 
     def _clean_tag(self, raw_tag):
         """
