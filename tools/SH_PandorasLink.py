@@ -7,9 +7,9 @@ from datetime import datetime
 from tools.SH_ThemisLoader import ThemisLoader
 
 # ============================================================
-#  SH_PandorasLink v18.14 [Themis Integrated]
+#  SH_PandorasLink v18.17 [Triage Cleaner]
 #  Mission: Surgical removal & Cross-Correlation.
-#  Update: Plan I - Killed Chrome/Skype Junk (.ldb, -journal).
+#  Update: Expanded Triage Kill List (McAfee, BMP, GIF).
 # ============================================================
 
 def print_logo():
@@ -23,16 +23,17 @@ def print_logo():
     * \_/    \__\______/__/    \_/   *
       .     * /______\     .     .
     
-      [ SH_PandorasLink v18.14 ]
+      [ SH_PandorasLink v18.17 ]
      "The Trinity: Normalized & Focused."
     """
     print(logo)
 
 class PandoraEngine:
-    def __init__(self, mft_live, usn, mft_vss=None):
+    def __init__(self, mft_live, usn, mft_vss=None, triage_mode=False):
         self.mft_live_path = mft_live
         self.usn_path = usn
         self.mft_vss_path = mft_vss
+        self.triage_mode = triage_mode
         self.loader = ThemisLoader(["rules/triage_rules.yaml", "rules/sigma_file_event.yaml"])
         print(f"[*] Initializing Engine with Themis Rules...")
         self.lf_live = self._load_mft(mft_live).lazy()
@@ -200,16 +201,25 @@ class PandoraEngine:
         file_kill_list = [
             "safe browsing", "bistats.lock", ".qml", 
             "edb.log", "edb00", "thumbs.db", "iconcache", 
-            "gdipfontcache", "ntuser.dat", "usrclass.dat",
-            # [NEW] Plan I Targets
-            ".ldb", "-journal", ".sys", ".lst", ".cab", ".pyd", 
-            "0000", ".lock"
+            "gdipfontcache", "ntuser.dat", "usrclass.dat"
         ]
+        
+        # [NEW] Triage Mode Extension (Cleaner)
+        if self.triage_mode:
+            print("       >> [!] Triage Mode: Aggressive Junk Killing Active")
+            file_kill_list.extend([
+                ".ldb", "-journal", ".sys", ".lst", ".cab", ".pyd", 
+                "0000", ".lock", ".log",
+                ".aux", ".bmp", ".gif", ".rbf", ".ni.dll", "mcafee.truekey" # [Added]
+            ])
         
         path_kill_list = [
             "dropbox", "onedrive", "assembly", "servicing",
             "microsoft.net", "windowsapps", "winsxs",
-            "windows/filemanager/assets"
+            "windows/filemanager/assets",
+            "macromedia", "flash player", "sharedobjects", # Flash junk
+            "appdata/local/packages", "appdata\\local\\packages", # Appx junk
+            "templates" # Office junk
         ]
 
         # ==========================================
@@ -347,7 +357,7 @@ def auto_detect_ntfs(target_dir):
 
 def main(argv=None):
     print_logo()
-    parser = argparse.ArgumentParser(description="SH_PandorasLink v18.14")
+    parser = argparse.ArgumentParser(description="SH_PandorasLink v18.17")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("-d", "--dir", help="Auto-detect CSVs")
     group.add_argument("--manual", action="store_true")
@@ -356,7 +366,10 @@ def main(argv=None):
     parser.add_argument("--chaos"); parser.add_argument("--pf"); parser.add_argument("--shim")
     parser.add_argument("--chronos", help="Chronos CSV for Correlation")
     parser.add_argument("--hercules", help="Hercules CSV for Correlation")
-    parser.add_argument("--out", default="pandora_result_v18.14.csv")
+    parser.add_argument("--out", default="pandora_result_v18.17.csv")
+    
+    # [NEW] Triage Flag
+    parser.add_argument("--triage", action="store_true", help="Enable Aggressive Junk Killer")
     args = parser.parse_args(argv)
     
     mft_path = args.mft
@@ -368,7 +381,7 @@ def main(argv=None):
     if not mft_path or not usn_path: return
     
     try:
-        engine = PandoraEngine(str(mft_path), str(usn_path), args.vss)
+        engine = PandoraEngine(str(mft_path), str(usn_path), args.vss, triage_mode=args.triage)
         lf_ghosts = engine.run_gap_analysis_full(args.start, args.end)
         
         if lf_ghosts is not None:

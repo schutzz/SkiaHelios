@@ -1,37 +1,32 @@
-$content = @'
-# --- SkiaHelios Pure Logic Filter ---
+# --- SkiaHelios Critical Logic Filter ---
 .env
 *.pem
 *.key
 id_rsa
 id_ed25519
 
-# Artifacts & Noise
-*.raw
-*.mem
-*.vmem
-*.ad1
-*.E01
-*.csv
-*.json
-*.log
-*.tmp
-*.spec
-/case_data/
-/evidence/
+# Artifacts & Temporary Files
+/*.csv
+/*.log
+/*.txt
+/*.docx
+!/README.md
+!/requirements.txt
+fol.txt
 
-# Python & Build
-**/__pycache__/
-*.py[cod]
-build/
-dist/
+# External Repositories (Sigma)
+/sigma/
 
-# Analysis Outputs (This is what you want to hide!)
+# Output Folders
 Helios_Output/
 TestCase/
+TEST_ZONE_HELIOS/
+Mock_TwinSnakes/
 /output/
 
-!/.github/
-'@
-
-[System.IO.File]::WriteAllLines("$pwd\.gitignore", $content)
+# Python Cache & Env
+**/__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/

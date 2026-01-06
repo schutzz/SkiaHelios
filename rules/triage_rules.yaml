@@ -1,5 +1,6 @@
-# rules/triage_rules.yaml [Themis Law v2.2]
+# rules/triage_rules.yaml [Themis Law v2.3]
 # Update: Fixed Noise Filter placement & Enhanced folder suppression
+# Update: Added Detection for LNK Masquerade, CRX Hidden, and Notification Anomalies.
 
 # --- [Persistence Targets (AION Scope)] ---
 persistence_targets:
@@ -418,29 +419,28 @@ threat_signatures:
     condition: "regex"
     pattern: "(?i)^(winword\\.exe|excel\\.exe|powerpnt\\.exe|outlook\\.exe)$"
 
-    # ==========================================
-# 🛠️ Dual-Use / Admin Tools Configuration
-# ==========================================
-# これらのツールは「攻撃にも使われる」ため、ゴミは消しつつ、
-# 実行痕跡（EXEなど）は必ず報告書（Lachesis）に残します。
-dual_use_tools:
-  - name: "Nmap"
-    keywords: ["nmap", "zenmap"]
-    # 以下のパスに含まれるファイルは「ノイズ」としてChronos/Pandoraで除外する
-    noise_paths: ["nmap/scripts", "nmap/nselib", "nmap/docs"]
 
-  - name: "Wireshark"
-    keywords: ["wireshark", "tshark", "capinfos"]
-    noise_paths: ["wireshark/snmp", "wireshark/radius", "wireshark/help", "wireshark/dtds"]
+# [NEW] Case Specific Threat Signatures
+  - name: "Masquerading LNK (Phishing)"
+    tag: "CRITICAL_PHISHING"
+    score: 300
+    target: "FileName"
+    condition: "regex"
+    # Detects .jpg.lnk, .pdf.lnk, .doc.lnk OR LNKs with bait words (kitties, cute, invoice)
+    pattern: "(?i)(\\.(jpg|pdf|doc|docx|png|xlsx)\\.lnk|.*(adorable|cute|kitten|cats|invoice|payment|receipt).*\\.lnk)$"
 
-  - name: "Python / Dev Tools"
-    keywords: ["python", "pip", "perl", "ruby"]
-    noise_paths: ["python/lib", "python/tcl", "python/include", "lib/test", "lib/site-packages"]
+  - name: "Suspicious CRX (Adobe Masquerade)"
+    tag: "CRITICAL_MASQUERADE"
+    score: 300
+    target: "ParentPath"
+    condition: "regex"
+    # Detects .crx files outside of typical Chrome/Edge extension paths, specifically Adobe
+    pattern: "(?i)(Adobe|Acrobat|Program Files.*Adobe).*(extensions|plugins|js).*\\.crx$"
 
-  - name: "Remote Admin / Lateral"
-    keywords: ["psexec", "paexec", "winscp", "putty", "netcat", "nc.exe"]
-    noise_paths: [] # ノイズパスなし（見つけたら即報告）
-
-  - name: "Anonymity / Tor"
-    keywords: ["tor.exe", "tor browser"]
-    noise_paths: ["tor/pluggabletransports"]
+  - name: "Suspicious Notification Asset (Timestomp)"
+    tag: "SUSP_TIMESTOMP_NOTIF"
+    score: 200
+    target: "ParentPath"
+    condition: "regex"
+    # Targets weird files in Notifications folder
+    pattern: "(?i)AppData\\\\Local\\\\Microsoft\\\\Windows\\\\Notifications"

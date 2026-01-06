@@ -1,245 +1,190 @@
-# SkiaHelios v4.12 - The Silencer & The Inverted Filter (Noise Kill Strategy)
+# SkiaHelios v4.43 - The Story Inference Engine (Tartaros v3.0)
 
 ![SkiaHelios CI](https://github.com/schutzz/SkiaHelios/actions/workflows/test.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
 ![Polars](https://img.shields.io/badge/Engine-Polars_0.20%2B-orange?logo=polars)
 ![Mermaid](https://img.shields.io/badge/Report-Mermaid_Visuals-ff69b4?logo=mermaid)
-![Tests](https://img.shields.io/badge/Tests-15%2F15_PASS-brightgreen)
-![Status](https://img.shields.io/badge/Status-Battle_Tested-green)
+![Tests](https://img.shields.io/badge/Tests-35%2F35_PASS-brightgreen)
+![Status](https://img.shields.io/badge/Status-Deep_Dive_Ready-green)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey)
 
 > *"From Shadows to Sun. From Data to Gold."*
+> *"Tracing the Thread (LNK) back to the Spider (Web)."*
 
-**SkiaHelios** is a high-resolution, modular DFIR (Digital Forensics & Incident Response) framework built for **speed**, **causality**, and **visual narrative**.
+**SkiaHelios** is a high-resolution, modular DFIR (Digital Forensics & Incident Response) framework built for **speed**, **causality**, **origin tracing**, and **visual narrative**.
 
-Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** supported by **"Hestia" (The Gatekeeper)** to deconstruct artifacts, trace physical execution chains, and weave a cohesive narrative across multiple hosts.
+Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** supported by **"Hestia" (The Gatekeeper)**, **"Hercules" (The Referee)**, and the newly evolved **"Tartaros" (The Story Inference Engine)** to deconstruct artifacts, trace physical execution chains, and weave a cohesive narrative across multiple hosts.
 
-**Current Version:** v4.12 (System Silencer / Inverted Tool Filter / YAML Config / Noise Chain Break)
-
----
-
-## ⚡ Key Features (v4.12 Updates)
-
-* **🛡️ Inverted Tool Filter (逆転フィルタ - Plan H):** A paradigm shift in noise reduction.
-    * Instead of blacklisting "garbage" inside tool folders (Nmap, Python, Wireshark), Chronos now **whitelists only the binaries (EXE)** and nukes everything else.
-    * Result: 10,000+ library files vanished, leaving only the execution evidence.
-* **🤫 System Silencer (システム黙殺 - Plan I):** Breaks the "Negative Chain" of false positives.
-    * **Hercules Update:** Excludes `LocalSystem (S-1-5-18)`, `LocalService`, and `NetworkService` from timeline correlation logic.
-    * Prevents harmless background system activity from being flagged as "Sniper Hits" when coincidental timestamp matches occur.
-* **🧹 Junk Killer (ゴミ掃除):** Pandora now aggressively purges browser/app artifacts like `.ldb`, `-journal`, `.log`, and `.lock` to prevent them from being misidentified as "Credentials".
-* **⚙️ Externalized Dual-Use Config:** Moved "Dual-Use Tool" definitions (Nmap, PsExec, etc.) from Python code to `triage_rules.yaml` for easier updates without touching the core engine.
-* **🏛️ Two-Pass Strategy (往復ビンタ方式):** Resolves the "Chicken and Egg" problem.
-    * **Pass 1:** Pandora identifies "Ghost" files.
-    * **Sniper Mode:** Hercules targets specific logs based on Ghosts.
-    * **Pass 2:** Pandora re-runs to boost scores for correlated artifacts.
-* **👑 Midas Touch (Docx/PDF):** Automatically converts Markdown reports into **Executive Docx** files with embedded high-res Mermaid diagrams.
+**Current Version:** v4.43 (Story Inference / Deep Hunter / Hybrid Matching)
 
 ---
 
-## ⚡ Quick Start (30 Seconds)
-
-Get started immediately. No complex databases, just pure Python & Polars power.
-
-### 1. Installation
-```bash
-# Clone the repository
-git clone [https://github.com/schutzz/SkiaHelios.git](https://github.com/schutzz/SkiaHelios.git)
-cd SkiaHelios
-
-# Install dependencies (Rust/Polars required)
-pip install -r requirements.txt
-
-# [Optional] For Docx & Diagram generation:
-# Install Pandoc & Mermaid-CLI (npm install -g @mermaid-js/mermaid-cli)
-```
-
-### 2. Sigma Integration Setup (Optional)
-Import global threat intelligence (Sigma Rules) into AION's brain.
-
-```bash
-# 1. Clone Sigma Rules
-git clone [https://github.com/SigmaHQ/sigma.git](https://github.com/SigmaHQ/sigma.git)
-
-# 2. Convert Rules using CharonBridge
-python tools/SH_CharonBridge.py sigma/rules/windows/process_creation/ -o rules/sigma_process_creation.yaml
-python tools/SH_CharonBridge.py sigma/rules/windows/file/ -o rules/sigma_file_event.yaml
-python tools/SH_CharonBridge.py sigma/rules/windows/registry/ -o rules/sigma_registry.yaml
-```
-
-### 3. Interactive Mode (Wizard)
-Simply run the script. It now asks if you want to generate a **Golden Report (Docx)**.
-
-```bash
-python SH_HeliosConsole.py
-# Follow the prompts: "Generate Docx Report? [y/N]"
-```
-
-### 4. Command Line Mode (Automation)
-Ideal for CI/CD pipelines or scripted analysis.
-
-**Standard Scan + Two-Pass Mode:**
-```bash
-python SH_HeliosConsole.py \
-  --dir "C:\Cases\Case_001\KAPE_Output" \
-  --case "Case2_52" \
-  --docx
-```
-
-**Legacy Scan (Old OS - XP/Vista/2008/2012 or High Noise):**
-*Use this flag to ignore System32/Program Files timestamps and focus on User/Web spaces.*
-```bash
-python SH_HeliosConsole.py \
-  --dir "C:\Cases\Legacy_Breach\KAPE_Output" \
-  --case "Legacy_Inv" \
-  --legacy
-```
-
----
-
-## 🏛️ Architecture (The Triad + Hestia + Two-Pass)
-
-SkiaHelios separates concerns into divine roles to ensure modularity, logic isolation, and deadlock resolution.
+## 🏛️ Architecture Overview
 
 ```mermaid
 graph TD
-    %% Style Definitions
-    classDef inputClass fill:#2D1B3A,stroke:#E0B0FF,stroke-width:2px,color:#E0B0FF;
-    classDef phaseClass fill:#1E0B2A,stroke:#B19CD9,stroke-width:3px,color:#FFFFFF,rx:15,ry:15;
-    classDef coreClass fill:#3A1B4F,stroke:#D8BFD8,stroke-width:2px,color:#FFFFFF;
-    classDef moduleClass fill:#4A2B5F,stroke:#9370DB,stroke-width:2px,color:#E6E6FA;
-    classDef outputClass fill:#2F1B3A,stroke:#BA55D3,stroke-width:2px,color:#DDA0DD;
-    classDef fusionClass fill:#1A0033,stroke:#FF69B4,stroke-width:3px,color:#FFB6C1;
-    classDef goldClass fill:#B8860B,stroke:#FFD700,stroke-width:3px,color:#FFFFFF;
-    classDef hestiaClass fill:#ff4444,stroke:#333,stroke-width:2px,color:#FFFFFF;
-
-    %% Title Node
-    Title["⚡️ SkiaHelios v4.12 Architecture ⚡️<br/>System Silencer & Inverted Filters"]:::inputClass
-
-    %% Input
-    Evidence["📂 Raw Artifacts<br/>KAPE CSVs / EVTX / MFT"]:::inputClass
+    %% Input Stage
+    Input[("KAPE Artifacts\n(CSV)")] --> Clotho[("🌀 Clotho\n(Ingestion)")]
     
-    %% Phase 0: Hestia (The Gatekeeper)
-    subgraph Phase0 ["🔥 Phase 0: Hestia (The Gatekeeper) - Censorship"]
-        Hestia["SH_HestiaCensorship<br/>Zone of Death Filtering"]:::hestiaClass
-    end
-
-    %% Phase 1: Clotho & Physical
-    subgraph Phase1 ["🧶 Phase 1: Clotho & Physical Analysis"]
-        Clotho["SH_ClothoReader<br/>Identity Aware (v2.2)"]:::coreClass
-        Chronos["SH_ChronosSift<br/>Inverted Tool Filter (Plan H)"]:::moduleClass
-        Pandora1["SH_PandorasLink (Pass 1)<br/>Junk Killer (Plan I)"]:::moduleClass
-    end
-
-    %% Phase 2: Event Logic (Hercules)
-    subgraph Phase2 ["⚔️ Phase 2: Hercules (Sniper Mode)"]
-        Hercules["SH_HerculesReferee<br/>System Silencer (S-1-5-18 Ignore)"]:::moduleClass
-        Pandora2["SH_PandorasLink (Pass 2)<br/>Cross-Correlation Feedback"]:::moduleClass
-    end
-
-    %% Phase 3: Lachesis (Reporting)
-    subgraph Phase3 ["✍️ Phase 3: Lachesis (The Editor) - Narrative"]
-        AION["SH_AIONDetector<br/>Persistence"]:::moduleClass
-        Lachesis["SH_LachesisWriter<br/>YAML Configured Reporting"]:::coreClass
-        Report["📜 Grimoire Report<br/>Visual Markdown"]:::outputClass
-    end
-
-    %% Phase 5: Midas
-    subgraph Phase5 ["👑 Phase 5: Midas (The Alchemist)"]
-        Midas["SH_MidasTouch<br/>Docx Converter"]:::goldClass
-        GoldReport["🏆 Golden Docx Report"]:::goldClass
-    end
-
-    %% Flow
-    Title --> Evidence
-    Evidence --> Hestia
-    Hestia --> Clotho
+    %% Analysis Stage (Themis Logic)
+    Clotho --> Atropos{{"⚖️ Atropos\n(Judgment)"}}
+    Rules[("📜 Themis Rules\n(YAML)")] -.-> Atropos
     
-    Clotho --> Chronos
-    Clotho --> Pandora1
+    %% Specialized Modules
+    Atropos --> Chronos["⏳ Chronos\n(Timeline & Timestomp)"]
+    Atropos --> Pandora["📦 Pandora\n(File & Masquerade)"]
+    Atropos --> Hercules["🦁 Hercules\n(Identity & Registry)"]
+    Atropos --> Aion["👁️ AION\n(Persistence)"]
     
-    Pandora1 --> Hercules
-    Hercules -->|Feedback Loop| Pandora2
+    %% Origin Tracing (Evolved in v4.40+)
+    LNKs["Phishing LNKs"] -.-> Tartaros["⛓️ Tartaros v3.0\n(Story Inference Engine)"]
+    History["Browser History"] -.-> Tartaros
+    Tartaros --> Lachesis
     
-    Pandora2 --> AION
-    Hercules --> AION
-    AION --> Lachesis
-    Lachesis --> Report
-    Report --> Midas
-    Midas --> GoldReport
-
-    %% Overall Layout
-    Phase0 --> Phase1 --> Phase2 --> Phase3 --> Phase5
-
-    %% Phase Styling
-    class Phase0,Phase1,Phase2,Phase3,Phase5 phaseClass;
+    %% Reporting Stage
+    Chronos --> Lachesis[("🕸️ Lachesis\n(Narrative Weaver)")]
+    Pandora --> Lachesis
+    Hercules --> Lachesis
+    Aion --> Lachesis
+    
+    %% Output
+    Lachesis --> Report[("📜 Grimoire.md\n(Final Report)")]
+    Lachesis --> Pivot[("🎯 Pivot_Config.json\n(Deep Dive)")]
+    Lachesis --> Mermaid[("📊 Attack Flow\n(Visual Graph)")]
 ```
 
 ---
 
-## 🧩 Module Breakdown
+## 🚀 Module Breakdown & Features
 
-| Module | Role | Functionality | v4.12 Update |
-| :--- | :--- | :--- | :--- |
-| **Hestia** | The Gatekeeper | Centralized noise censorship. Defines "Zone of Death". | **v1.2:** Expanded Windows/Intel noise lists. |
-| **Clotho** | The Spinner | Ingestion & Enrichment. | **v2.2:** Identity Aware (OS/User extraction). |
-| **Pandora** | The Link | File System (MFT/USN) analysis. Recovers "Ghosts". | **v18.14:** **Plan I:** Explicitly kills `.ldb`/`.log` junk to prevent Credential false positives. |
-| **Hercules** | The Referee | Event Log analysis. Integrates Sigma Rules. | **v4.6:** **Plan I:** System Silencer. Ignores S-1-5-18 correlation to break noise chains. |
-| **Chronos** | Time Lord | Detects Timestomping ($SI < $FN). | **v23.15:** **Plan H:** Inverted Tool Filter. Protects EXEs, nukes libraries. |
-| **Lachesis** | The Weaver | Omni-Visual Reporting & Summarization. | **v3.16:** **External Config:** Reads `dual_use_tools` from YAML. |
-| **AION** | The Eye | Persistence detection (RunKeys, Services). | **v14.1:** Scans Registry & MFT powered by Themis rules. |
-| **Themis** | The Lawgiver | Rule Loader & Config Manager. | **v2.8:** Added `Dual-Use` tool configuration parsing. |
-| **Plutos** | Gatekeeper | Network & SRUM analysis. Detects C2/Lateral Movement. | (Stable) |
-| **Sphinx** | Decipherer | Decodes obfuscated command lines (Base64, PowerShell). | (Stable) |
-| **Midas** | The Alchemist | Converts MD to Docx, renders Mermaid to PNG. | (Stable) |
+### 1. The Triad Architecture (Time, Space, Narrative)
+* **Clotho (Parser):** High-speed ingestion of KAPE artifacts (MFT, USN, EventLogs, Registry) using Rust-based Polars. Optimized for large datasets (millions of rows).
+* **Atropos (Analyzer):** "Themis" rule-based logic to cut the thread of life (separate Signal from Noise). Uses a dual-pass scoring system.
+* **Lachesis (Weaver):** Generates the "Grimoire" (Report) with **Smart Scope Calculation** (Auto-detecting incident window) and **Visual IOCs**.
+    * **Deep History Hunter (v4.40):** Recursively scans the entire KAPE output directory tree to find Browser History CSVs, ensuring no evidence is left behind regardless of folder structure.
+
+### 2. Intelligent Noise Filtering (Hestia)
+* **Hestia (Gatekeeper):** Aggressive whitelisting of OS noise.
+* **Inverted Tool Filter (v4.12):** Instead of blacklisting garbage, Hestia whitelists known binaries inside tool folders (e.g., `C:\Program Files\`). Anything else is flagged.
+* **Result:** 95% noise reduction in Chronos timelines.
+
+### 3. Critical Bypass Logic (v4.25+)
+* **Concept:** A safety net for high-threat artifacts that might reside in noisy locations.
+* **Mechanism:** Artifacts are exempt from Hestia's filtering if:
+    1.  Threat Score >= 250 (Critical)
+    2.  Tag contains "MASQUERADE" or "TIMESTOMP"
+    3.  Filename matches a "Dual-Use Tool" (e.g., `teamviewer.exe`, `nmap.exe`)
+* **Benefit:** Ensures hidden threats in `AppData/.../Notifications/` or `Adobe` folders are reported.
+
+### 4. Origin Tracing (Tartaros v3.0 - Evolved)
+* **Tartaros (The Story Inference Engine):** Connects isolated artifacts back to their source using advanced heuristics.
+    * **Hybrid Matching:** Combines **Direct Name Match** (High Confidence) with **Time Cluster Inference** (Medium Confidence).
+    * **Time Clustering:** Can infer the origin of a file even if the name has changed, by correlating LNK access times with clusters of Browser Download events (Time Window Analysis).
+    * **Stem Logic:** Automatically handles browser auto-numbering (e.g., `cat[1].jpg` vs `cat.jpg`) and extension mismatches to robustness linking.
+    * **Output:** Populates the **Initial Access Vector** section with precise URLs and time-gap analysis (e.g., *"Gap: 2h 15m"*).
+
+### 5. Identity & Context Awareness (Hercules)
+* **Hercules (Referee v4.20):**
+    * **Registry Sovereign:** Parses `SOFTWARE` hive directly to identify OS Version (e.g., *Windows 8.1 Enterprise Build 9600*), removing reliance on Event ID 6009.
+    * **Sniper Mode:** Correlates `UserAssist` and `ShellBags` with file artifacts to identify the "Patient Zero" user.
+* **System Silencer (v4.12):** Identified a "Noise Chain" where Pandora's false positives were correlated with System events. Implemented `S-1-5-18` ignore rules.
+
+### 6. Persistence Detection (AION)
+* **AION (The Eye):** Scans Registry Run Keys, Services, and Tasks.
+* **Integration:** Cross-references persistence mechanisms with file artifacts found by Pandora.
 
 ---
 
-## 📊 Report Sample (Grimoire)
+## 🛠️ Installation & Configuration
 
-SkiaHelios generates a `Grimoire_[CaseName]_jp.md` that renders beautifully in VS Code or GitHub.
-**v4.1 Update:** Now includes auto-generated Mermaid Attack Flow charts.
+### Prerequisites
+* Python 3.10+
+* Polars (`pip install polars`)
+* Pandas (`pip install pandas`) - *Legacy support*
+* Colorama (`pip install colorama`)
 
-```mermaid
-graph TD
-    %% [Visual Style v4.1 - Attack Flow]
-    Attacker[🦁 Attacker] -->|Exploit/Access| Initial[Initial Access]
-    
-    Initial -->|Drop/Upload| WS_1["c99.php"]
-    WS_1 -->|Exec| Cmd_1((Shell))
-    
-    Initial -->|Timestomp| TS_1["hash_suite.exe<br/>(Time Forged)"]
-    
-    Cmd_1 -->|Persistence| RK_1["mxdwdui.BUD <br/>(Rootkit)"]
-    
-    Attacker -.->|C2/Lateral| IP_1("192.168.56.102")
+### Configuration (`triage_rules.yaml`)
+SkiaHelios uses an external configuration file for "Themis" rules.
+```yaml
+dual_use_tools:
+  - teamviewer
+  - nmap
+  - anydesk
+  - mimikatz
+  - procmon
+  # Add tools here to prevent them from being filtered
+```
 
-    %% Styles
-    classDef threat fill:#f96,stroke:#333,stroke-width:2px;
-    class Attacker,Initial,WS_1,TS_1,RK_1,IP_1 threat;
+### Standard Triage Execution
+To run the full pipeline including **Tartaros v3.0** and **Hercules OS Detection**:
+
+```bash
+python SH_HekateTriad.py \
+  --case "Case2_Incident_X" \
+  --outdir "C:\Work\Case2\Helios_Output" \
+  --timeline "C:\Work\Case2\KAPE\Timeline.csv" \
+  --kape "C:\Work\Case2\KAPE\Registry_Dump"
+```
+
+*Note: Hekate/Lachesis will automatically recursively search for `Browser_History` CSVs in the KAPE directory and feed them to Tartaros.*
+
+### Deep Dive (Pivot)
+After Triage, use the generated `Pivot_Config.json` to investigate specific targets:
+
+```bash
+python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
 ```
 
 ---
 
-## 🛠️ Development History (Case2 Strategy Log)
+## 📜 Complete Changelog
 
-Significant milestones in overcoming legacy environment challenges and noise floods.
+### v4.43 (Current) - The Story Inference Update
+* **[Tartaros]** Upgraded to **v3.0 Story Inference Mode**. Implemented "Time Cluster" logic to infer download origins even when file names do not strictly match (e.g., LNK created hours after download).
+* **[Tartaros]** Added **Stem Matching** to ignore browser duplicate numbering (e.g., `[1]`) and extension mismatches.
+* **[Lachesis]** Implemented **Deep History Hunter (v4.40)**: Recursive disk scanning to locate History CSVs in subdirectories.
+* **[Core]** Fixed path relaying between Hekate and Lachesis to ensure remote evidence folders are correctly scanned.
 
-### 1. Radical Noise Filtering (The Hestia Protocol)
-Overcoming the flood of 100k+ noise artifacts in legacy environments.
-* **Zone of Death Strategy:** Defined structural noise zones (Web Cache, Temp, Tool Samples) where files are nuked unless correlated.
-* **Safety Valve:** Implemented strict whitelisting for Windows/Python system files.
+### v4.32 - The Robustness Update
+* **[Core]** Removed all silent `try-except-pass` blocks. Errors are now logged with full tracebacks.
+* **[Lachesis]** Implemented **Safe Casting** for AION/Chronos scores to prevent `str` vs `int` crashes.
+* **[Lachesis]** **Scope Self-Correction:** Calculation of incident window now includes "Visual IOCs" (Bypassed artifacts), fixing "Unknown Range" errors.
 
-### 2. The Silence of the Logs (Plan H & I)
-**v4.12 Breakthrough:** Addressed the "Dual-Use Tool" dilemma where legitimate admin tools (Nmap, Wireshark) generated thousands of false positives.
-* **Plan H (Inverted Filter):** Switched from "Blacklisting garbage" to "Whitelisting Binaries" inside tool folders. Result: 95% noise reduction in Chronos.
-* **Plan I (System Silencer):** Identified a "Noise Chain" where Pandora's false positives (Chrome .ldb) were being correlated with Hercules' System events. Implemented `S-1-5-18` ignore rules to sever this link.
+### v4.28 - The Synapse (Tartaros Integration)
+* **[Module]** Added **TartarosTracer** class.
+* **[Logic]** Implemented memory-to-memory data passing between Lachesis and Tartaros for real-time origin analysis (LNK -> URL).
+* **[Report]** "Initial Access Vector" section now displays download URLs and source domains.
 
-### 3. Identity & Context Awareness
-* **Clotho v2.2:** Now parses `SOFTWARE` hive for ProductName and analyzes Event Logs to infer Hostname/User, drastically reducing manual context entry and eliminating "N/A".
+### v4.25 - The Critical Bypass
+* **[Logic]** Implemented **`super_critical`** logic in Lachesis.
+    * Artifacts with Score >= 250, "MASQUERADE" tag, or "TIMESTOMP" tag now **bypass** the Hestia noise filter.
+    * This ensures hidden threats in noisy folders (e.g., `AppData/.../Notifications/malware.jpg`) are reported.
 
-### 4. Narrative Reporting (Lachesis v4.1)
-* **The Editor:** Transformed the report from a "Phonebook of Logs" to an "Intelligence Brief".
-* **External Config:** Dual-Use tools are now defined in `triage_rules.yaml`, ensuring reports capture "Living off the Land" binaries without code changes.
+### v4.20 - Hercules "The Sovereign"
+* **[Hercules]** Added native Registry parsing (RECmd output) to identify `ProductName` and `BuildLab`.
+* **[Fix]** Fixed OS identification reporting "Unknown" or relying on inconsistent EventLogs.
+
+### v4.12 - The Silencer (Legacy)
+* **[Hestia]** Introduced "Inverted Tool Filter" (Whitelisting binaries).
+* **[Chronos]** 95% noise reduction in timeline generation.
+* **[Plan I]** System Silencer implemented to ignore `S-1-5-18` noise chains.
+
+### v4.1 - Narrative Reporting (Legacy)
+* **[Lachesis]** The Editor: Transformed report from "Phonebook of Logs" to "Intelligence Brief".
+* **[Config]** Externalized Dual-Use tools to `triage_rules.yaml`.
+
+### v4.0 - Two-Pass Strategy (Legacy)
+* **[Architecture]** Split Pandora into Pass 1 (Triage) and Pass 2 (Deep Dive) to resolve dependency deadlocks.
+
+### v2.7 - AION Integration (Legacy)
+* **[Module]** AION added for persistence hunting.
+* **[Report]** Added DOCX export (Midas Touch) - *Deprecated in v4 in favor of Markdown.*
+
+### v2.0 - Visual Reporting (Legacy)
+* **[Feature]** MermaidJS integration for attack flow graphs.
+
+### v1.0 - Core Logic (Legacy)
+* **[Core]** Clotho/Atropos/Lachesis trinity established.
 
 ---
 
@@ -249,14 +194,24 @@ Overcoming the flood of 100k+ noise artifacts in legacy environments.
 * [x] **v1.9:** Internal Scout & Lateral Movement Logic (Chimera)
 * [x] **v2.0:** Visual Reporting (Mermaid Integration)
 * [x] **v2.5:** Modular Architecture (Nemesis/Themis)
-* [x] **v2.7:** AION-Sigma Integration & Midas Touch (Docx)
+* [x] **v2.7:** AION-Sigma Integration
 * [x] **v4.0:** **Hestia Censorship & Two-Pass Strategy** (Deadlock Resolution)
-* [x] **v4.11:** **SIMD Optimization & Identity Aware** (Speed)
-* [x] **v4.12:** **System Silencer & Inverted Tool Filters** (Noise Kill)
-* [ ] **v5.0:** Real-time Triage Mode (Live Response)
+* [x] **v4.12:** System Silencer & Inverted Filters
+* [x] **v4.20:** Registry-based OS Identity (Hercules)
+* [x] **v4.28:** Origin Tracing (Tartaros)
+* [x] **v4.32:** **Robustness & Full JSON/Pivot Export**
+* [x] **v4.43:** **Tartaros v3.0 (Story Inference) & Deep Hunter**
+* [ ] **v5.0:** **"Nemesis" (Automated Remediation Suggestion)** - *Planned*
+* [ ] **v5.x:** **LLM Integration** (Auto-summarization of Technical Findings) - *Planned*
 
 ---
 
-## 🛡️ License
+## ⚠️ Known Issues & Solutions
 
-MIT License - Built for the DFIR Community.
+* **Encoding:** Some KAPE CSVs use inconsistent encoding (UTF-8 vs CP1252). Tartaros v1.3+ now attempts `utf-8`, `utf-8-sig`, and `cp1252` automatically.
+* **Mermaid Rendering:** Special characters in filenames (e.g., `{}`) previously broke graphs. Lachesis v4.31+ sanitizes these to `()` automatically.
+* **Polars Version:** Requires Polars 0.20+ for `read_csv` compatibility.
+
+---
+
+*Powered by Python, Polars, and Paranoia.*
