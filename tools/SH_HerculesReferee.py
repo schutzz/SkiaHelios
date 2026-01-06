@@ -143,6 +143,229 @@ class HerculesReferee:
             print(f"[+] Metadata Saved: {meta_file}")
         except: pass
 
+    def judge(self, timeline_df):
+        """
+        メイン判定ロジック (Justice V3: The Executioner)
+        Mission: Fix LNK Analysis & Strict Dual-Use Logic
+        """
+        print("    -> [Hercules] Judging events with Justice V3 logic...")
+        
+        # 0. 必須カラムの初期化・正規化
+        cols = timeline_df.columns
+        for c in ["Threat_Score", "Tag", "Judge_Verdict"]:
+            if c not in cols:
+                timeline_df = timeline_df.with_columns(pl.lit(0 if c == "Threat_Score" else "").alias(c))
+
+        # 型変換 (Score計算のため)
+        timeline_df = timeline_df.with_columns(
+            pl.col("Threat_Score").cast(pl.Int64, strict=False).fill_null(0)
+        )
+
+        # パスカラムの特定 (Source_Fileがアンダースコアあり)
+        path_col = "ParentPath" if "ParentPath" in cols else ("Source_File" if "Source_File" in cols else None)
+        if path_col is None:
+            # パスがない場合は空文字で埋めておく
+            timeline_df = timeline_df.with_columns(pl.lit("").alias("_path_check"))
+            path_col = "_path_check"
+        
+        # メッセージカラム特定 (優先順: Message -> Action -> Description -> FileName)
+        msg_col = None
+        for candidate in ["Message", "Action", "Description", "FileName"]:
+            if candidate in cols:
+                msg_col = candidate
+                break
+        if msg_col is None:
+            timeline_df = timeline_df.with_columns(pl.lit("").alias("_msg_check"))
+            msg_col = "_msg_check"
+
+        # ========================================================
+        # 1. Masquerade Detection (CRX Analysis) [Priority: Critical]
+        # ========================================================
+        # 正規のブラウザ拡張機能フォルダ以外にある .crx は即死判定
+        print("    -> [Hercules] Scanning for Masquerade files (.crx)...")
+        if "FileName" in cols:
+            # 正規パスの定義 (正規表現)
+            legit_crx_paths = [
+                r"Google\\Chrome\\.*\\Extensions",
+                r"Microsoft\\Edge\\.*\\Extensions",
+                r"BraveSoftware\\Brave-Browser\\.*\\Extensions",
+                r"Chromium\\.*\\Extensions",
+                r"Opera Software\\Opera Stable\\Extensions",
+                r"Vivaldi\\.*\\Extensions"
+            ]
+            combined_legit = "|".join(legit_crx_paths)
+
+            # 条件: .crx かつ 正規パスに含まれない
+            is_masquerade = (
+                pl.col("FileName").str.to_lowercase().str.ends_with(".crx") & 
+                (~pl.col(path_col).str.contains(combined_legit)) # Case-insensitive check handled by regex ideally, but simple check here
+            )
+            
+            # Polarsの regex は Rust regex (case sensitive default). 
+            # 簡易的に小文字化してからチェックする方法で実装
+            timeline_df = timeline_df.with_columns([
+                pl.when(is_masquerade)
+                  .then(300) # MAX SCORE
+                  .otherwise(pl.col("Threat_Score"))
+                  .alias("Threat_Score"),
+                
+                pl.when(is_masquerade)
+                  .then(pl.lit("CRITICAL_MASQUERADE"))
+                  .otherwise(pl.col("Tag"))
+                  .alias("Tag")
+            ])
+
+        # ========================================================
+        # 2. LNK Analysis & Enrichment [Priority: High]
+        # ========================================================
+        # LNKの飛び先(Target_Path)を解析し、危険なコマンドを検知
+        if "Target_Path" in cols:
+            print("    -> [Hercules] Analyzing LNK targets & arguments...")
+            
+            # 危険なコマンドラインパターン
+            malicious_patterns = [
+                r"powershell.*-enc", r"powershell.*-w.*hidden", r"powershell.*iex",
+                r"mshta.*http", r"cmd\.exe.*/c", 
+                r"certutil.*-decode", r"bitsadmin.*/transfer",
+                r"regsvr32.*/s.*/u", r"rundll32.*javascript",
+                r"wscript", r"cscript"
+            ]
+            combined_malicious = "|".join(malicious_patterns)
+            
+            # LNK検出用のFileNameカラムを特定 (存在しない場合はmsg_colで代用)
+            fname_col_for_lnk = "FileName" if "FileName" in cols else msg_col
+            
+            # (A) Enrichment: 詳細をMessageに強制結合
+            # 例: "Kitties.lnk" -> "Kitties.lnk 🎯 Target: cmd.exe /c powershell..."
+            if msg_col and msg_col in cols and fname_col_for_lnk:
+                timeline_df = timeline_df.with_columns(
+                    pl.when(
+                        (pl.col(fname_col_for_lnk).str.to_lowercase().str.contains(r"\.lnk")) & 
+                        (pl.col("Target_Path").is_not_null()) &
+                        (pl.col("Target_Path") != "")
+                    )
+                    .then(pl.format("{} 🎯 Target: {}", pl.col(msg_col), pl.col("Target_Path")))
+                    .otherwise(pl.col(msg_col))
+                    .alias(msg_col)
+                )
+
+            # (B) Malicious Pattern Matching: スコアブースト
+            # Target_Path または Message (引数がMessageに入っている場合がある) をチェック
+            if fname_col_for_lnk:
+                has_malicious_cmd = (
+                    pl.col(fname_col_for_lnk).str.to_lowercase().str.contains(r"\.lnk") & 
+                    (
+                        pl.col("Target_Path").str.to_lowercase().str.contains(combined_malicious) |
+                        pl.col(msg_col).str.to_lowercase().str.contains(combined_malicious)
+                    )
+                )
+
+                timeline_df = timeline_df.with_columns([
+                    pl.when(has_malicious_cmd)
+                      .then(pl.col("Threat_Score") + 90) # Significant Boost
+                      .otherwise(pl.col("Threat_Score"))
+                      .alias("Threat_Score"),
+                    
+                    pl.when(has_malicious_cmd)
+                      .then(pl.format("{},SUSPICIOUS_CMDLINE", pl.col("Tag")))
+                      .otherwise(pl.col("Tag"))
+                      .alias("Tag")
+                ])
+
+        # ========================================================
+        # 3. Robust Noise Filter [Priority: Critical]
+        # ========================================================
+        # NotificationsやCacheフォルダを「無害(Score 0)」化
+        print("    -> [Hercules] Applying Robust Noise Filters...")
+        
+        noise_patterns = [
+            r"windows[/\\]notifications",
+            r"microsoft[/\\]windows[/\\]notifications",
+            r"appdata[/\\]local[/\\]microsoft[/\\]windows[/\\]notifications", # Toast Icons
+            r"windows[/\\]inetcache", # IE Cache
+            r"inetcookies",
+            r"windows[/\\]softwaredistribution", # Windows Update
+            r"windows[/\\]servicing",
+            r"appdata[/\\]local[/\\]temp", # Temp
+            r"windows[/\\]temp",
+            r"thumbcache",
+            r"officefilecache"
+        ]
+        combined_noise = "|".join(noise_patterns)
+
+        # パスがノイズパターンに一致するか
+        is_noise = pl.col(path_col).str.to_lowercase().str.contains(combined_noise)
+        
+        timeline_df = timeline_df.with_columns([
+            pl.when(is_noise).then(0).otherwise(pl.col("Threat_Score")).alias("Threat_Score"),
+            pl.when(is_noise).then(pl.lit("NOISE_FILTERED")).otherwise(pl.col("Tag")).alias("Tag"),
+            pl.when(is_noise).then(pl.lit("False Positive (Cache)")).otherwise(pl.col("Judge_Verdict")).alias("Judge_Verdict")
+        ])
+
+        # ========================================================
+        # 4. Strict Evidence Hierarchy (Dual-Use) [Priority: Medium]
+        # ========================================================
+        # 実行痕跡がないツールはスコア没収
+        print("    -> [Hercules] Applying Strict Evidence Hierarchy...")
+        
+        dual_use_tools = ["python", "nmap", "teamviewer", "putty", "winscp", "powershell", "cmd.exe", "net.exe", "ipconfig"]
+        combined_tools = "|".join(dual_use_tools)
+        
+        # 実行証拠となるArtifact Type (これら以外は「存在のみ」とみなす)
+        execution_artifacts = ["Process", "EventLog", "Shimcache", "Amcache", "Prefetch", "UserAssist"]
+        combined_exec_types = "|".join(execution_artifacts)
+        
+        if "Artifact_Type" in cols:
+            # FileName が存在する場合のみツール検出を実行
+            if "FileName" in cols:
+                is_tool = pl.col("FileName").str.to_lowercase().str.contains(combined_tools)
+            elif msg_col and msg_col in cols:
+                # FileNameがない場合はmsg_colで代用
+                is_tool = pl.col(msg_col).str.to_lowercase().str.contains(combined_tools)
+            else:
+                is_tool = pl.lit(False)  # ツール検出不可
+            
+            # [V3 FIX] 実行証拠があるか？
+            has_exec_evidence = pl.col("Artifact_Type").str.contains(combined_exec_types)
+            
+            # 重大な異常タグ（タイムスタンプ偶装など）があるか？（これがあれば実行証拠がなくてもクロ）
+            has_anomaly = pl.col("Tag").str.contains("TIMESTOMP|PARADOX|MASQUERADE")
+
+            # 条件: ツール名を含む AND 実行証拠なし AND 異常なし -> 完全除外
+            is_innocent_tool = (is_tool & (~has_exec_evidence) & (~has_anomaly))
+
+            timeline_df = timeline_df.with_columns([
+                pl.when(is_innocent_tool)
+                  .then(0) # スコア没収
+                  .otherwise(pl.col("Threat_Score"))
+                  .alias("Threat_Score"),
+                  
+                pl.when(is_innocent_tool)
+                  .then(pl.lit("DUAL_USE_BENIGN"))
+                  .otherwise(pl.col("Tag"))
+                  .alias("Tag")
+            ])
+
+        # ========================================================
+        # 5. Final Verdict Formatting (for Lachesis)
+        # ========================================================
+        # Phase 2への布石: Force Include対象をVerdictで明確化
+        print("    -> [Hercules] Finalizing Verdicts...")
+        
+        timeline_df = timeline_df.with_columns(
+            pl.when(pl.col("Threat_Score") >= 80)
+              .then(pl.lit("CRITICAL"))
+              .when(pl.col("Threat_Score") >= 50)
+              .then(pl.lit("HIGH"))
+              # 特定タグは無条件でCRITICAL/HIGH扱いにしてForce Includeさせる
+              .when(pl.col("Tag").str.contains("PARADOX|MASQUERADE|SUSPICIOUS_CMDLINE|CRITICAL_PHISHING"))
+              .then(pl.lit("CRITICAL"))
+              .otherwise(pl.lit("INFO"))
+              .alias("Judge_Verdict")
+        )
+
+        return timeline_df
+
     def extract_host_identity(self, df_evtx):
         if df_evtx is None: return "Unknown_Host"
         return "4ORENSICS"
@@ -337,6 +560,9 @@ class HerculesReferee:
 
         df_final = self.correlate_ghosts(df_combined, df_ghosts)
         
+        # [v4.21] Apply Justice Logic (Noise Killing & Enrichment)
+        df_final = self.judge(df_final)
+
         # [Plan L] The Verdict Gate (Triage Threshold)
         if df_final.height > 0:
             # 1. Base Filter (Keep Abnormal)

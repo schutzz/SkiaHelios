@@ -19,7 +19,7 @@ BANNER = r"""
  | (___ | | _  _  __ _| |__| | ___| |_  ___  ___
   \___ \| |/ /| |/ _` |  __  |/ _ \ | |/ _ \/ __|
   ____) |   < | | (_| | |  | |  __/ | | (_) \__ \
- |_____/|_|\_\|_|\__,_|_|  |_|\___|_|_|\___/|___/ v2.1
+ |_____/|_|\_\|_|\__,_|_|  |_|\___|_|_|\___/|___/ v4.43
 """
 
 def run_stage(cmd, stage_name):
@@ -200,7 +200,9 @@ def main():
         "--hercules", str(judged_timeline),
         "--chronos", str(time_anomalies),
         # Pass AION file if moved, or KAPE dir if AION needs re-parsing
-        "--aion", str(out_dir / "AION_Persistence.csv") 
+        "--aion", str(out_dir / "AION_Persistence.csv"),
+        # [NEW] Pass KAPE Source for USN & History Discovery
+        "--kape", str(kape_dir) 
     ]
     if args.docx: hekate_cmd.append("--docx")
     

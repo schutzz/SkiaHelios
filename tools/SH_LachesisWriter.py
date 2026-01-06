@@ -15,11 +15,9 @@ except ImportError:
     TartarosTracer = None
 
 # ============================================================
-#  SH_LachesisWriter v4.40 [Deep History Hunter]
+#  SH_LachesisWriter v4.44 [Time Paradox Edition]
 #  Mission: Weave the Grimoire with accurate Scope & Origins.
-#  Update: 
-#    1. Recursive Search (rglob) to find CSVs in subfolders (e.g., out/Browser_Artifacts/).
-#    2. Fixed missing Executive Summary visual method.
+#  Update: Added System Time Rollback visualization (⏪).
 # ============================================================
 
 TEXT_RES = {
@@ -68,7 +66,8 @@ class LachesisWriter:
             "appdata/local/google/chrome", "appdata/roaming/microsoft/spelling",
             "appdata/roaming/skype", "appdata/local/packages", 
             "windows/assembly", "windows/servicing", "windows/prefetch", 
-            "inetcache", "tkdata", "thumbcache", "iconcache"
+            "inetcache", "tkdata", "thumbcache", "iconcache",
+            "windows/notifications", "appdata/local/microsoft/windows/notifications"
         ]
         for gp in garbage_paths:
             if gp in path:
@@ -85,6 +84,37 @@ class LachesisWriter:
     def _is_dual_use(self, name):
         name_lower = str(name).lower()
         return any(k in name_lower for k in self.dual_use_keywords)
+    
+    def _is_high_confidence(self, ev):
+        """
+        [Phase 2] Force Include Logicの実装
+        特定タグを持つイベントは無条件でHigh Confidence扱いとする
+        """
+        summary = str(ev.get('Summary', ''))
+        category = str(ev.get('Category', ''))
+        tag = str(ev.get('Tag', '')).upper()
+        
+        # [FORCE INCLUDE] 以下のキーワード/タグは絶対に通す
+        force_keywords = [
+            "TIME_PARADOX", "CRITICAL_MASQUERADE", "CRITICAL_PHISHING", 
+            "SUSPICIOUS_CMDLINE", "CRITICAL_SIGMA", "ROLLBACK"
+        ]
+        if any(k in summary.upper() for k in force_keywords):
+            return True
+        if any(k in tag for k in force_keywords):
+            return True
+            
+        # 既存のスコア判定
+        try:
+            score = int(ev.get('Criticality', 0))
+            if score >= 80: return True
+        except: pass
+
+        # カテゴリベースの判定
+        if category in ["PERSIST", "LATERAL", "EXFIL"]:
+            return True
+            
+        return False
     
     def _parse_time_safe(self, time_str):
         if not time_str: return None
@@ -120,12 +150,12 @@ class LachesisWriter:
         # [v4.43 Enhancement] Data-Driven Inference from Timeline Source
         inferred_roots = self._infer_source_roots(self._latest_dfs)
         if inferred_roots:
-            print(f"    [Lachesis] 🧠 Inferred Source Roots from Data: {[str(r) for r in inferred_roots]}")
+            print(f"    [Lachesis] [Brain] Inferred Source Roots from Data: {[str(r) for r in inferred_roots]}")
             for r in inferred_roots:
                 if r.exists() and r not in expanded_dirs: expanded_dirs.append(r)
 
         patterns = ["*History*.csv", "*Web*.csv", "*Chrome*.csv", "*Browsing*.csv", "*Edge*.csv"]
-        print(f"    [Lachesis] 🔍 Scanning {len(expanded_dirs)} locations (Up-then-Down + Data-Inferred) for Browser History...")
+        print(f"    [Lachesis] [Scan] Scanning {len(expanded_dirs)} locations (Up-then-Down + Data-Inferred) for Browser History...")
         for d in expanded_dirs: print(f"      - Search Scope: {d}")
         
         for d in expanded_dirs:
@@ -134,12 +164,12 @@ class LachesisWriter:
                 for pat in patterns:
                     for f in d.rglob(pat):
                         if "Grimoire" in f.name: continue
-                        print(f"    [Lachesis] ✅ Found Candidate: {f}")
+                        print(f"    [Lachesis] [OK] Found Candidate: {f}")
                         return str(f.resolve())
             except Exception as e:
                 print(f"    [!] Disk scan error in {d}: {e}")
                 
-        print("    [Lachesis] ❌ No History CSV found on disk.")
+        print("    [Lachesis] [FAIL] No History CSV found on disk.")
         return None
 
 
@@ -240,6 +270,11 @@ class LachesisWriter:
             elif "CRITICAL" in str(ev.get('Category', '')).upper(): is_crit_std = True
             elif "CRITICAL" in tag or "ACTIVE" in tag: is_crit_std = True
             
+            # [Phase 2.5] Force Include: These tags ALWAYS count as critical
+            force_include_tags = ["TIME_PARADOX", "MASQUERADE", "PHISHING", "SUSPICIOUS_CMDLINE", "ROLLBACK"]
+            if any(k in tag for k in force_include_tags):
+                is_crit_std = True
+            
             if is_crit_std: critical_events.append(ev)
             elif score >= 80: medium_events.append(ev)
 
@@ -253,7 +288,7 @@ class LachesisWriter:
             chk_tag = tag + str(ev.get('Threat_Tag', "")).upper()
             chk_name = str(ev.get('FileName', "") or ev.get('Ghost_FileName', "") or ev.get('Target_FileName', "") or summary).lower()
             
-            if chk_score >= 200 or "CRITICAL" in chk_tag or "MASQUERADE" in chk_tag or "TIMESTOMP" in chk_tag or "PHISHING" in chk_tag or self._is_dual_use(chk_name):
+            if chk_score >= 200 or "CRITICAL" in chk_tag or "MASQUERADE" in chk_tag or "TIMESTOMP" in chk_tag or "PHISHING" in chk_tag or "PARADOX" in chk_tag or self._is_dual_use(chk_name):
                 t_val = ev.get('Time') or ev.get('Ghost_Time_Hint') or ev.get('Last_Executed_Time')
                 dt = self._parse_time_safe(t_val)
                 if dt and dt.year >= 2016:  
@@ -278,6 +313,23 @@ class LachesisWriter:
         self._extract_visual_iocs_from_events(raw_events)
         
         self._generate_pivot_seeds()
+        
+        # [Phase 2.5] Recalculate time_range including Force Include IOCs
+        force_include_types = ["TIME_PARADOX", "CRITICAL_MASQUERADE", "CRITICAL_PHISHING", "TIMESTOMP", "CREDENTIALS"]
+        for ioc in self.visual_iocs:
+            ioc_type = str(ioc.get("Type", "")).upper()
+            if any(k in ioc_type for k in force_include_types):
+                ioc_time = ioc.get("Time", "")
+                dt = self._parse_time_safe(ioc_time)
+                if dt and dt.year >= 2016:
+                    high_crit_times.append(dt)
+        
+        # Recalculate time_range if we found new critical times
+        if high_crit_times:
+            high_crit_times = sorted(set(high_crit_times))
+            core_start = min(high_crit_times) - timedelta(hours=3)
+            core_end = max(high_crit_times) + timedelta(hours=3)
+            time_range = f"{core_start.strftime('%Y-%m-%d %H:%M')} 〜 {core_end.strftime('%H:%M')} (UTC)"
 
         # 3. Tartaros Origin Tracing
         origin_stories = []
@@ -316,7 +368,7 @@ class LachesisWriter:
             self._write_technical_findings(f, phases)
             self._write_detection_statistics(f, medium_events, dfs_for_ioc)
             self._write_ioc_appendix_unified(f) 
-            f.write(f"\n---\n*Report woven by SkiaHelios (The Triad v4.43)* 🦁")
+            f.write(f"\n---\n*Report woven by SkiaHelios (The Triad v4.44)* 🦁")
         
         json_path = out_file.with_suffix('.json')
         self._export_json_grimoire(analysis_result, dfs_for_ioc, json_path, primary_user)
@@ -405,13 +457,36 @@ class LachesisWriter:
                 try:
                     df_sorted = df.sort(score_col, descending=True)
                     for row in df_sorted.iter_rows(named=True):
-                        fname = row.get("FileName", "")
-                        path = row.get("ParentPath", "")
+                        fname = row.get("FileName") or ""
+                        path = row.get("ParentPath") or ""
                         score = int(float(row.get(score_col, 0)))
                         
                         bypass_reason = None
                         is_trusted_loc = self._is_trusted_system_path(path)
                         is_dual = self._is_dual_use(fname)
+
+                        # [NEW v4.44] System Rollback Detection
+                        if "ROLLBACK" in str(row.get("Anomaly_Time", "")):
+                            bypass_reason = "🚨 SYSTEM TIME ROLLBACK DETECTED 🚨"
+                            if not fname and path: fname = f"System Artifact ({path})"
+                            self._log_noise("TIME PARADOX", f"{fname} triggered Rollback Alert")
+                            self._add_unique_visual_ioc({
+                                "Type": "TIME_PARADOX", 
+                                "Value": fname if fname else "Unknown", 
+                                "Path": path, 
+                                "Note": str(row.get("Anomaly_Time", "")), 
+                                "Time": str(row.get("si_dt", "") or row.get("UpdateTimestamp", "")),
+                                "Reason": bypass_reason
+                            })
+                            continue
+
+                        # [NEW v4.45] LNK Target Insight
+                        if fname.lower().endswith(".lnk"):
+                            tgt = str(row.get("Target_Path", "")).strip()
+                            if tgt and len(tgt) > 4:
+                                # Shorten target for display
+                                tgt_short = (tgt[:20] + "..") if len(tgt) > 20 else tgt
+                                fname += f" 🎯 {tgt_short}"
 
                         if is_dual:
                             bypass_reason = "Dual-Use Tool [DROP]" 
@@ -422,9 +497,16 @@ class LachesisWriter:
                             else:
                                 bypass_reason = "High Score (Timestomp) [DROP]"
                         
+                        # [Fix v4.45] Strict Noise Killing (Notifications)
+                        if self._is_noise(fname, path):
+                             self._log_noise("Explicit Noise Filter", fname)
+                             continue
+
                         if bypass_reason:
-                            print(f"    [BYPASS] Retained {fname} (Score: {score})")
-                        elif score < 200 or self._is_noise(fname, path): continue 
+                             # If bypass reason indicates drop, ensure we respect user wishes for "disappearance"
+                             if "False Positive" in bypass_reason or "NOISE" in bypass_reason: continue
+                             print(f"    [BYPASS] Retained {fname} (Score: {score})")
+                        elif score < 200: continue 
                         
                         if not bypass_reason: bypass_reason = "High Score (>200)"
                         self._add_unique_visual_ioc({
@@ -456,12 +538,17 @@ class LachesisWriter:
                             self._log_noise("Trusted Path (Update)", fname)
                             continue
                         
+                        # [Fix v4.45] Strict Noise Killing (Notifications)
+                        if self._is_noise(fname, path):
+                             self._log_noise("Explicit Noise Filter", fname)
+                             continue
+
                         elif self._is_dual_use(fname): bypass_reason = "Dual-Use Tool [DROP]"
                         elif "TIMESTOMP" in tag: bypass_reason = "Timestomp [DROP]"
                         elif score >= 250: bypass_reason = "Critical Score [DROP]"
 
                         if bypass_reason: print(f"    [BYPASS] Retained {fname} ({bypass_reason})")
-                        elif score < 200 or self._is_noise(fname, path): continue
+                        elif score < 200: continue
 
                         if not bypass_reason: bypass_reason = "High Confidence"
                         clean_name = fname.split("] ")[-1]
@@ -520,11 +607,49 @@ class LachesisWriter:
                         })
 
     def _write_executive_summary_visual(self, f, events, verdicts, primary_user, time_range):
-        """[v4.38/v4.40] Restored & Updated Visual Executive Summary"""
+        """[v4.46] Enhanced Visual Executive Summary with Advanced Evasion Detection"""
         t = self.txt
         f.write(f"## {t['h1_exec']}\n")
-        f.write(f"**結論:**\n{time_range} の期間において、端末 {self.hostname} に対する **CRITICAL レベルの侵害活動** を確認しました。\n")
-        f.write(f"**主な攻撃手口:** フィッシング（LNK）による初期侵入、バックドア設置（Persistence）、およびタイムスタンプ偽装（Timestomp）。\n\n")
+        
+        # [Phase 2.5] Detect special conditions for enhanced conclusion
+        has_paradox = any("TIME_PARADOX" in str(ioc.get('Type', '')) for ioc in self.visual_iocs)
+        has_masquerade = any("MASQUERADE" in str(ioc.get('Type', '')) for ioc in self.visual_iocs)
+        has_phishing = any("PHISHING" in str(ioc.get('Type', '')) for ioc in self.visual_iocs)
+        has_timestomp = any("TIMESTOMP" in str(ioc.get('Type', '')) for ioc in self.visual_iocs)
+        
+        # Dynamic conclusion based on detected threats
+        if "Unknown" in time_range and self.visual_iocs:
+            # We have IOCs but couldn't determine time range from events - use IOC times
+            ioc_times = []
+            for ioc in self.visual_iocs:
+                dt = self._parse_time_safe(ioc.get("Time", ""))
+                if dt and dt.year >= 2016:
+                    ioc_times.append(dt)
+            if ioc_times:
+                ioc_times = sorted(ioc_times)
+                time_range = f"{ioc_times[0].strftime('%Y-%m-%d %H:%M')} 〜 {ioc_times[-1].strftime('%H:%M')} (UTC)"
+        
+        # Build conclusion
+        if has_paradox or has_masquerade:
+            conclusion = f"**結論:**\n{time_range} の期間において、端末 {self.hostname} に対する **高度な隠蔽工作を伴う重大な侵害活動** を確認しました。\n"
+        elif self.visual_iocs:
+            conclusion = f"**結論:**\n{time_range} の期間において、端末 {self.hostname} に対する **CRITICAL レベルの侵害活動** を確認しました。\n"
+        else:
+            conclusion = f"**結論:**\n本調査範囲において、重大なインシデントの痕跡は検出されませんでした。\n"
+        
+        f.write(conclusion)
+        
+        # [v4.45 UI] Dynamic Attack Method Description
+        attack_methods = []
+        if has_phishing: attack_methods.append("フィッシング（LNK）による初期侵入")
+        if has_masquerade: attack_methods.append("偽装ファイル設置（Masquerading）")
+        if has_timestomp: attack_methods.append("タイムスタンプ偽装（Timestomp）")
+        if has_paradox: attack_methods.append("**システム時間巻き戻し（System Rollback）**")
+        
+        if not attack_methods:
+            attack_methods = ["不審なアクティビティ"]
+            
+        f.write(f"**主な攻撃手口:** {', '.join(attack_methods)}。\n\n")
         f.write("> **Deep Dive 推奨:** 詳細な調査を行う際は、添付の `Pivot_Config.json` に記載された **CRITICAL_PHISHING** ターゲット群から開始してください。\n\n")
         f.write("\n### 🏹 Attack Timeline Flow (Critical Chain)\n")
         if self.visual_iocs: f.write(self._generate_mermaid())
@@ -568,107 +693,271 @@ class LachesisWriter:
         f.write("\n")
 
     def _write_technical_findings(self, f, phases):
+        """
+        [Phase 2] 技術的詳細セクションの生成
+        優先度順に並べ替え、専用ヘッダーで強調表示する
+        """
         t = self.txt
         f.write(f"## {t['h1_tech']}\n")
-        f.write("本セクションでは、確度が高い（High Confidence）と判定された重要イベントのみを集約して記載します。\n")
-        f.write("詳細なログデータは、添付のマスタータイムライン（CSV）を参照してください。\n\n")
-        has_any_findings = False
-        for idx, phase in enumerate(phases):
-            if not phase: continue
-            created_files = set()
-            for ev in phase:
-                if ev['Category'] in ['DROP', 'EXEC'] and ev.get('Keywords'):
-                    for k in ev['Keywords']: created_files.add(str(k).lower())
-            grouped_events = {}
-            if isinstance(phase[0], dict) and 'Time' in phase[0]:
-                date_str = str(phase[0]['Time']).replace('T', ' ').split(' ')[0]
-            else:
-                date_str = "Unknown Date"
+        
+        # 1. フィルタリング (Force Include適用 - visual_iocsより判定)
+        high_conf_events = [ioc for ioc in self.visual_iocs if self._is_force_include_ioc(ioc)]
+        
+        if not high_conf_events:
+            f.write("本調査範囲において、特筆すべき高確度の技術的痕跡は検出されませんでした。\n")
+            f.write("（Medium Confidence以下のイベントについては統計情報を参照してください）\n\n")
+            return
 
-            for ev in phase:
-                if self._is_noise(ev['Summary']): continue
-                is_dual = self._is_dual_use(ev.get('Summary', ''))
-                is_high_conf = ev['Criticality'] >= 90 or is_dual
-                if is_high_conf:
-                    insight = self._generate_insight(ev, created_files) 
-                    if insight not in grouped_events:
-                        grouped_events[insight] = []
-                    grouped_events[insight].append(ev)
-            if grouped_events:
-                has_any_findings = True
-                f.write(f"### 📅 Phase {idx+1} ({date_str})\n")
-                for insight, events in grouped_events.items():
-                    f.write(f"- **{insight}**\n")
-                    targets = []
-                    for ev in events: targets.append(ev['Summary'])
-                    unique_targets = sorted(list(set(targets)))
-                    count = len(unique_targets)
-                    if count == 1:
-                        f.write(f"  - Target: {unique_targets[0]}\n")
-                    else:
-                        f.write(f"  - **Total Events:** {len(events)} (Unique Targets: {count})\n")
-                        for tgt in unique_targets[:3]: f.write(f"  - {tgt}\n")
-                        if count > 3: f.write(f"  - *(... and {count - 3} more targets)*\n")
-                    f.write("\n")
+        f.write("本セクションでは、検出された脅威の中でも特に確度が高く、対応優先度の高い痕跡を詳述します。\n\n")
+
+        # 2. グルーピング (Priority Buckets)
+        groups = {
+            "🚨 System Time Manipulation (Time Paradox)": [],
+            "🎭 File Masquerading & Backdoors": [],
+            "🎣 Phishing & Initial Access": [],
+            "⚠️ High Confidence Threats": []
+        }
+        
+        for ioc in high_conf_events:
+            ioc_type = str(ioc.get('Type', '')).upper()
+            reason = str(ioc.get('Reason', '')).upper()
+            
+            if "TIME_PARADOX" in ioc_type or "ROLLBACK" in reason:
+                groups["🚨 System Time Manipulation (Time Paradox)"].append(ioc)
+            elif "MASQUERADE" in ioc_type or ".crx" in str(ioc.get('Value', '')).lower():
+                groups["🎭 File Masquerading & Backdoors"].append(ioc)
+            elif "PHISHING" in ioc_type or "SUSPICIOUS_CMDLINE" in reason:
+                groups["🎣 Phishing & Initial Access"].append(ioc)
+            else:
+                groups["⚠️ High Confidence Threats"].append(ioc)
+
+        # 3. 描画 (優先度順)
+        for header, ioc_list in groups.items():
+            if not ioc_list: continue
+            
+            f.write(f"### {header}\n")
+            # 時系列順にソート
+            ioc_list.sort(key=lambda x: x.get('Time', '9999'))
+            
+            for ioc in ioc_list:
+                dt = str(ioc.get('Time', 'Unknown')).replace('T', ' ')[:19]
+                val = ioc.get('Value', 'No details')
+                path = ioc.get('Path', 'Unknown')
+                ioc_type = ioc.get('Type', 'Unknown')
+                reason = ioc.get('Reason', '-')
+                
+                # 詳細情報の整形
+                f.write(f"- **{dt}** | Type: `{ioc_type}` | Path: `{path[:50]}{'...' if len(path) > 50 else ''}`\n")
+                f.write(f"  - **Detection:** `{val}` ({reason})\n")
+                
+                # タグに応じた解説（Insight）の自動付与
+                insight = self._generate_ioc_insight(ioc)
+                if insight:
+                    f.write(f"  - 🕵️ **Analyst Note:** {insight}\n")
                 f.write("\n")
-        if not has_any_findings:
-            f.write("本調査範囲において、特筆すべき高確度の技術的痕跡は検出されませんでした。\n\n")
+
+        f.write("\n")
+    
+    def _is_force_include_ioc(self, ioc):
+        """Force Includeの判定（visual_ioc用）"""
+        force_keywords = [
+            "TIME_PARADOX", "CRITICAL_MASQUERADE", "CRITICAL_PHISHING", 
+            "SUSPICIOUS_CMDLINE", "CRITICAL_SIGMA", "ROLLBACK", "BACKDOOR"
+        ]
+        ioc_type = str(ioc.get('Type', '')).upper()
+        reason = str(ioc.get('Reason', '')).upper()
+        
+        if any(k in ioc_type for k in force_keywords):
+            return True
+        if any(k in reason for k in force_keywords):
+            return True
+        # Dual-Use tools are also high confidence
+        if "DUAL-USE" in reason or "DUAL_USE" in ioc_type:
+            return True
+        # TIMESTOMP is high confidence
+        if "TIMESTOMP" in ioc_type:
+            return True
+        return False
+    
+    def _generate_ioc_insight(self, ioc):
+        """
+        [V3] IOCに対する動的アナリストインサイトを生成
+        イベントの中身（LNKターゲット等）を読み取って賢くコメント
+        """
+        ioc_type = str(ioc.get('Type', '')).upper()
+        val = str(ioc.get('Value', ''))
+        val_lower = val.lower()
+        reason = str(ioc.get('Reason', '')).upper()
+        path = str(ioc.get('Path', ''))
+        
+        # TIME_PARADOX: ロールバック秒数を抽出
+        if "TIME_PARADOX" in ioc_type or "ROLLBACK" in reason:
+            rb_sec = "Unknown"
+            if "Rollback:" in val:
+                import re
+                match = re.search(r"Rollback:\s*(-?\d+)", val)
+                if match: rb_sec = match.group(1)
+            return f"USNジャーナルの整合性分析により、システム時刻の巻き戻し(約{rb_sec}秒)を検知しました。これは高度なアンチフォレンジック活動を示唆します。"
+        
+        # MASQUERADE (CRX): 偽装場所を具体的に
+        elif "MASQUERADE" in ioc_type or ".crx" in val_lower:
+            masq_app = "正規アプリケーション"
+            if "adobe" in path.lower(): masq_app = "Adobe Reader"
+            elif "microsoft" in path.lower(): masq_app = "Microsoft Office"
+            elif "google" in path.lower(): masq_app = "Google Chrome"
+            return f"{masq_app}のフォルダに、無関係なChrome拡張機能(.crx)が配置されています。これは典型的なPersistence（永続化）手法です。"
+        
+        # SUSPICIOUS_CMDLINE: LNKターゲットを読み取り
+        elif "SUSPICIOUS_CMDLINE" in reason or ("Target:" in val and ".lnk" in val_lower):
+            target_info = "Unknown"
+            if "Target:" in val:
+                target_info = val.split("Target:")[-1].strip()[:100]
+            
+            if "powershell" in target_info.lower():
+                return f"LNKファイルがPowerShellを呼び出しています。Target: `{target_info}...`"
+            elif "cmd" in target_info.lower():
+                return f"LNKファイルがコマンドプロンプトを呼び出しています。Target: `{target_info}...`"
+            elif "mshta" in target_info.lower():
+                return f"LNKファイルがHTAスクリプトを実行しています。Target: `{target_info}...`"
+            else:
+                return f"不審なショートカットファイルを検知。実行ターゲット: `{target_info}...`"
+        
+        # PHISHING (LNK with double extension)
+        elif "PHISHING" in ioc_type and ".lnk" in val_lower:
+            # 二重拡張子を検出
+            import re
+            double_ext = re.search(r'\.(jpg|png|pdf|doc|docx|xls|xlsx|mp4)\.lnk', val_lower)
+            if double_ext:
+                return f"二重拡張子({double_ext.group(0)})による偽装を検知。ユーザーを欺いてLNKを実行させる典型的なフィッシング手法です。"
+            else:
+                return "不審なショートカットファイルが作成されました。フィッシング攻撃の可能性があります。"
+        
+        # TIMESTOMP
+        elif "TIMESTOMP" in ioc_type:
+            tool_name = val.split()[0] if val else "Unknown"
+            return f"`{tool_name}` のタイムスタンプに不整合（Timestomp）を確認。攻撃ツールを隠蔽しようとした痕跡です。"
+        
+        # CREDENTIALS
+        elif "CREDENTIALS" in ioc_type:
+            return "認証情報の窃取または不正ツールの配置を検知しました。"
+        
+        return None
 
     def _generate_mermaid(self):
+        """
+        [Phase 2] Mermaidグラフ生成 (Fake Time注釈対応)
+        """
         if not self.visual_iocs: return ""
+        
         def get_time(item):
             t = item.get("Time", "")
             return t if t else "9999"
+            
         sorted_iocs = sorted(self.visual_iocs, key=get_time)
         if not sorted_iocs: return ""
+        
+        # [Phase 2] TIME_PARADOXの存在チェック
+        has_paradox = any("TIME_PARADOX" in str(ioc.get("Type", "")) for ioc in self.visual_iocs)
+        
+        # ロールバック発生時刻を探す（動的検出）
+        rollback_time_str = None
+        if has_paradox:
+            for ioc in self.visual_iocs:
+                if "TIME_PARADOX" in str(ioc.get("Type", "")):
+                    rollback_time_str = str(ioc.get("Time", ""))[:10]  # 日付部分を取得
+                    break
+        
         chart = "\n```mermaid\ngraph TD\n"
         chart += "    %% Time-Clustered Attack Flow\n"
         chart += "    start((Start)) --> P0\n"
+        
+        # クラスタリングロジック
         clusters = []
         current_cluster = []
         last_dt = None
-        for ioc in sorted_iocs[:20]:
+        for ioc in sorted_iocs[:25]:  # ノード数制限
             if self._is_visual_noise(ioc["Value"]): continue
             ts_str = ioc.get("Time", "")
             curr_dt = self._parse_time_safe(ts_str)
             if curr_dt:
-                if last_dt and (curr_dt - last_dt).total_seconds() > 45: 
+                if last_dt and (curr_dt - last_dt).total_seconds() > 60: 
                     clusters.append(current_cluster)
                     current_cluster = []
                 last_dt = curr_dt
             current_cluster.append(ioc)
         if current_cluster: clusters.append(current_cluster)
+
+        # ノード描画
         node_registry = []
         for idx, cluster in enumerate(clusters):
             if not cluster: continue
-            time_label = "Unknown Time"
+            
+            # 時間ラベル
+            time_label = "Unknown"
             if cluster[0].get("Time"):
-                time_label = str(cluster[0]["Time"]).split("T")[1][:5]
+                time_str = str(cluster[0]["Time"])
+                if "T" in time_str: time_label = time_str.split("T")[1][:5]
+                elif " " in time_str: time_label = time_str.split(" ")[1][:5]
+                else: time_label = time_str[-8:-3]
+            
+            # [Phase 2] Fake Time Annotation
+            cluster_is_fake = False
+            if has_paradox and rollback_time_str:
+                cluster_time = str(cluster[0].get("Time", ""))[:10]
+                # ロールバック時刻より前のイベントは偽造の可能性あり
+                if cluster_time and cluster_time < rollback_time_str:
+                    # 早朝の時間帯は特に怪しい
+                    if any(x in time_label for x in ["00:", "01:", "02:", "03:"]):
+                        cluster_is_fake = True
+                        time_label += " ⚠️(FAKE?)"
+
             chart += f"\n    subgraph T{idx} [Time: {time_label}]\n"
             chart += "        direction TB\n"
+            
             for item in cluster:
                 val = self._sanitize_mermaid(item["Value"])
                 typ = item["Type"]
-                short_val = (val[:15] + '..') if len(val) > 15 else val
+                
+                # [v4.45 UI] Force Rollback Label
+                if "TIME_PARADOX" in typ: short_val = "SYSTEM ROLLBACK"
+                else: short_val = (val[:15] + '..') if len(val) > 15 else val
+                
+                # アイコン定義
                 icon = "💀"
                 if "PHISH" in typ: icon = "🎣"
-                elif "BACKDOOR" in typ or "MASQ" in typ: icon = "🚪"
+                elif "BACKDOOR" in typ or "MASQ" in typ: icon = "🎭"  # Mask for Masquerade
+                elif "TIME_PARADOX" in typ: icon = "⏪"
                 elif "TIMESTOMP" in typ: icon = "🕒"
                 elif "PERSIST" in typ: icon = "⚓"
+                
+                # スタイルクラス分岐
+                style_class = "threat"
+                if cluster_is_fake: style_class = "fake"
+                if "TIME_PARADOX" in typ: style_class = "paradox"
+
                 node_id = f"N{abs(hash(val + str(idx)))}"
                 label = f"{icon} {typ}<br/>{short_val}"
                 chart += f"        {node_id}[\"{label}\"]\n"
-                node_registry.append(node_id)
+                node_registry.append({"id": node_id, "style": style_class})
+            
             chart += "    end\n"
-            if idx > 0:
-                prev_node_id = node_registry[len(node_registry) - len(cluster) - 1]
-                curr_first_node = node_registry[len(node_registry) - len(cluster)]
-                chart += f"    {prev_node_id} --> {curr_first_node}\n"
-            else:
-                chart += f"    P0 --> {node_registry[0]}\n"
+            
+            # エッジ接続
+            if idx > 0 and node_registry:
+                prev_node = node_registry[-len(cluster)-1]["id"] if len(node_registry) > len(cluster) else node_registry[0]["id"]
+                curr_node = node_registry[-len(cluster)]["id"]
+                chart += f"    {prev_node} --> {curr_node}\n"
+            elif node_registry:
+                chart += f"    P0 --> {node_registry[0]['id']}\n"
+
         chart += "\n    %% Styles\n"
         chart += "    classDef threat fill:#ffcccc,stroke:#ff0000,stroke-width:2px,color:#000;\n"
-        chart += "    class N* threat;\n"
+        chart += "    classDef fake fill:#eeeeee,stroke:#999999,stroke-dasharray: 5 5,color:#666;\n"  # 偽装用スタイル
+        chart += "    classDef paradox fill:#ffffcc,stroke:#ffcc00,stroke-width:4px,color:#000;\n"  # パラドックス用
+        
+        for node in node_registry:
+            chart += f"    class {node['id']} {node['style']};\n"
+            
         chart += "```\n"
         return chart
 
@@ -729,6 +1018,10 @@ class LachesisWriter:
     def _generate_insight(self, ev, created_files_in_phase=None):
         summary = ev['Summary']
         path = str(ev.get('Keywords', [''])[0]).lower() if ev.get('Keywords') else ""
+        # [NEW] Time Paradox Insight
+        if "ROLLBACK" in str(ev.get('Anomaly_Time', '')) or "TIME_PARADOX" in str(ev.get('Type', '')):
+            return "【重要】システム時刻の巻き戻し（Time Rollback）による隠蔽工作を検知しました。"
+
         if ".crx" in path and not any(b in path for b in ["chrome", "edge", "chromium", "brave"]):
              return "【致命的】正規アプリを装ったバックドア（Masquerading）の設置を検知しました。"
         if ".lnk" in path and re.search(r'\.(jpg|png|pdf|doc|docx|xls|xlsx)\.lnk$', path):

@@ -7,9 +7,9 @@ from tools.SH_LachesisWriter import LachesisWriter
 from tools.SH_ThemisLoader import ThemisLoader
 
 # ============================================================
-#  SH_HekateTriad v1.7 [The Broker]
+#  SH_HekateTriad v1.8 [The Broker]
 #  Mission: Aggregate, Filter, Narrate, and pass Intel.
-#  Update: Pass KAPE dir to Lachesis for history discovery.
+#  Update: Direct USN Journal Injection for Chronos (Time Paradox Fix).
 # ============================================================
 
 def main():
@@ -35,7 +35,7 @@ def main():
     parser.add_argument("--docx", action="store_true")
     args = parser.parse_args()
 
-    print("[*] Hekate v1.3: Analyzing narrative...")
+    print("[*] Hekate v1.8: Analyzing narrative...")
     
     # 1. Load Dataframes
     loader = ThemisLoader([])
@@ -71,6 +71,65 @@ def main():
     
     if aion_path and os.path.exists(aion_path):
         dfs['AION'] = load_pl(aion_path)
+
+    # -------------------------------------------------------------------------
+    # [NEW] Chronos - USN Journal Direct Injection (Time Paradox Fix)
+    # -------------------------------------------------------------------------
+    usn_csv = None
+    # 探索パスをリスト化（親ディレクトリも含める）
+    search_roots = [Path(args.outdir)]
+    if args.kape: search_roots.append(Path(args.kape))
+    # アップロードファイルが置かれるルート直下も探す
+    search_roots.append(Path(".")) 
+
+    print("    [*] Scanning for USN Journal ($J) to detect Time Paradox...")
+    for root_path in search_roots:
+        if not root_path.exists(): continue
+        # 再帰的に探す (rglob)
+        for f in root_path.rglob("*$J*Output.csv"):
+            if "MFTECmd" in f.name:
+                usn_csv = str(f)
+                print(f"    [+] Found USN Journal: {usn_csv}")
+                break
+        if usn_csv: break
+
+    if usn_csv:
+        try:
+            print("    [!] Injecting USN Journal into Chronos Engine...")
+            from tools.SH_ChronosSift import ChronosEngine
+            engine = ChronosEngine()
+            
+            # Run specific USN logic directly
+            lf_usn = pl.scan_csv(usn_csv, ignore_errors=True, infer_schema_length=0)
+            lf_usn = engine._ensure_columns(lf_usn)
+            lf_usn = engine._detect_usn_rollback(lf_usn)
+            
+            # Extract Critical Rollbacks
+            rollback_hits = lf_usn.filter(pl.col("Anomaly_Time") == "CRITICAL_SYSTEM_ROLLBACK").collect()
+            
+            # [FIX] Cast to String to match 'infer_schema_length=0' of main DF
+            rollback_hits = rollback_hits.select([pl.col(c).cast(pl.Utf8) for c in rollback_hits.columns])
+            
+            if rollback_hits.height > 0:
+                print(f"      [ALERT] SYSTEM ROLLBACK DETECTED: {rollback_hits.height} events found!")
+                
+                # Ensure Score column consistency
+                if "Chronos_Score" not in rollback_hits.columns and "Threat_Score" in rollback_hits.columns:
+                     rollback_hits = rollback_hits.with_columns(pl.col("Threat_Score").alias("Chronos_Score"))
+                
+                # Merge into dfs['Chronos']
+                if dfs['Chronos'] is None:
+                    dfs['Chronos'] = rollback_hits
+                else:
+                    # Use diagonal concat to handle column mismatches between different CSV sources
+                    dfs['Chronos'] = pl.concat([dfs['Chronos'], rollback_hits], how="diagonal")
+            else:
+                print("      [.] No Time Paradox found in USN.")
+        except Exception as e:
+            print(f"    [!] USN Injection Failed: {e}")
+            import traceback
+            traceback.print_exc()
+
     
     # [NEW] Load Metadata from Hercules (OS Info)
     os_info = "Windows (Auto-Detected)"
@@ -150,8 +209,14 @@ def main():
             for row in high_chronos.iter_rows(named=True):
                 fname = row.get("FileName", "Unknown")
                 anomaly = row.get("Anomaly_Time", "Anomaly")
-                flow_steps.append(f"Timestomp ({anomaly}): {fname}")
-                verdict_flags.add("TIMESTOMP")
+                
+                # [NEW] Add ROLLBACK to flow
+                if "ROLLBACK" in str(anomaly):
+                     flow_steps.append(f"🚨 System Rollback Detected: {fname}")
+                     verdict_flags.add("TIME_PARADOX")
+                else:
+                     flow_steps.append(f"Timestomp ({anomaly}): {fname}")
+                     verdict_flags.add("TIMESTOMP")
 
     # --- AION Processing (Add to Flow) ---
     if dfs.get('AION') is not None:

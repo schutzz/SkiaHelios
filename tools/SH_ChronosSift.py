@@ -6,16 +6,16 @@ from tools.SH_ThemisLoader import ThemisLoader
 from tools.SH_HestiaCensorship import Hestia
 
 # ============================================================
-#  SH_ChronosSift v23.17 [Path Splitter]
-#  Mission: Detect Time Anomalies.
-#  Update: Auto-generate ParentPath/FileName from Target_Path.
+#  SH_ChronosSift v23.18 [Time Paradox]
+#  Mission: Detect Time Anomalies & System Rollbacks.
+#  Update: Added USN Journal Rollback Detection logic.
 # ============================================================
 
 def print_logo():
     print(r"""
        (   )
       (  :  )   < CHRONOS SIFT >
-       (   )     v23.17 - Path Splitter
+       (   )     v23.18 - Time Paradox
         " "      "Time bows to the Law."
     """)
 
@@ -30,21 +30,87 @@ class ChronosEngine:
         
         if "ParentPath" not in cols and "Target_Path" in cols:
             print("    -> [Chronos] Splitting Target_Path into ParentPath/FileName...")
-            # WindowsパスとLinuxパスの両方に対応
             lf = lf.with_columns(
-                pl.col("Target_Path").str.replace_all(r"/", "\\") # 統一
+                pl.col("Target_Path").str.replace_all(r"/", "\\") 
             )
             lf = lf.with_columns([
                 pl.col("Target_Path").str.split("\\").list.get(-1).alias("FileName"),
                 pl.col("Target_Path").str.split("\\").list.slice(0, -1).list.join("\\").alias("ParentPath")
             ])
         
-        # カラムがない場合のフォールバック
-        cols = lf.collect_schema().names() # 更新
+        cols = lf.collect_schema().names()
         if "ParentPath" not in cols: lf = lf.with_columns(pl.lit("UNKNOWN").alias("ParentPath"))
         if "FileName" not in cols: lf = lf.with_columns(pl.lit("UNKNOWN").alias("FileName"))
             
         return lf
+
+    # [NEW] USNジャーナルの「時間の逆行」を検知するメソッド
+    def _detect_usn_rollback(self, lf):
+        cols = lf.collect_schema().names()
+        
+        # USNジャーナルの必須カラムがあるか確認 ($J CSVなど)
+        if "UpdateSequenceNumber" not in cols or "UpdateTimestamp" not in cols:
+            return lf
+
+        print("    -> [Chronos] USN Journal detected. Scanning for Time Paradoxes (System Rollback)...")
+        
+        # [FIX] USNをInt64にキャスト！これがないと文字列ソートになって時系列が壊れる！
+        lf = lf.with_columns(
+            pl.col("UpdateSequenceNumber").cast(pl.Int64, strict=False).alias("UpdateSequenceNumber_Int")
+        )
+
+        # 時刻変換
+        lf = lf.with_columns(
+            pl.col("UpdateTimestamp").str.replace("T", " ").str.to_datetime(format="%Y-%m-%d %H:%M:%S%.f", strict=False).alias("_dt")
+        )
+
+        # [FIX] Int化したUSNでソート
+        lf = lf.sort("UpdateSequenceNumber_Int")
+        lf = lf.with_columns([
+            pl.col("_dt").shift(1).alias("_prev_dt"),
+            # pl.col("UpdateSequenceNumber").shift(1).alias("_prev_usn")
+        ])
+
+        # 判定ロジック: 
+        # tolerance (default 10.0s) よりも大きく「マイナス」になった場合を検知
+        # 誤検知回避のため、-60秒以上の巻き戻しを異常とみなす
+        rollback_threshold = -1.0 * 60 
+
+        lf = lf.with_columns(
+            (pl.col("_dt") - pl.col("_prev_dt")).dt.total_seconds().alias("_time_diff")
+        )
+
+        # Anomaly_Time カラムがなければ作成
+        if "Anomaly_Time" not in cols:
+            lf = lf.with_columns(pl.lit("").alias("Anomaly_Time"))
+        
+        if "Threat_Score" not in cols:
+            lf = lf.with_columns(pl.lit(0).alias("Threat_Score"))
+
+        lf = lf.with_columns(
+            pl.when(pl.col("_time_diff") < rollback_threshold)
+              .then(pl.lit("CRITICAL_SYSTEM_ROLLBACK")) # 時間遡行検知タグ
+              .otherwise(pl.col("Anomaly_Time"))
+              .alias("Anomaly_Time")
+        )
+
+        # スコアリングの更新（ROLLBACKは最重要 = 300点）
+        lf = lf.with_columns(
+            pl.when(pl.col("Anomaly_Time") == "CRITICAL_SYSTEM_ROLLBACK")
+              .then(300) 
+              .otherwise(pl.col("Threat_Score"))
+              .alias("Threat_Score")
+        )
+        
+        # 証跡として「どれくらい戻ったか」をFileName列などに追記
+        lf = lf.with_columns(
+            pl.when(pl.col("Anomaly_Time") == "CRITICAL_SYSTEM_ROLLBACK")
+              .then(pl.format("{} (Rollback: {} sec)", pl.col("FileName"), pl.col("_time_diff")))
+              .otherwise(pl.col("FileName"))
+              .alias("FileName")
+        )
+
+        return lf.drop(["_dt", "_prev_dt", "_time_diff", "UpdateSequenceNumber_Int"])
 
     def _apply_safety_filters(self, df):
         print("    -> [Chronos] Applying Safety Filters (Brutal Mode)...")
@@ -54,9 +120,6 @@ class ChronosEngine:
             pl.col("FileName").fill_null("").str.to_lowercase().alias("_fn")
         ])
         
-        # ---------------------------------------------------------
-        # 1. 🔨 GLOBAL HAMMER
-        # ---------------------------------------------------------
         kill_keywords = [
             "ccleaner", "jetico", "bcwipe", "dropbox", 
             "skype", "onedrive", "google", "adobe", 
@@ -74,9 +137,6 @@ class ChronosEngine:
             "windows/system32/config", "windows\\system32\\config"
         ]
         
-        # ---------------------------------------------------------
-        # 2. ⚡ DUAL-USE TRAP
-        # ---------------------------------------------------------
         dual_use_folders = [
             "nmap", "wireshark", "python", "tcl", "ruby", "perl", "java", "jdk", "jre",
             "tor browser"
@@ -91,9 +151,6 @@ class ChronosEngine:
             "tor.exe", "firefox.exe"
         ]
 
-        # ---------------------------------------------------------
-        # 3. 📄 FILE KILL LIST
-        # ---------------------------------------------------------
         file_kill_list = [
             "fm20.dll", "ven2232.olb", "mofygdvh.mcp", 
             "shatbbms.dif", "vkorppvhkxuvqcvj",
@@ -104,10 +161,8 @@ class ChronosEngine:
         ]
 
         is_noise = pl.lit(False)
-        
         for kw in kill_keywords:
             is_noise = is_noise | pl.col("_pp").str.contains(kw, literal=True)
-
         for kw in file_kill_list:
             is_noise = is_noise | pl.col("_fn").str.contains(kw, literal=True)
 
@@ -127,13 +182,20 @@ class ChronosEngine:
 
     def analyze(self, args):
         mode_str = "LEGACY" if args.legacy else "STANDARD"
-        print(f"[*] Chronos v23.17 awakening... Mode: {mode_str}")
+        print(f"[*] Chronos v23.18 awakening... Mode: {mode_str}")
         try:
             loader = ThemisLoader(["rules/triage_rules.yaml", "rules/sigma_file_event.yaml"])
             lf = pl.scan_csv(args.file, ignore_errors=True, infer_schema_length=0)
             
             # [FIX] Ensure columns exist before processing
             lf = self._ensure_columns(lf)
+
+            # [NEW] USN Rollback Check (Detect Time Paradox BEFORE filtering)
+            lf = self._detect_usn_rollback(lf)
+            
+            # [FIX] Ensure Anomaly_Time exists even if USN logic skipped it
+            if "Anomaly_Time" not in lf.collect_schema().names():
+                lf = lf.with_columns(pl.lit("").alias("Anomaly_Time"))
             
             print("    -> Applying Themis Threat Scoring...")
             lf = loader.apply_threat_scoring(lf)
@@ -144,17 +206,6 @@ class ChronosEngine:
             lf = self._apply_safety_filters(lf)
             
             cols = lf.collect_schema().names()
-            # Timeline CSV usually doesn't have SI/FN timestamps, so we might skip timestamp analysis
-            # or try to map 'Timestamp_UTC' if available.
-            # But Chronos is designed for MFT/TimeStomp logic ($SI < $FN).
-            # If Master_Timeline comes from EventLogs/MFT combined, it might lack $SI/$FN columns.
-            
-            # CHECK: Does Master_Timeline have Created0x10 / Created0x30 ?
-            # If not, Chronos cannot detect Timestomping based on MFT attributes.
-            # However, for the purpose of "filtering noise", the above is enough.
-            
-            # Assuming Master_Timeline might NOT have MFT details. 
-            # If so, Chronos acts as a Threat Scorer + Noise Filter.
             
             si_cr = "Created0x10"
             fn_cr = "Created0x30"
@@ -171,7 +222,9 @@ class ChronosEngine:
                 lf = lf.with_columns((pl.col("fn_dt") - pl.col("si_dt")).dt.total_seconds().alias("diff_sec"))
 
                 lf = lf.with_columns([
-                    pl.when((pl.col("Threat_Score") >= 80) & (pl.col("Threat_Tag") != "NOISE_ARTIFACT"))
+                    pl.when(pl.col("Anomaly_Time") == "CRITICAL_SYSTEM_ROLLBACK")
+                      .then(pl.lit("CRITICAL_SYSTEM_ROLLBACK"))
+                    .when((pl.col("Threat_Score") >= 80) & (pl.col("Threat_Tag") != "NOISE_ARTIFACT"))
                       .then(pl.lit("CRITICAL_ARTIFACT"))
                     .when(pl.col("diff_sec") < -60)
                       .then(pl.lit("TIMESTOMP_BACKDATE"))
@@ -197,7 +250,8 @@ class ChronosEngine:
                 )
                 
                 score_expr = (
-                    pl.when(pl.col("Threat_Tag") == "NOISE_ARTIFACT").then(0)
+                    pl.when(pl.col("Anomaly_Time") == "CRITICAL_SYSTEM_ROLLBACK").then(300)
+                    .when(pl.col("Threat_Tag") == "NOISE_ARTIFACT").then(0)
                     .when(pl.col("Anomaly_Time") == "LEGACY_BUILD").then(10)
                     .when(pl.col("Anomaly_Time") == "CRITICAL_ARTIFACT").then(200)
                     .when(pl.col("Anomaly_Time") == "TIMESTOMP_BACKDATE").then(100)
@@ -207,16 +261,14 @@ class ChronosEngine:
                 )
                 lf = lf.with_columns(score_expr.alias("Chronos_Score"))
             else:
-                # Fallback if no MFT timestamps
-                print("    [!] MFT Timestamps (Created0x10/30) not found. Skipping Timestomp detection.")
+                print("    [!] MFT Timestamps (Created0x10/30) not found. Skipping Standard Timestomp detection.")
                 lf = lf.with_columns([
-                    pl.lit("").alias("Anomaly_Time"),
+                    pl.col("Anomaly_Time").fill_null("").alias("Anomaly_Time"),
                     pl.col("Threat_Score").alias("Chronos_Score")
                 ])
 
             df = lf.filter(pl.col("Chronos_Score") > 0).collect()
 
-            # Final Censorship
             if "ParentPath" in df.columns:
                 df = self.hestia.apply_censorship(df, "ParentPath", "FileName")
             

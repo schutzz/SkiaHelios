@@ -82,6 +82,8 @@ try:
     from SH_LachesisWriter import LachesisWriter
     # ThemisLoaderも同様
     from SH_ThemisLoader import ThemisLoader
+    # [NEW] Import Chronos for direct injection
+    from SH_ChronosSift import ChronosEngine
 except ImportError as e:
     # 万が一これでもダメな場合のデバッグ表示
     print(f"[!] Hekate Import Critical Error: {e}")
@@ -149,6 +151,62 @@ def main(argv=None):
             if recovered_os != "Unknown OS":
                 os_info = recovered_os
                 print(f"    -> [Hekate] OS Identified: {os_info}")
+
+        # -------------------------------------------------------------------------
+        # [NEW] Chronos - USN Journal Direct Injection (Time Paradox Fix for Weaver)
+        # -------------------------------------------------------------------------
+        usn_csv = None
+        # 探索ルート：入力ファイルのディレクトリ、KAPE出力先、カレント
+        search_roots = []
+        if args.input: search_roots.append(Path(args.input).parent)
+        if args.kape: search_roots.append(Path(args.kape))
+        search_roots.append(Path("."))
+
+        print("    [*] Scanning for USN Journal ($J) to detect Time Paradox...")
+        for root_path in search_roots:
+            if not root_path or not root_path.exists(): continue
+            # 再帰的に探す
+            for f in root_path.rglob("*$J*Output.csv"):
+                if "MFTECmd" in f.name:
+                    usn_csv = str(f)
+                    print(f"    [+] Found USN Journal: {usn_csv}")
+                    break
+            if usn_csv: break
+
+        if usn_csv:
+            try:
+                print(f"    [!] Injecting USN Journal into Chronos Engine: {usn_csv}")
+                engine = ChronosEngine()
+                
+                # Run specific USN logic directly
+                lf_usn = pl.scan_csv(usn_csv, ignore_errors=True, infer_schema_length=0)
+                lf_usn = engine._ensure_columns(lf_usn)
+                lf_usn = engine._detect_usn_rollback(lf_usn)
+                
+                # Extract Critical Rollbacks
+                rollback_hits = lf_usn.filter(pl.col("Anomaly_Time") == "CRITICAL_SYSTEM_ROLLBACK").collect()
+                
+                # [FIX] Cast to String to match 'infer_schema_length=0' of main DF
+                rollback_hits = rollback_hits.select([pl.col(c).cast(pl.Utf8) for c in rollback_hits.columns])
+                
+                if rollback_hits.height > 0:
+                    print(f"      [ALERT] SYSTEM ROLLBACK DETECTED: {rollback_hits.height} events found!")
+                    
+                    # Ensure Score column consistency
+                    if "Chronos_Score" not in rollback_hits.columns and "Threat_Score" in rollback_hits.columns:
+                         rollback_hits = rollback_hits.with_columns(pl.col("Threat_Score").alias("Chronos_Score"))
+                    
+                    # Merge into dfs['Chronos']
+                    if 'Chronos' not in dfs or dfs['Chronos'] is None:
+                        dfs['Chronos'] = rollback_hits
+                    else:
+                        # Use diagonal concat to handle column mismatches
+                        dfs['Chronos'] = pl.concat([dfs['Chronos'], rollback_hits], how="diagonal")
+                else:
+                    print("      [.] No Time Paradox found in USN.")
+            except Exception as e:
+                print(f"    [!] USN Injection Failed: {e}")
+                # traceback.print_exc()
 
         # ----------------------------------------------------
         # 2. Atropos: Measure & Cut (Analyze Logic)
