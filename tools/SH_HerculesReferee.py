@@ -295,6 +295,15 @@ class HerculesReferee:
             timeline_df = timeline_df.with_columns(pl.lit("").alias("_msg_check"))
             msg_col = "_msg_check"
 
+        # [NEW] Phase A: Anti-Forensics Detection Definitions
+        ANTI_FORENSIC_TOOLS = {
+            'bcwipe.exe': 'BCWIPE_WIPING',
+            'ccleaner.exe': 'CCLEANER_WIPING',
+            'sdelete.exe': 'SDELETE_WIPING',
+            'eraser.exe': 'ERASER_WIPING',
+            'cipher.exe': 'CIPHER_WIPING' # cipher /w
+        }
+
         # ========================================================
         # 1. Masquerade Detection (CRX Analysis) [Priority: Critical]
         # ========================================================
@@ -333,7 +342,31 @@ class HerculesReferee:
             ])
 
         # ========================================================
-        # 2. LNK Analysis & Enrichment [Priority: High] - Deep LNK
+        # 2. Anti-Forensics Tool Detection [Priority: P0]
+        # ========================================================
+        print("    -> [Hercules] Scanning for Anti-Forensics Tools (Wipers)...")
+        if "FileName" in cols or msg_col:
+            # カラム選択 (FileName優先)
+            target_col = "FileName" if "FileName" in cols else msg_col
+            
+            for tool, tag_label in ANTI_FORENSIC_TOOLS.items():
+                # ツール名が含まれているか (Lower case check)
+                is_wiper = pl.col(target_col).str.to_lowercase().str.contains(tool)
+                
+                timeline_df = timeline_df.with_columns([
+                    pl.when(is_wiper)
+                      .then(300) # MAX SCORE
+                      .otherwise(pl.col("Threat_Score"))
+                      .alias("Threat_Score"),
+                    
+                    pl.when(is_wiper)
+                      .then(pl.format("{},CRITICAL_ANTI_FORENSICS,{}", pl.col("Tag"), pl.lit(tag_label)))
+                      .otherwise(pl.col("Tag"))
+                      .alias("Tag")
+                ])
+
+        # ========================================================
+        # 3. LNK Analysis & Enrichment [Priority: High] - Deep LNK
         # ========================================================
         # LNKの飛び先(Target_Path)を解析し、具体的なTTPsをタグ付け
         if "Target_Path" in cols:
@@ -584,7 +617,7 @@ class HerculesReferee:
               .when(pl.col("Threat_Score") >= 50)
               .then(pl.lit("HIGH"))
               # 特定タグは無条件でCRITICAL/HIGH扱いにしてForce Includeさせる
-              .when(pl.col("Tag").str.contains("PARADOX|MASQUERADE|SUSPICIOUS_CMDLINE|CRITICAL_PHISHING"))
+              .when(pl.col("Tag").str.contains("PARADOX|MASQUERADE|SUSPICIOUS_CMDLINE|CRITICAL_PHISHING|ANTI_FORENSICS"))
               .then(pl.lit("CRITICAL"))
               .otherwise(pl.lit("INFO"))
               .alias("Judge_Verdict")

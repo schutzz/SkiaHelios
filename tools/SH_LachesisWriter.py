@@ -88,24 +88,18 @@ class LachesisWriter:
     # [Task 1] Helper Method for Cross-Reference
     def _enrich_from_timeline(self, filename, timeline_df):
         """
-        [Cross-Reference] TimelineからLNKファイル名に一致する行を探し、Target_PathとTagを返す
-        Update: Robust matching (Case-insensitive & Path handling)
+        [Cross-Reference] Timelineから詳細情報を抽出
+        Returns: target_path, tag, args, is_executed(bool)
         """
         if timeline_df is None or not filename:
-            return None, None
+            return None, None, None, False
             
         try:
-            # 1. 検索キーの正規化（小文字化 & パス除去）
-            # ファイル名のみを抽出して検索キーとする
             import os
             search_key = str(filename).lower()
             if "\\" in search_key or "/" in search_key:
                 search_key = os.path.basename(search_key.replace("\\", "/"))
 
-            # 2. TimelineのFileName/Message列に対して検索
-            # Polarsのstr.to_lowercase()を使って大文字小文字を無視してマッチング
-            # FileNameカラムがない場合はMessageカラムのみ検索
-            
             exprs = []
             if "FileName" in timeline_df.columns:
                 exprs.append(pl.col("FileName").str.to_lowercase().str.contains(search_key, literal=True))
@@ -115,23 +109,44 @@ class LachesisWriter:
                 exprs.append(pl.col(msg_cols[0]).str.to_lowercase().str.contains(search_key, literal=True))
             
             if not exprs:
-                return None, None
+                return None, None, None, False
                 
-            # OR条件で結合
             combined_expr = exprs[0]
             for e in exprs[1:]:
                 combined_expr = combined_expr | e
                 
-            matched = timeline_df.filter(combined_expr).head(1)
+            matched = timeline_df.filter(combined_expr)
             
             if matched.height > 0:
                 row = matched.row(0, named=True)
                 target = row.get("Target_Path", "")
                 tag = row.get("Tag", "")
-                return target, tag
+                
+                args = row.get("Arguments", "")
+                if not args:
+                    for col in row.keys():
+                        val = str(row[col])
+                        if "Arguments:" in val:
+                            try:
+                                args = val.split("Arguments:", 1)[1].split("  ")[0].strip()
+                            except: pass
+                            if args: break
+                
+                # Check Execution Evidence
+                is_executed = False
+                exec_artifacts = ["Process", "Prefetch", "UserAssist", "Shimcache", "Amcache"]
+                if "Artifact_Type" in matched.columns:
+                     exec_rows = matched.filter(pl.col("Artifact_Type").str.contains("|".join(exec_artifacts)))
+                     if exec_rows.height > 0:
+                         is_executed = True
+                
+                if "EXECUTION_CONFIRMED" in tag:
+                    is_executed = True
+
+                return target, tag, args, is_executed
         except Exception as e:
             pass
-        return None, None
+        return None, None, None, False
     
     def _is_high_confidence(self, ev):
         """
@@ -497,15 +512,17 @@ class LachesisWriter:
                                 "Path": path, 
                                 "Note": str(row.get("Anomaly_Time", "")), 
                                 "Time": str(row.get("si_dt", "") or row.get("UpdateTimestamp", "")),
-                                "Reason": bypass_reason
+                                "Reason": bypass_reason,
+                                "Score": score  # [追加] Scoreを保存
                             })
                             continue
 
-                        if fname.lower().endswith(".lnk"):
-                            tgt = str(row.get("Target_Path", "")).strip()
-                            if tgt and len(tgt) > 4:
-                                tgt_short = (tgt[:20] + "..") if len(tgt) > 20 else tgt
-                                fname += f" 🎯 {tgt_short}"
+                        # [追加・変更] Timestomp Execution Check
+                        extra_info = {}
+                        timeline_df = dfs.get('Timeline')
+                        if is_dual or "TIMESTOMP" in str(row.get("Threat_Tag", "")):
+                             _, _, _, is_executed = self._enrich_from_timeline(fname, timeline_df)
+                             extra_info["Execution"] = is_executed
 
                         if is_dual:
                             bypass_reason = "Dual-Use Tool [DROP]" 
@@ -526,7 +543,11 @@ class LachesisWriter:
                         
                         if not bypass_reason: bypass_reason = "High Score (>200)"
                         self._add_unique_visual_ioc({
-                            "Type": "TIMESTOMP", "Value": fname, "Path": path, "Note": "Time Anomaly", "Time": str(row.get("Anomaly_Time", "")), "Reason": bypass_reason
+                            "Type": "TIMESTOMP", "Value": fname, "Path": path, "Note": "Time Anomaly", 
+                            "Time": str(row.get("Anomaly_Time", "")), 
+                            "Reason": bypass_reason, 
+                            "Score": score,          # [追加] Scoreを保存
+                            "Extra": extra_info      # [追加] Extraを保存
                         })
                 except: pass
 
@@ -577,10 +598,17 @@ class LachesisWriter:
                         final_tag = tag
                         
                         if ".lnk" in fname.lower():
-                            target_path, timeline_tag = self._enrich_from_timeline(fname, timeline_df)
-                            if target_path:
-                                extra_info["Target_Path"] = target_path
+                            # [CHANGE] args を受け取る
+                            target_path, timeline_tag, args, _ = self._enrich_from_timeline(fname, timeline_df)
                             
+                            if target_path: extra_info["Target_Path"] = target_path
+                            # [NEW] 引数を格納
+                            if args: extra_info["Arguments"] = args
+                            
+                            # [NEW] セキュリティツールやカンファレンスへの偽装検知
+                            if "DEFCON" in clean_name.upper() or "BYPASS" in clean_name.upper():
+                                extra_info["Risk"] = "SECURITY_TOOL_MASQUERADE"
+
                             if timeline_tag:
                                 merged_tags = set(tag.split(",") + timeline_tag.split(","))
                                 merged_tags.discard("")
@@ -593,7 +621,8 @@ class LachesisWriter:
                             "Note": "File Artifact", 
                             "Time": str(row.get("Ghost_Time_Hint", "")), 
                             "Reason": bypass_reason,
-                            "Extra": extra_info
+                            "Extra": extra_info,
+                            "Score": score # [追加] Scoreを保存
                         })
                 except: pass
 
@@ -609,7 +638,9 @@ class LachesisWriter:
                             name = row.get("Target_FileName")
                             if not self._is_noise(name, row.get("Full_Path", "")):
                                 self._add_unique_visual_ioc({
-                                    "Type": "PERSISTENCE", "Value": name, "Path": row.get("Full_Path"), "Note": "Persist", "Time": str(row.get("Last_Executed_Time", "")), "Reason": "Persistence"
+                                    "Type": "PERSISTENCE", "Value": name, "Path": row.get("Full_Path"), "Note": "Persist", 
+                                    "Time": str(row.get("Last_Executed_Time", "")), "Reason": "Persistence",
+                                    "Score": score # [追加] Scoreを保存
                                 })
                 except: pass
 
@@ -633,16 +664,30 @@ class LachesisWriter:
                 })
             
             is_dual = self._is_dual_use(ev.get('Summary', ''))
-            if (ev['Criticality'] >= 90 or is_dual) and ev['Category'] == 'EXEC':
+            tag = str(ev.get('Tag', '')).upper()
+            is_af = "ANTI_FORENSICS" in tag
+            score = ev.get('Criticality', 0) # [追加]
+
+            if (ev['Criticality'] >= 90 or is_dual or is_af) and (ev['Category'] == 'EXEC' or ev['Category'] == 'ANTI'):
                 kws = ev.get('Keywords', [])
                 if kws:
                     kw = str(kws[0]).lower()
                     if not self._is_noise(kw):
-                        type_label = "DUAL_USE_TOOL" if is_dual else "EXECUTION"
-                        reason_label = "Dual-Use Tool [DROP]" if is_dual else "Execution"
+                        if is_af:
+                            type_label = "ANTI_FORENSICS"
+                            reason_label = "Evidence Destruction"
+                        elif is_dual:
+                            type_label = "DUAL_USE_TOOL"
+                            reason_label = "Dual-Use Tool [DROP]"
+                        else:
+                            type_label = "EXECUTION"
+                            reason_label = "Execution"
+
                         self._add_unique_visual_ioc({
                             "Type": type_label, "Value": kws[0], "Path": "Process", "Note": f"Execution ({ev['Source']})",
-                            "Reason": reason_label
+                            "Reason": reason_label,
+                            "Time": ev.get('Time'),
+                            "Score": score # [追加]
                         })
 
     def _write_executive_summary_visual(self, f, events, verdicts, primary_user, time_range):
@@ -687,18 +732,55 @@ class LachesisWriter:
         f.write("\n### 🏹 Attack Timeline Flow (Critical Chain)\n")
         if self.visual_iocs: f.write(self._generate_mermaid())
         else: f.write("(No sufficient visual indicators found)\n")
+
+        # [NEW] Enhanced Table Logic
         f.write("\n### 💎 Key Indicators (Critical Only)\n")
         if self.visual_iocs:
-            f.write("| Time | Type | Value (File/IP) | Reason (Bypass) | Path |\n|---|---|---|---|---|\n")
+            # ヘッダー変更: Target/Action と Score を追加
+            f.write("| Time | Type | Value (File/IP) | **Target / Action** | **Score** | Path |\n|---|---|---|---|---|---|\n")
+            
             sorted_iocs = sorted(self.visual_iocs, key=lambda x: x.get("Time", "9999"))
             seen = set()
             for ioc in sorted_iocs:
                 val = ioc['Value']
                 if val in seen: continue
                 seen.add(val)
+                
+                # Determine Target/Action Content
+                target_action = "-"
+                extra = ioc.get("Extra", {})
+                ioc_type = str(ioc.get("Type", "")).upper()
+                reason = str(ioc.get("Reason", "")).upper()
+                
+                if ".lnk" in val.lower() or "PHISHING" in ioc_type:
+                    tgt = extra.get("Target_Path", "")
+                    if not tgt and "Target:" in ioc.get("Value", ""):
+                        tgt = ioc.get("Value", "").split("Target:")[-1].strip()
+                    # ターゲットがあれば表示
+                    target_action = f"🎯 {tgt[:40] + '..' if len(tgt)>40 else tgt}" if tgt else "Target Unknown"
+                
+                elif "TIMESTOMP" in ioc_type:
+                    # Check execution evidence (Extra flag or Tag context)
+                    if extra.get("Execution") == True or "EXECUTION" in reason or "EXECUTION_CONFIRMED" in ioc_type:
+                        target_action = "✅ 実行痕跡あり"
+                    else:
+                        target_action = "⚠️ 実行痕跡なし (存在のみ)"
+                
+                elif "ANTI_FORENSICS" in ioc_type:
+                    target_action = "🗑️ 証拠隠滅 (Wiping)"
+                    
+                elif "MASQUERADE" in ioc_type:
+                    target_action = "🎭 偽装ファイル設置"
+                    
+                else:
+                    # Fallback
+                    target_action = ioc.get("Reason", "-")
+
+                score = ioc.get("Score", 0)
                 path_short = (ioc['Path'][:30] + '..') if len(ioc['Path']) > 30 else ioc['Path']
-                reason = ioc.get("Reason", "-")
-                f.write(f"| {str(ioc.get('Time','')).replace('T',' ')[:19]} | **{ioc['Type']}** | `{ioc['Value']}` | {reason} | `{path_short}` |\n")
+                
+                # 新しいフォーマットで書き込み
+                f.write(f"| {str(ioc.get('Time','')).replace('T',' ')[:19]} | **{ioc['Type']}** | `{ioc['Value']}` | {target_action} | {score} | `{path_short}` |\n")
         else: f.write("No critical IOCs automatically detected.\n")
         f.write("\n")
 
@@ -723,62 +805,179 @@ class LachesisWriter:
                 row_str = f"| {time_display} | {cat_name} | **{prefix}{summary}** | {ev['Source']} |"
                 f.write(f"{row_str}\n")
             if idx < len(phases)-1: f.write("\n*( ... Time Gap ... )*\n\n")
-        f.write("\n")
+    # [Action 2.2] Enhanced Anti-Forensics Report
+    def _write_anti_forensics_section(self, f, ioc_list, dfs):
+        """
+        [New] Anti-Forensics専用セクション
+        """
+        af_tools = [ioc for ioc in ioc_list if "ANTI_FORENSICS" in str(ioc.get("Type", "")) or "WIPING" in str(ioc.get("Type", ""))]
+        
+        if not af_tools:
+            return
+
+        f.write("### 🚨 Anti-Forensics Activities (Evidence Destruction)\n\n")
+        f.write("⚠️⚠️⚠️ **重大な証拠隠滅活動を検出** ⚠️⚠️⚠️\n\n")
+        f.write("攻撃者は侵入後、以下のツールを使用して活動痕跡を意図的に抹消しています：\n\n")
+
+        seen_tools = set()
+        
+        # ツールごとの詳細情報表示
+        for tool in af_tools:
+            name = tool.get("Value", "Unknown").upper()
+            if name in seen_tools: continue
+            seen_tools.add(name)
+            
+            run_count = self._extract_run_count(tool, dfs)
+            last_run = tool.get("Time", "Unknown").replace("T", " ")[:19]
+            
+            desc = "データ抹消ツール"
+            if "BCWIPE" in name: desc = "軍事レベルのファイルワイピングツール。通常の復元を不可能にします。"
+            elif "CCLEANER" in name: desc = "システムクリーナー。ブラウザ履歴やMRUの削除に使用されます。"
+            elif "SDELETE" in name: desc = "Sysinternals製のセキュア削除ツール。"
+            elif "ERASER" in name: desc = "ファイル抹消ツール。"
+
+            f.write(f"#### {name}\n")
+            f.write(f"- 📊 **Run Count**: {run_count}回\n")
+            f.write(f"- 🕐 **Last Execution**: {last_run} (UTC)\n")
+            f.write(f"- ⚠️ **Severity**: CRITICAL\n")
+            f.write(f"- 🔍 **Description**: {desc}\n\n")
+            
+            f.write(f"🕵️ **Analyst Note**:\n")
+            if "BCWIPE" in name:
+                 f.write("このツールの実行により、LNKファイル、Prefetch、一時ファイル等の証拠が物理的に上書き削除された可能性が極めて高いです。\n")
+            else:
+                 f.write("攻撃活動終了後の痕跡削除（Cleanup）に使用されたと推定されます。\n")
+            f.write("\n---\n\n")
+
+        # Missing Evidence Impact Table
+        f.write("### 📉 Missing Evidence Impact Assessment\n\n")
+        f.write("以下の証拠が、Anti-Forensicsツールによって失われたと判断されます：\n\n")
+        f.write("| 証拠カテゴリ | 期待される情報 | 現状 | 推定原因 |\n|---|---|---|---|\n")
+        f.write("| LNK Target Paths | `cmd.exe ...` 等の引数 | ❌ 欠落 | BCWipe/SDeleteによる削除 |\n")
+        f.write("| Prefetch (Tools) | 実行回数・タイムスタンプ | ❌ 欠落 | CCleaner/BCWipeによる削除 |\n")
+        f.write("| 一時ファイル | ペイロード本体 | ❌ 欠落 | ワイピングによる物理削除 |\n\n")
+
+        f.write("🕵️ **Analyst Note**:\n")
+        f.write("これらの証拠欠落は「ツールの限界」ではなく、**「攻撃者による高度な隠蔽工作」**の結果です。\n")
+        f.write("Ghost Detection (USNジャーナル) によりファイルの「存在していた事実」のみを確認できています。\n\n")
+
+    def _extract_run_count(self, ioc, dfs):
+        """
+        IOCに関連するRunCountを抽出する。
+        1. IOC自身が持つSummaryから抽出 (Most Reliable)
+        2. Prefetch DFがあればそこから。
+        3. なければTimelineのMessageからRegex検索。
+        """
+        # 0. Check IOC Summary (carried from Hercules)
+        summary = ioc.get("Summary", "")
+        if summary:
+            match = re.search(r"(?:Run\s*Count:|Run:)\s*(\d+)", summary, re.IGNORECASE)
+            if match: return match.group(1)
+
+        try:
+            if dfs and 'Prefetch' in dfs:
+                pf_df = dfs['Prefetch']
+                # Try finding by executable name
+                name = ioc.get("Value", "")
+                if name:
+                    # Case insensitive search
+                    hits = pf_df.filter(pl.col("ExecutableName").str.to_lowercase().str.contains(name.lower()))
+                    if hits.height > 0:
+                        return hits[0, "RunCount"]
+        except: pass
+        
+        try:
+            timeline = dfs.get("Timeline")
+            if timeline is not None:
+                # Filter by name and approximate time
+                name = ioc.get("Value", "")
+                
+                # Broaden search: FileName OR Message OR Description
+                cond = pl.col("FileName").str.to_lowercase().str.contains(name.lower())
+                for c in ["Message", "Description", "Action"]:
+                    if c in timeline.columns:
+                        cond = cond | pl.col(c).str.to_lowercase().str.contains(name.lower())
+                
+                # Find row
+                hits = timeline.filter(cond)
+                if hits.height > 0:
+
+                    # 1. Try generic column search
+                    for col in hits.columns:
+                        val = str(hits[0, col])
+                        match = re.search(r"RunCount:\s*(\d+)", val, re.IGNORECASE)
+                        if match: return match.group(1)
+                        if col == "RunCount": return str(hits[0, col])
+                    
+                    # 2. Try bruteforce scan on stringified row (User Request)
+                    try:
+                        row_str = str(hits.row(0))
+                        # Match 'RunCount: 1' or '(Run: 1)' or 'Run Count: 1'
+                        match = re.search(r"(?:Run\s*Count:|Run:)\s*(\d+)", row_str, re.IGNORECASE)
+                        if match: return match.group(1)
+                    except: pass
+        except: pass
+        
+        return "Unknown"
 
     def _write_technical_findings(self, f, phases):
         t = self.txt
         f.write(f"## {t['h1_tech']}\n")
         
-        high_conf_events = [ioc for ioc in self.visual_iocs if self._is_force_include_ioc(ioc)]
+        high_conf_events = [ioc for ioc in self.visual_iocs if self._is_force_include_ioc(ioc) or "ANTI_FORENSICS" in str(ioc.get("Type", ""))]
         
-        if not high_conf_events:
-            f.write("本調査範囲において、特筆すべき高確度の技術的痕跡は検出されませんでした。\n")
-            f.write("（Medium Confidence以下のイベントについては統計情報を参照してください）\n\n")
-            return
+        # [Call New Section]
+        self._write_anti_forensics_section(f, high_conf_events, self._latest_dfs)
 
-        f.write("本セクションでは、検出された脅威の中でも特に確度が高く、対応優先度の高い痕跡を詳述します。\n\n")
+        f.write("本セクションでは、検出された脅威を分類して詳述します。\n\n")
 
         groups = {
             "🚨 System Time Manipulation (Time Paradox)": [],
             "🎭 File Masquerading & Backdoors": [],
-            "🎣 Phishing & Initial Access": [],
-            "⚠️ High Confidence Threats": []
+            "🎣 Phishing & Initial Access (LNKs)": [],
+            "⚡ Executed Tools (Active Threats)": [],
+            "📦 Suspicious Files (Presence Only)": [],
+            "⚠️ Other High Confidence Threats": []
         }
         
         for ioc in high_conf_events:
             ioc_type = str(ioc.get('Type', '')).upper()
             reason = str(ioc.get('Reason', '')).upper()
+            val = str(ioc.get('Value', '')).lower()
             
+            # Anti-Forensicsは専用セクションで書いたのでここではスキップ
+            if "ANTI_FORENSICS" in ioc_type: continue 
+
             if "TIME_PARADOX" in ioc_type or "ROLLBACK" in reason:
                 groups["🚨 System Time Manipulation (Time Paradox)"].append(ioc)
-            elif "MASQUERADE" in ioc_type or ".crx" in str(ioc.get('Value', '')).lower():
+            elif "MASQUERADE" in ioc_type or ".crx" in val:
                 groups["🎭 File Masquerading & Backdoors"].append(ioc)
-            elif "PHISHING" in ioc_type or "SUSPICIOUS_CMDLINE" in reason:
-                groups["🎣 Phishing & Initial Access"].append(ioc)
+            elif "PHISHING" in ioc_type or "SUSPICIOUS_CMDLINE" in reason or ".lnk" in val:
+                groups["🎣 Phishing & Initial Access (LNKs)"].append(ioc)
+            elif self._is_dual_use(val) or "DUAL_USE" in ioc_type:
+                if "EXECUTION_CONFIRMED" in ioc_type or "EXEC" in reason.upper() or "PROCESS" in ioc.get("Path", "").upper():
+                     groups["⚡ Executed Tools (Active Threats)"].append(ioc)
+                else:
+                     groups["📦 Suspicious Files (Presence Only)"].append(ioc)
             else:
-                groups["⚠️ High Confidence Threats"].append(ioc)
+                groups["⚠️ Other High Confidence Threats"].append(ioc)
 
+        # ... (Loop through groups and write details) ...
         for header, ioc_list in groups.items():
             if not ioc_list: continue
-            
             f.write(f"### {header}\n")
+            if "Presence Only" in header:
+                f.write("> **Note:** 以下のツールはディスク上に存在しますが、明確な実行痕跡（Prefetch/ProcessLog等）は確認されていません。\n\n")
             ioc_list.sort(key=lambda x: x.get('Time', '9999'))
-            
             for ioc in ioc_list:
                 dt = str(ioc.get('Time', 'Unknown')).replace('T', ' ')[:19]
                 val = ioc.get('Value', 'No details')
                 path = ioc.get('Path', 'Unknown')
                 ioc_type = ioc.get('Type', 'Unknown')
-                reason = ioc.get('Reason', '-')
-                
                 f.write(f"- **{dt}** | Type: `{ioc_type}` | Path: `{path[:50]}{'...' if len(path) > 50 else ''}`\n")
-                f.write(f"  - **Detection:** `{val}` ({reason})\n")
-                
                 insight = self._generate_ioc_insight(ioc)
-                if insight:
-                    f.write(f"  - 🕵️ **Analyst Note:** {insight}\n")
+                if insight: f.write(f"  - 🕵️ **Analyst Note:** {insight}\n")
                 f.write("\n")
-
         f.write("\n")
     
     def _is_force_include_ioc(self, ioc):
@@ -802,12 +1001,21 @@ class LachesisWriter:
     # [Task 1] Updated Insight Generation using Extra (LNK Details)
     def _generate_ioc_insight(self, ioc):
         ioc_type = str(ioc.get('Type', '')).upper()
+        
+        if "ANTI_FORENSICS" in ioc_type:
+            return "🚨 **Evidence Destruction**: 証拠隠滅ツールです。実行回数やタイムスタンプを確認してください。"
+        
         val = str(ioc.get('Value', ''))
         val_lower = val.lower()
         reason = str(ioc.get('Reason', '')).upper()
         path = str(ioc.get('Path', ''))
+
+
+
+        if "EXECUTION_CONFIRMED" in ioc_type:
+            return "🚨 **Confirmed**: このツールは実際に実行された痕跡があります。調査優先度：高"
         
-        if "TIME_PARADOX" in ioc_type or "ROLLBACK" in reason:
+        elif "TIME_PARADOX" in ioc_type or "ROLLBACK" in reason:
             rb_sec = "Unknown"
             if "Rollback:" in val:
                 import re
@@ -823,64 +1031,48 @@ class LachesisWriter:
             return f"{masq_app}のフォルダに、無関係なChrome拡張機能(.crx)が配置されています。これは典型的なPersistence（永続化）手法です。"
         
         elif ".lnk" in val_lower and ("SUSPICIOUS" in ioc_type or "PHISHING" in ioc_type or "PS_" in ioc_type or "CMD_" in ioc_type or "MSHTA" in ioc_type):
-            import re
             insights = []
-            
-            if "PS_ENCODED" in ioc_type:
-                insights.append("⚠️ Base64エンコードされたPowerShellコマンドの実行を検知。")
-            if "PS_HIDDEN" in ioc_type:
-                insights.append("🕶️ 隠しウィンドウ(Hidden)での実行を検知。")
-            if "PS_IEX" in ioc_type:
-                insights.append("⚡ Invoke-Expression (IEX) による動的コード実行を検知。")
-            if "PS_BYPASS" in ioc_type:
-                insights.append("🔓 ExecutionPolicy Bypassを検知。")
-            if "PS_DOWNLOAD" in ioc_type:
-                insights.append("📥 DownloadStringによるペイロード取得を検知。")
-            if "CMD_PS_CHAIN" in ioc_type:
-                insights.append("🔗 cmd.exe経由でのPowerShell呼び出しチェーンを検知。")
-            if "CMD_MSHTA_CHAIN" in ioc_type:
-                insights.append("🔗 cmd.exe経由でのMSHTA呼び出しチェーンを検知。")
-            if "MSHTA_REMOTE" in ioc_type:
-                insights.append("🌐 MSHTAによるリモートスクリプト実行(Fileless)を検知。")
-            if "RUNDLL_JS" in ioc_type:
-                insights.append("💣 rundll32.exeによるJavaScript実行を検知。")
-            if "REGSVR32_BYPASS" in ioc_type:
-                insights.append("🔧 regsvr32.exeを使用したAppLocker/WDAC回避を検知。")
-            if "CERTUTIL_DL" in ioc_type:
-                insights.append("📥 certutil.exeによるファイルダウンロードを検知。")
-            if "CERTUTIL_DECODE" in ioc_type:
-                insights.append("🔓 certutil.exeによるBase64デコードを検知。")
-            if "BITS_JOB" in ioc_type:
-                insights.append("📥 BITS転送によるステルスダウンロードを検知。")
-            if "WSCRIPT" in ioc_type or "CSCRIPT" in ioc_type:
-                insights.append("📜 Windows Script Hostによるスクリプト実行を検知。")
-            if "VBS_SCRIPT" in ioc_type:
-                insights.append("📜 VBScriptの実行を検知。")
-            if "HTA_SCRIPT" in ioc_type:
-                insights.append("🌐 HTAファイルの実行を検知。")
-            
-            double_ext = re.search(r'\.(jpg|png|pdf|doc|docx|xls|xlsx|mp4|txt)\.lnk', val_lower)
-            if double_ext:
-                insights.append(f"🎭 二重拡張子({double_ext.group(0)})による偽装を検知。")
-            
             extra = ioc.get('Extra', {})
-            target_info = extra.get('Target_Path', '')
+            target = extra.get('Target_Path', '')
+            args = extra.get('Arguments', '')
+            risk = extra.get('Risk', '')
+
+            # 1. Target Information
+            if not target:
+                if "Target:" in val: target = val.split("Target:")[-1].strip()
+                elif "🎯" in val: target = val.split("🎯")[-1].strip()
             
-            if not target_info:
-                if "Target:" in val:
-                    target_info = val.split("Target:")[-1].strip()
-                elif "🎯" in val:
-                    target_info = val.split("🎯")[-1].strip()
-            
-            if target_info:
-                disp_target = target_info[:90] + "..." if len(target_info) > 90 else target_info
-                insights.append(f"Target: `{disp_target}`")
-            
+            if target:
+                insights.append(f"🎯 **Target**: `{target}`")
+                
+                # Dynamic Severity Analysis
+                if "cmd.exe" in target.lower() or "powershell" in target.lower():
+                     insights.append("⚠️ **Critical**: OS標準シェルを悪用した攻撃の起点です。")
+                elif ".exe" in target.lower() or ".bat" in target.lower() or ".vbs" in target.lower():
+                     insights.append("⚠️ **High**: 実行可能ファイルを呼び出すショートカットです。")
+
+            # 2. Argument Analysis
+            if args:
+                # 長すぎる場合は省略表示
+                args_disp = (args[:100] + "...") if len(args) > 100 else args
+                insights.append(f"📝 **Args**: `{args_disp}`")
+                
+                # Critical Flags Identification
+                if "-enc" in args.lower() or "-encoded" in args.lower():
+                    insights.append("🚫 **Encoded**: Base64エンコードされたPowerShellコマンドを検知。即座に解析が必要です。")
+                if "-windowstyle hidden" in args.lower() or "-w hidden" in args.lower():
+                    insights.append("🕶️ **Stealth**: ユーザーからウィンドウを隠蔽するフラグを確認。")
+            else:
+                 # 引数が取れなくてもターゲットパスに引数が含まれている場合のフォールバック
+                 if "-enc" in target.lower():
+                      insights.append("🚫 **Encoded**: ターゲットパス内にエンコードされたコマンドを確認。")
+
+            # 3. Special Flags (Masquerade)
+            if risk == "SECURITY_TOOL_MASQUERADE":
+                insights.append("🎭 **Masquerade**: セキュリティツールやカンファレンス資料(DEFCON等)への偽装が疑われます。")
+
             if insights:
-                conclusion = ""
-                if any(tag in ioc_type for tag in ["PS_ENCODED", "PS_HIDDEN", "PS_IEX", "MSHTA_REMOTE", "CMD_PS_CHAIN"]):
-                    conclusion = "\n    ⚠️ **解析者コメント:** 典型的なダウンローダーまたはC2通信の起動スクリプトです。"
-                return "\n    ".join(insights) + conclusion
+                return "<br/>".join(insights)
             elif "PHISHING" in ioc_type:
                 return "不審なショートカットファイルが作成されました。フィッシング攻撃の可能性があります。"
             else:

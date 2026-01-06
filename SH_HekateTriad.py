@@ -190,13 +190,17 @@ def main():
                     "Summary": row.get('Action', '') or row.get('Description', ''),
                     "Source": row.get('Artifact_Type', 'Log'),
                     "Criticality": score,
+                    "Tag": tag,  # [FIX] Preserve Tag for Lachesis
                     "Keywords": [row.get('Target_Path')] if row.get('Target_Path') else []
                 }
                 if "LATERAL" in tag: ev['Category'] = "LATERAL"
                 elif "PERSISTENCE" in tag: ev['Category'] = "PERSIST"
                 elif "EXECUTION" in tag: ev['Category'] = "EXEC"
                 elif "CREATION" in tag or "DROP" in tag: ev['Category'] = "DROP"
-                
+                elif "ANTI_FORENSICS" in tag:
+                     ev['Category'] = "ANTI"
+                     verdict_flags.add("ANTI-FORENSICS")
+
                 events.append(ev)
 
     # --- Chronos Processing (Add to Flow) ---
