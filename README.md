@@ -1,4 +1,4 @@
-# SkiaHelios v4.50 - The Causality & Justice Engine
+# SkiaHelios v4.55 - The Causality & Justice Engine
 
 ![SkiaHelios CI](https://github.com/schutzz/SkiaHelios/actions/workflows/test.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
@@ -13,9 +13,9 @@
 
 **SkiaHelios** is a high-resolution, modular DFIR (Digital Forensics & Incident Response) framework built for **speed**, **causality**, **origin tracing**, and **visual narrative**.
 
-Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** supported by **"Chronos" (The Time Lord)**, **"Hercules" (The Referee)**, and the newly evolved **"Tartaros" (Story Inference)** to detect advanced anti-forensics techniques like **Time Paradoxes (System Rollbacks)** and **File Masquerading**.
+Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** supported by **"Chronos" (The Time Lord)**, **"Hercules" (The Referee)**, and the newly evolved **"Tartaros" (The Origin Tracer)** to detect advanced anti-forensics techniques like **Time Paradoxes (System Rollbacks)**, **Evidence Wiping**, and **File Masquerading**.
 
-**Current Version:** v4.50 (Operation Justice / Time Paradox / Deep LNK Hunter)
+**Current Version:** v4.55 (Operation Omniscience / The Linker / Deep LNK / Anti-Forensics)
 
 ---
 
@@ -43,7 +43,7 @@ graph TD
     Atropos --> Aion["👁️ AION\n(Persistence)"]:::engine
     
     %% Origin Tracing
-    LNKs["Phishing LNKs"] -.-> Tartaros["⛓️ Tartaros v3.0\n(Story Inference)"]:::engine
+    LNKs["Phishing LNKs"] -.-> Tartaros["⛓️ Tartaros v4.1\n(Adaptive Origin Tracing)"]:::engine
     History["Browser History"] -.-> Tartaros
     Tartaros --> Lachesis
     
@@ -70,25 +70,27 @@ graph TD
     * **Dynamic Analyst Notes (v4.50):** Automatically generates human-readable insights explaining *why* an artifact is critical (e.g., *"LNK targets PowerShell execution"*).
     * **Causality Visualization:** Annotates "Fake Time" nodes in Mermaid graphs when Time Paradox is detected.
 
-### 2. The Judges (Chronos & Hercules) - **[NEW]**
+### 2. The Judges (Chronos & Hercules) - **[UPDATED]**
 * **Chronos (The Time Lord):**
     * **Time Paradox Detection:** Detects system clock rollbacks (Timestomping) by analyzing USN Journal physical offsets versus timestamps.
-    * **Rollback Calculation:** precise calculation of the time delta (e.g., `-35997 seconds`).
+    * **Rollback Calculation:** Precise calculation of the time delta (e.g., `-35997 seconds`).
 * **Hercules (The Referee - Justice V3):**
-    * **LNK Malice Hunter:** Parses LNK Target Paths and Arguments to detect PowerShell/CMD attacks. Visualizes the actual command line.
-    * **Masquerade Killer:** Instantly identifies `.crx` backdoors hiding in non-browser directories (e.g., Adobe Reader folders).
-    * **Strict Evidence Hierarchy:** Eliminates "Dual-Use Tool" false positives by demanding execution evidence (Prefetch/Process) before flagging.
+    * **The Linker (Phase 4):** Correlates file artifacts (LNK, Prefetch) with **Browser History** to confirm "Execution Success" vs "Attempt".
+    * **Deep LNK Analysis:** Extracts Target Paths and Arguments to detect **PowerShell encoding**, **Hidden Windows**, and **Script Chaining** (e.g., `🎯 Target: cmd.exe /c powershell...`).
+    * **Anti-Forensics Detection:** Detects usage of wiping tools (e.g., `BCWipe`, `CCleaner`) and flags missing artifacts as "Deleted Evidence".
+    * **Masquerade Killer:** Instantly identifies `.crx` backdoors hiding in non-browser directories.
 
 ### 3. Intelligent Noise Filtering (Hestia)
 * **Hestia (Gatekeeper):** Aggressive whitelisting of OS noise.
 * **Robust Noise Filter (v4.50):** Regex-based sanitization of `Windows\Notifications`, `INetCache`, and `Temp` folders to remove 99% of false positives.
 * **Inverted Tool Filter:** Whitelists known binaries inside tool folders (e.g., `C:\Program Files\`). Anything else is flagged.
 
-### 4. Origin Tracing (Tartaros v3.0)
-* **Tartaros (The Story Inference Engine):** Connects isolated artifacts back to their source using advanced heuristics.
-    * **Hybrid Matching:** Combines Direct Name Match with Time Cluster Inference.
-    * **Time Clustering:** Infers origin even if filenames change by correlating access times with browser download clusters.
-    * **Output:** Populates the **Initial Access Vector** section with precise URLs and time-gap analysis.
+### 4. Origin Tracing (Tartaros v4.1) - **[UPDATED]**
+* **Tartaros (The Adaptive Origin Tracer):** Connects isolated artifacts back to their source using advanced heuristics.
+    * **Confidence Hierarchy:** Distinguishes between **Confirmed** (ID/Filename Match) and **Inferred** (Temporal Proximity) origins.
+    * **Adaptive Time Window:** Allows up to **3 hours gap** for strong ID matches (e.g., specific image IDs in LNKs), while keeping strict windows for generic files.
+    * **Honest Reporting:** Explicitly reports `❓ No Trace Found` when evidence is missing, avoiding false positives.
+    * **Output:** Populates the **Initial Access Vector** section with precise URLs, Confidence levels, and time-gap analysis.
 
 ### 5. Identity & Context Awareness
 * **Registry Sovereign:** Parses `SOFTWARE` hive directly to identify OS Version (e.g., *Windows 8.1 Enterprise Build 9600*).
@@ -137,10 +139,16 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
 
 ## 📜 Complete Changelog
 
-### v4.50 - Operation Justice (Current) ⚖️
+### v4.55 - Operation Omniscience (Current) 👁️
+* **[Critical]** **Adaptive Origin Tracing (Tartaros v4.1):** Implemented logic to match artifacts with browser history even with significant time gaps (up to 3 hours) if a unique ID is present.
+* **[Critical]** **The Linker (Phase 4):** Added Network Correlation Analysis to confirm communication success by linking LNK targets to browser history.
+* **[Critical]** **Deep LNK Analysis:** Enhanced LNK parsing to extract target paths and arguments, detecting obfuscated PowerShell commands.
+* **[Critical]** **Anti-Forensics Detection:** Added detection for evidence wiping tools (`BCWipe`, `CCleaner`) and missing artifact flagging.
+
+### v4.50 - Operation Justice ⚖️
 * **[Critical]** **Time Paradox Detection:** Implemented USN Journal rollback logic in `Chronos`. Physically proves if the attacker rolled back the system clock.
 * **[Critical]** **Justice V3 Engine:**
-    * **LNK Enrichment:** `Target_Path` and Arguments are now visualized in the summary (e.g., `🎯 Target: cmd.exe /c powershell...`).
+    * **LNK Enrichment:** `Target_Path` and Arguments are now visualized in the summary.
     * **CRX Detection:** Strict whitelist-based masquerade detection for Chrome Extensions.
     * **Evidence Hierarchy:** Scores are now weighted by Execution (Prefetch) vs Existence (File).
 * **[Report]** **Dynamic Analyst Notes:** Lachesis now generates specific insights for each threat type.
@@ -187,6 +195,7 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
 * [x] **v4.32:** **Robustness & Full JSON/Pivot Export**
 * [x] **v4.43:** **Tartaros v3.0 (Story Inference) & Deep Hunter**
 * [x] **v4.50:** **Operation Justice (Time Paradox & Masquerade Killer)**
+* [x] **v4.55:** **The Linker & Deep LNK (Network Correlation & Anti-Forensics)**
 * [ ] **v5.0:** **"Nemesis" (Automated Remediation Suggestion)** - *Planned*
 * [ ] **v5.x:** **LLM Integration** (Auto-summarization of Technical Findings) - *Planned*
 

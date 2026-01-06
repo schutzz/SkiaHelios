@@ -9,17 +9,131 @@ from tools.SH_ThemisLoader import ThemisLoader
 from tools.SH_HestiaCensorship import Hestia
 
 # ============================================================
-#  SH_HerculesReferee v4.20 [Registry Sovereign V2]
+#  SH_HerculesReferee v4.30 [Justice V3 + The Linker]
 #  Mission: Identity + Script Hunter + GHOST CORRELATION
-#  Update: Enhanced Registry Path Strictness & Fallbacks.
+#  Update: Phase 4 Network Correlation Analysis
 # ============================================================
 
 def print_logo():
     print(r"""
       | | | | | |
-    -- HERCULES --   [ Referee v4.20 ]
-      | | | | | |    "Sniper Mode: RESTORED."
+    -- HERCULES --   [ Referee v4.30 ]
+      | | | | | |    "The Linker: Network Correlation Active."
     """)
+
+
+# ============================================================
+#  [NEW] NetworkCorrelator - Phase 4 Implementation
+#  Mission: Extract IOCs & verify against Browser/DNS logs
+# ============================================================
+class NetworkCorrelator:
+    def __init__(self, kape_dir):
+        self.kape_dir = Path(kape_dir)
+        self.browser_history = None
+        self.dns_cache = None
+        self.initialized = False
+        
+        # IOC Patterns
+        self.url_regex = re.compile(
+            r'(https?://[a-zA-Z0-9.-]+(?:/[^\s"\'<>]*)?|'
+            r'www\.[a-zA-Z0-9.-]+|'
+            r'[a-zA-Z0-9.-]+\.(?:com|net|org|io|ru|cn|jp|co|info|biz|xyz|top))',
+            re.IGNORECASE
+        )
+        self.ip_regex = re.compile(r'\b(?:(?!0\.0\.0\.0|127\.0\.0\.1)(?:\d{1,3}\.){3}\d{1,3})\b')
+        
+        # Noise domains to exclude
+        self.noise_domains = [
+            "microsoft.com", "google.com", "windowsupdate.com", "bing.com",
+            "adobe.com", "apple.com", "amazon.com", "cloudflare.com",
+            "akamai.net", "googleapis.com", "gstatic.com", "office.com"
+        ]
+
+    def initialize(self):
+        """Lazy initialization to avoid slowdown if not needed"""
+        if self.initialized:
+            return
+        print("    -> [Linker] Initializing Network Correlation Engine...")
+        self.browser_history = self._load_browser_history()
+        self.dns_cache = self._load_dns_cache()
+        self.initialized = True
+        if self.browser_history is not None:
+            print(f"       >> Browser History Loaded: {self.browser_history.height} entries")
+        else:
+            print("       >> (No Browser History CSVs found for correlation)")
+
+    def _load_browser_history(self):
+        """Load browser history CSVs from KAPE output"""
+        # Expanded search patterns
+        targets = list(self.kape_dir.rglob("*History*.csv")) + \
+                  list(self.kape_dir.rglob("*places*.csv")) + \
+                  list(self.kape_dir.rglob("*WebCacheV*.csv")) + \
+                  list(self.kape_dir.rglob("Browser*/*.csv"))  # Browser_Artifacts folder
+        
+        df_list = []
+        for t in targets:
+            try:
+                # Skip our own output files
+                if "Helios_Output" in str(t) or "Timeline" in str(t):
+                    continue
+                    
+                df = pl.read_csv(t, ignore_errors=True, infer_schema_length=0)
+                
+                # Find URL column - try multiple variations
+                url_col = None
+                for candidate in ["URL", "Url", "url", "ValueData", "value_data", "SourceUrl", "TargetUrl"]:
+                    if candidate in df.columns:
+                        url_col = candidate
+                        break
+                
+                if url_col:
+                    df_list.append(df.select(pl.col(url_col).alias("URL").str.to_lowercase()))
+            except Exception as e:
+                pass
+        
+        if not df_list:
+            return None
+        return pl.concat(df_list).unique()
+
+    def _load_dns_cache(self):
+        """Stub for DNS cache loading (future expansion)"""
+        return None
+
+    def extract_iocs(self, text):
+        """Extract URLs/IPs from text"""
+        if not text:
+            return []
+        text = str(text).lower()
+        
+        # Skip known noise
+        for noise in self.noise_domains:
+            if noise in text:
+                return []
+        
+        urls = self.url_regex.findall(text)
+        ips = self.ip_regex.findall(text)
+        
+        # Filter short garbage
+        result = [ioc for ioc in set(urls + ips) if len(ioc) > 6]
+        return result
+
+    def check_connection(self, ioc_list):
+        """Check if any IOC exists in browser history"""
+        if self.browser_history is None or not ioc_list:
+            return False
+        
+        try:
+            # Escape IOCs for regex safety
+            patterns = [re.escape(ioc) for ioc in ioc_list if len(ioc) > 4]
+            if not patterns:
+                return False
+            
+            combined_pat = "|".join(patterns)
+            hits = self.browser_history.filter(pl.col("URL").str.contains(combined_pat))
+            return hits.height > 0
+        except Exception as e:
+            return False
+
 
 class HerculesReferee:
     def __init__(self, kape_dir, triage_mode=False):
@@ -27,7 +141,10 @@ class HerculesReferee:
         self.triage_mode = triage_mode
         self.loader = ThemisLoader(["rules/triage_rules.yaml", "rules/sigma_process_creation.yaml", "rules/sigma_registry.yaml"])
         self.hestia = Hestia()
-        self.os_info = "Windows (Unknown Version)" # Default
+        self.os_info = "Windows (Unknown Version)"
+        
+        # [Phase 4] Initialize The Linker
+        self.linker = NetworkCorrelator(kape_dir)
 
     def _load_evtx_csv(self):
         csvs = list(self.kape_dir.rglob("*EvtxECmd*.csv"))
@@ -216,21 +333,44 @@ class HerculesReferee:
             ])
 
         # ========================================================
-        # 2. LNK Analysis & Enrichment [Priority: High]
+        # 2. LNK Analysis & Enrichment [Priority: High] - Deep LNK
         # ========================================================
-        # LNKの飛び先(Target_Path)を解析し、危険なコマンドを検知
+        # LNKの飛び先(Target_Path)を解析し、具体的なTTPsをタグ付け
         if "Target_Path" in cols:
-            print("    -> [Hercules] Analyzing LNK targets & arguments...")
+            print("    -> [Hercules] Analyzing LNK targets & arguments (Granular Mode)...")
             
-            # 危険なコマンドラインパターン
-            malicious_patterns = [
-                r"powershell.*-enc", r"powershell.*-w.*hidden", r"powershell.*iex",
-                r"mshta.*http", r"cmd\.exe.*/c", 
-                r"certutil.*-decode", r"bitsadmin.*/transfer",
-                r"regsvr32.*/s.*/u", r"rundll32.*javascript",
-                r"wscript", r"cscript"
+            # [Deep LNK] 詳細な悪性パターン定義
+            # 検知したいテクニックと、付与するタグ・スコアを定義
+            lnk_threats = [
+                # PowerShell系
+                {"pat": r"powershell.*-enc", "tag": "PS_ENCODED", "score": 50},
+                {"pat": r"powershell.*-w.*hidden", "tag": "PS_HIDDEN", "score": 40},
+                {"pat": r"powershell.*iex", "tag": "PS_IEX", "score": 50},
+                {"pat": r"bypass", "tag": "PS_BYPASS", "score": 30},
+                {"pat": r"downloadstring", "tag": "PS_DOWNLOAD", "score": 45},
+                {"pat": r"invoke-expression", "tag": "PS_IEX", "score": 50},
+                
+                # 実行チェーン系
+                {"pat": r"cmd\.exe.*/c.*powershell", "tag": "CMD_PS_CHAIN", "score": 40},
+                {"pat": r"cmd\.exe.*/c.*mshta", "tag": "CMD_MSHTA_CHAIN", "score": 45},
+                {"pat": r"mshta.*http", "tag": "MSHTA_REMOTE", "score": 50},
+                {"pat": r"rundll32.*javascript", "tag": "RUNDLL_JS", "score": 50},
+                {"pat": r"regsvr32.*/s.*/u", "tag": "REGSVR32_BYPASS", "score": 45},
+                
+                # ダウンローダー系
+                {"pat": r"certutil.*-urlcache", "tag": "CERTUTIL_DL", "score": 45},
+                {"pat": r"certutil.*-decode", "tag": "CERTUTIL_DECODE", "score": 40},
+                {"pat": r"bitsadmin.*/transfer", "tag": "BITS_JOB", "score": 45},
+                {"pat": r"curl.*http", "tag": "CURL_DL", "score": 40},
+                {"pat": r"wget", "tag": "WGET_DL", "score": 40},
+                
+                # スクリプト系
+                {"pat": r"wscript", "tag": "WSCRIPT", "score": 35},
+                {"pat": r"cscript", "tag": "CSCRIPT", "score": 35},
+                {"pat": r"\.vbs", "tag": "VBS_SCRIPT", "score": 35},
+                {"pat": r"\.js\b", "tag": "JS_SCRIPT", "score": 35},
+                {"pat": r"\.hta\b", "tag": "HTA_SCRIPT", "score": 40},
             ]
-            combined_malicious = "|".join(malicious_patterns)
             
             # LNK検出用のFileNameカラムを特定 (存在しない場合はmsg_colで代用)
             fname_col_for_lnk = "FileName" if "FileName" in cols else msg_col
@@ -249,29 +389,115 @@ class HerculesReferee:
                     .alias(msg_col)
                 )
 
-            # (B) Malicious Pattern Matching: スコアブースト
-            # Target_Path または Message (引数がMessageに入っている場合がある) をチェック
+            # (B) [Deep LNK] 詳細パターンマッチングとタグの積み上げ
             if fname_col_for_lnk:
-                has_malicious_cmd = (
-                    pl.col(fname_col_for_lnk).str.to_lowercase().str.contains(r"\.lnk") & 
-                    (
-                        pl.col("Target_Path").str.to_lowercase().str.contains(combined_malicious) |
-                        pl.col(msg_col).str.to_lowercase().str.contains(combined_malicious)
-                    )
-                )
-
-                timeline_df = timeline_df.with_columns([
-                    pl.when(has_malicious_cmd)
-                      .then(pl.col("Threat_Score") + 90) # Significant Boost
-                      .otherwise(pl.col("Threat_Score"))
-                      .alias("Threat_Score"),
+                target_expr = pl.col("Target_Path").str.to_lowercase()
+                msg_expr = pl.col(msg_col).str.to_lowercase()
+                is_lnk = pl.col(fname_col_for_lnk).str.to_lowercase().str.contains(r"\.lnk")
+                
+                for item in lnk_threats:
+                    pat = item["pat"]
+                    tag = item["tag"]
+                    score = item["score"]
                     
-                    pl.when(has_malicious_cmd)
+                    # Target_Path または Message にパターンが含まれるか（LNKファイル限定）
+                    match_expr = is_lnk & (target_expr.str.contains(pat) | msg_expr.str.contains(pat))
+                    
+                    timeline_df = timeline_df.with_columns([
+                        pl.when(match_expr)
+                          .then(pl.col("Threat_Score") + score)  # スコアを加算
+                          .otherwise(pl.col("Threat_Score"))
+                          .alias("Threat_Score"),
+                        
+                        pl.when(match_expr)
+                          .then(pl.format("{},{}", pl.col("Tag"), pl.lit(tag)))  # タグを追記
+                          .otherwise(pl.col("Tag"))
+                          .alias("Tag")
+                    ])
+
+                # (C) 汎用フラグ "SUSPICIOUS_CMDLINE" (互換性維持)
+                combined_malicious = "|".join([item["pat"] for item in lnk_threats])
+                has_malicious = is_lnk & (target_expr.str.contains(combined_malicious) | msg_expr.str.contains(combined_malicious))
+                
+                timeline_df = timeline_df.with_columns(
+                    pl.when(has_malicious)
                       .then(pl.format("{},SUSPICIOUS_CMDLINE", pl.col("Tag")))
                       .otherwise(pl.col("Tag"))
                       .alias("Tag")
-                ])
+                )
 
+            # ========================================================
+            # 2.5 Phase 4: Network Correlation (The Linker)
+            # ========================================================
+            # 抽出したIOCをブラウザ履歴と突き合わせて通信成功を確認
+            print("    -> [Hercules] Phase 4: Network Correlation Analysis...")
+            self.linker.initialize()  # Lazy init
+            
+            if self.linker.browser_history is not None:
+                # Iterate over suspicious rows and check for confirmed communication
+                # Note: We use a hybrid approach - filter first, then Python-side check
+                suspicious_rows = timeline_df.filter(
+                    (pl.col("Tag").str.contains("SUSPICIOUS")) | 
+                    (pl.col("Threat_Score") >= 50)
+                )
+                
+                if suspicious_rows.height > 0:
+                    print(f"       >> [Linker] Scanning {suspicious_rows.height} suspicious entries...")
+                    confirmed_indices = []
+                    
+                    for i, row in enumerate(suspicious_rows.iter_rows(named=True)):
+                        # Combine text sources for IOC extraction
+                        text_sources = [
+                            str(row.get("Target_Path", "") or ""),
+                            str(row.get("Message", "") or row.get(msg_col, "") or ""),
+                            str(row.get("Payload", "") or "")
+                        ]
+                        full_text = " ".join(text_sources)
+                        
+                        # Extract IOCs
+                        iocs = self.linker.extract_iocs(full_text)
+                        if not iocs:
+                            continue
+                        
+                        # Check browser history for connection evidence
+                        if self.linker.check_connection(iocs):
+                            confirmed_indices.append(i)
+                    
+                    if confirmed_indices:
+                        print(f"       >> [CRITICAL] {len(confirmed_indices)} events with CONFIRMED network communication!")
+                        
+                        # Update the original dataframe
+                        # We need to mark these specific rows - using a workaround with row_nr
+                        timeline_df = timeline_df.with_row_index("_row_idx")
+                        
+                        # Get the actual row indices from the filtered df
+                        suspicious_with_idx = suspicious_rows.with_row_index("_susp_idx")
+                        actual_indices = [suspicious_with_idx.row(i).get("_susp_idx", -1) for i in confirmed_indices] if confirmed_indices else []
+                        
+                        # Polars approach: use is_in for the indices
+                        # But since iter_rows gives position in filtered df, we need original indices
+                        # Alternative: use hash-based matching
+                        
+                        # For simplicity, let's add a flag column based on content match
+                        for idx in confirmed_indices:
+                            row = suspicious_rows.row(idx, named=True)
+                            target_val = row.get("Target_Path", "NOMATCH_TARGET")
+                            
+                            timeline_df = timeline_df.with_columns([
+                                pl.when(pl.col("Target_Path") == target_val)
+                                  .then(pl.lit(300))  # MAX SCORE
+                                  .otherwise(pl.col("Threat_Score"))
+                                  .alias("Threat_Score"),
+                                  
+                                pl.when(pl.col("Target_Path") == target_val)
+                                  .then(pl.format("{},COMMUNICATION_CONFIRMED", pl.col("Tag")))
+                                  .otherwise(pl.col("Tag"))
+                                  .alias("Tag")
+                            ])
+                        
+                        # Clean up temp column
+                        if "_row_idx" in timeline_df.columns:
+                            timeline_df = timeline_df.drop("_row_idx")
         # ========================================================
         # 3. Robust Noise Filter [Priority: Critical]
         # ========================================================

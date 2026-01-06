@@ -1,185 +1,224 @@
+import pandas as pd
 import polars as pl
-import argparse
-import os
-import json
-import re
-import urllib.parse
 from datetime import datetime, timedelta
-from pathlib import Path
+import re
+import os
+import urllib.parse
 
 class TartarosTracer:
-    def __init__(self, pivot_config=None, timeline_csv=None, history_csv=None):
-        self.pivot_config = pivot_config
-        self.timeline_csv = timeline_csv
-        self.history_csv = history_csv
-        self.origin_stories = []
-        self.history_df = None # Cache
-
-    def _load_pl(self, path):
-        path = str(path)
-        print(f"    [Tartaros] Loading History: {path}")
-        try: return pl.read_csv(path, ignore_errors=True, infer_schema_length=10000)
-        except:
-            try: return pl.read_csv(path, ignore_errors=True, infer_schema_length=0, encoding='utf-8-sig')
+    """
+    Tartaros v4.1: Adaptive Origin Tracer
+    Mission: Find the source of the artifact (Web -> Disk).
+    Update: Implemented 'Adaptive Time Window' based on match strength (ID/Stem).
+    """
+    def __init__(self, history_csv=None):
+        self.history = None
+        if history_csv:
+            try:
+                self.history = pl.read_csv(history_csv, ignore_errors=True, infer_schema_length=0)
+                self.history = self._normalize_columns(self.history)
+                # Pre-convert time for speed
+                if "Visit_Time" in self.history.columns:
+                    try:
+                        # Clean strings and parse
+                        self.history = self.history.with_columns(
+                            pl.col("Visit_Time").str.strip_chars()
+                        )
+                        # Try common formats
+                        self.history = self.history.with_columns(
+                            pl.coalesce([
+                                pl.col("Visit_Time").str.strptime(pl.Datetime, "%Y-%m-%d %H:%M:%S", strict=False),
+                                pl.col("Visit_Time").str.strptime(pl.Datetime, "%Y-%m-%d %H:%M:%S%.f", strict=False),
+                                pl.col("Visit_Time").str.strptime(pl.Datetime, "%m/%d/%Y %H:%M:%S", strict=False)
+                            ]).alias("Visit_Time")
+                        )
+                    except Exception as e:
+                        print(f"    [!] Tartaros Time Parse Error: {e}")
+                print(f"    -> [Tartaros] Loaded {self.history.height} history entries.")
             except Exception as e:
                 print(f"    [!] Tartaros Load Error: {e}")
-                return None
 
-    def _extract_filename_from_url(self, url):
-        if not url: return ""
+    def _normalize_columns(self, df):
+        col_map = {}
+        # 1. Identify potential columns
+        has_url = False
+        has_title = False
+        
+        # Priority scan
+        for c in df.columns:
+            cl = c.lower()
+            if "url" in cl and "host" not in cl: 
+                col_map[c] = "URL"
+                has_url = True
+            elif "title" in cl:
+                col_map[c] = "Title"
+                has_title = True
+        
+        for c in df.columns:
+            if c in col_map: continue # Already mapped
+            
+            cl = c.lower()
+            if "visit time" in cl or "visited on" in cl: col_map[c] = "Visit_Time"
+            elif "lastwritetime" in cl: col_map[c] = "Visit_Time"
+            elif "lastwritestamp" in cl: col_map[c] = "Visit_Time" # KAPE specific
+            elif "download" in cl or "target" in cl: col_map[c] = "Download_Path"
+            # Registry/Generic export mappings
+            elif "valuedata" in cl: 
+                if not has_url: col_map[c] = "URL"
+                else: col_map[c] = "ValueData_Extra"
+            elif "valuename" in cl: 
+                if not has_title: col_map[c] = "Title"
+                else: col_map[c] = "ValueName_Extra"
+        
+        # 2. Rename
         try:
-            path = urllib.parse.urlparse(url).path
-            path = urllib.parse.unquote(path)
-            name = os.path.basename(path)
-            return name.lower()
-        except: return ""
+            df = df.rename(col_map)
+        except Exception as e:
+            print(f"    [!] Tartaros Column Rename Warning: {e}")
+        
+        # 3. Validation & Fallback
+        if "URL" not in df.columns: 
+             return None
 
-    def _normalize_filename(self, filename):
-        """v2.1 Normalization (Extension & Numbering Removal)"""
-        n = str(filename).lower().strip()
-        if n.endswith(".lnk"): n = n[:-4]
-        n = re.sub(r'\[\d+\](\.[a-z0-9]+)$', r'\1', n)
-        n = re.sub(r'\(\d+\)(\.[a-z0-9]+)$', r'\1', n)
-        n = re.sub(r'\[\d+\]$', '', n)
-        n = re.sub(r'\(\d+\)$', '', n)
-        return n
+        return df
 
-    def _parse_time(self, t_str):
-        try: return datetime.fromisoformat(str(t_str).replace("T", " ")[:19])
-        except: return None
+    def _get_clean_stem(self, name):
+        """Recursively strip extensions to get the core filename"""
+        name = str(name).lower()
+        # Common temporary/artifact extensions
+        for ext in [".lnk", ".part", ".crdownload", ".tmp", ".download"]:
+            if name.endswith(ext): name = name[:-len(ext)]
+        # Strip true extension (e.g. image.jpg -> image)
+        root, ext = os.path.splitext(name)
+        if len(root) > 3: # Avoid over-stripping short names
+            return root
+        return name
 
-    def trace_memory(self, pivot_seeds, df_timeline, df_history=None):
-        print("[*] Tartaros v3.0: Story Inference Mode (Hybrid Matching)...")
+    def _extract_unique_ids(self, text):
+        """Extract unique IDs (6+ digits or 32+ hex) from text"""
+        if not text: return []
+        # 6+ digits OR 32+ hex chars (hash-like)
+        return re.findall(r'\d{6,}|[a-f0-9]{32,}', str(text))
+
+    def trace_memory(self, seeds, timeline_df, df_history=None):
+        history_source = df_history if df_history is not None else self.history
+        if history_source is None: return []
+
         stories = []
         
-        # 1. Load History
-        if df_history is None:
-            if self.history_df is not None: df_history = self.history_df
-            elif self.history_csv: 
-                df_history = self._load_pl(self.history_csv)
-                self.history_df = df_history
-        
-        if df_history is None or df_history.height == 0:
-            print("    [!] No History Data available.")
-            return []
+        # Helper: Safe URL decode
+        def safe_unquote(u):
+            try: return urllib.parse.unquote(str(u)).lower()
+            except: return str(u).lower()
 
-        # 2. Build Lookup Maps
-        # A. Name Map (Existing Logic)
-        hist_map = {}
-        # B. Image Download List (For Time Clustering)
-        image_downloads = []
-        
-        cols = df_history.columns
-        time_col = next((c for c in cols if "Time" in c or "Date" in c), "LastWriteTimestamp")
-        url_col = next((c for c in cols if "URL" in c or "Url" in c), "URL")
-        title_col = next((c for c in cols if "Title" in c), "Title")
-        
-        # Pre-process rows
-        image_exts = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.ico', '.svg']
-        
-        rows = df_history.select([pl.col(time_col), pl.col(url_col), pl.col(title_col)]).rows(named=True)
-        for row in rows:
-            url = str(row.get(url_col, ""))
-            time_str = str(row.get(time_col, ""))
-            dt_obj = self._parse_time(time_str)
+        for seed in seeds:
+            target_file = seed.get("Target_File", "")
+            timestamp_str = seed.get("Timestamp_Hint", "")
             
-            # Map Entry
-            fname = self._extract_filename_from_url(url)
-            norm_fname = self._normalize_filename(fname)
-            stem_fname = os.path.splitext(norm_fname)[0]
-            
-            entry = { "Time": dt_obj, "TimeStr": time_str, "URL": url, "Title": row.get(title_col, ""), "Name": fname }
-            
-            # Populate Name Map
-            if len(norm_fname) > 3:
-                if norm_fname not in hist_map: hist_map[norm_fname] = []
-                hist_map[norm_fname].append(entry)
-                if stem_fname != norm_fname and len(stem_fname) > 3:
-                    if stem_fname not in hist_map: hist_map[stem_fname] = []
-                    hist_map[stem_fname].append(entry)
-            
-            # Populate Image List (Only valid timestamps)
-            if dt_obj and any(fname.endswith(ext) for ext in image_exts):
-                image_downloads.append(entry)
+            try: 
+                file_dt = datetime.fromisoformat(str(timestamp_str).replace("Z", ""))
+            except: 
+                continue
 
-        # 3. Trace Seeds
-        for tgt in pivot_seeds:
-            target_file = tgt.get("Target_File", "")
-            if not target_file: continue
-            
-            seed_dt = self._parse_time(tgt.get("Timestamp_Hint", ""))
-            found_story = None
+            if not file_dt or not target_file: continue
 
-            # --- Strategy A: Direct Name Match (High Confidence) ---
-            seed_key = self._normalize_filename(target_file)
-            candidates = hist_map.get(seed_key, [])
+            # --- Feature Extraction ---
+            target_stem = self._get_clean_stem(target_file)
+            target_ids = self._extract_unique_ids(target_file)
             
-            if candidates:
-                # Reuse v2.1 Logic (Image=Year, Other=24h)
-                is_img_target = any(seed_key.endswith(x) for x in image_exts)
-                thresh = 31536000 if is_img_target else 86400
-                
-                best_match = None
-                min_diff = float('inf')
-                
-                for cand in candidates:
-                    if not seed_dt or not cand["Time"]: 
-                        if is_img_target: best_match = cand; break
-                        continue
-                    diff = abs((seed_dt - cand["Time"]).total_seconds())
-                    if diff <= thresh and diff < min_diff:
-                        min_diff = diff
-                        best_match = cand
-                
-                if best_match:
-                    found_story = self._create_story(target_file, best_match, min_diff, seed_dt, "Direct Match")
+            # --- Adaptive Search Window ---
+            # Broad search first: Look back up to 3 hours for strong matches
+            start_window = file_dt - timedelta(hours=3)
+            # Allow a small buffer after file creation (e.g. 1 min) for filesystem lag
+            candidates = history_source.filter(
+                (pl.col("Visit_Time") >= start_window) & 
+                (pl.col("Visit_Time") <= file_dt + timedelta(minutes=1))
+            )
 
-            # --- Strategy B: Time Cluster Inference (Medium Confidence) ---
-            # 名前でヒットせず、かつLNKファイル（画像系の可能性が高い）場合
-            if not found_story and seed_dt and ".lnk" in target_file.lower():
-                # Window: -6h to +6h (同日中のアクティビティとみなす)
-                window_start = seed_dt - timedelta(hours=6)
-                window_end = seed_dt + timedelta(hours=6)
+            best_match = None
+            best_score = 0
+            match_reason = "No Trace"
+            confidence = "LOW"
+
+            for row in candidates.iter_rows(named=True):
+                url_val = safe_unquote(row.get("URL", ""))
+                title_val = safe_unquote(row.get("Title", ""))
+                visit_time = row["Visit_Time"]
                 
-                # 範囲内の画像ダウンロードを抽出
-                cluster_matches = [d for d in image_downloads if window_start <= d["Time"] <= window_end]
+                if not visit_time: continue
                 
-                if cluster_matches:
-                    # LNK時刻に最も近いDLを「推定起源」とする
-                    best_match = min(cluster_matches, key=lambda x: abs((seed_dt - x["Time"]).total_seconds()))
-                    diff = abs((seed_dt - best_match["Time"]).total_seconds())
+                # --- Scoring Logic ---
+                score = 0
+                reasons = []
+
+                # 1. ID Match (Strongest Evidence) +100pt
+                for uid in target_ids:
+                    if uid in url_val or uid in title_val:
+                        score += 100
+                        reasons.append(f"ID Match({uid})")
+                        break 
+
+                # 2. Stem Match (Filename Match) +50pt
+                # Check if stem is in URL filename component (avoid matching domain parts)
+                url_parts = url_val.split("/")
+                if len(url_parts) > 0 and target_stem in url_parts[-1]:
+                    score += 50
+                    reasons.append("Filename Match")
+                elif target_stem in title_val:
+                    score += 50
+                    reasons.append("Title Match")
+
+                # Time Gap (seconds)
+                gap = (file_dt - visit_time).total_seconds()
+                
+                # 3. Adaptive Thresholding
+                is_valid = False
+                
+                if score >= 100: 
+                    # ID Match: Allow up to 3 hours (10800s)
+                    # "Big-eyes" case (~2h15m) falls here
+                    if gap <= 10800: is_valid = True
+                        
+                elif score >= 50: 
+                    # Name Match: Allow up to 30 mins (1800s)
+                    if gap <= 1800: is_valid = True
+                        
+                else: 
+                    # Weak (Time Only): Strict 10 mins (600s)
+                    # Avoid binding noise like 'pip' to random browsing 2 hours ago
+                    if gap <= 600:
+                        score += 10 # Time points
+                        reasons.append("Time Proximity")
+                        is_valid = True
+
+                # Update Best Match
+                if is_valid and score > best_score:
+                    best_score = score
+                    best_match = row
+                    match_reason = ", ".join(reasons)
                     
-                    found_story = self._create_story(target_file, best_match, diff, seed_dt, "Inferred (Time Cluster)")
-                    found_story["Evidence"][0]["Details"] += f" [Cluster Size: {len(cluster_matches)}]"
+                    if score >= 50: confidence = "HIGH"
+                    elif score >= 10: confidence = "MEDIUM"
+                    else: confidence = "LOW"
 
-            if found_story:
-                stories.append(found_story)
-                print(f"       [!] {found_story['Origin']}: {target_file} -> {found_story['Evidence'][0]['URL'][:30]}... ({found_story['Evidence'][0]['Time_Gap']})")
+            # --- Result Construction ---
+            if best_match:
+                gap = (file_dt - best_match["Visit_Time"]).total_seconds()
+                gap_str = f"{int(gap)}s"
+                if gap > 60: gap_str = f"{int(gap//60)}m {int(gap%60)}s"
 
-        return stories
-
-    def _create_story(self, target, match, diff_seconds, seed_dt, method):
-        gap_display = "Unknown"
-        if diff_seconds != float('inf'):
-            gap_display = f"{int(diff_seconds//3600)}h {int((diff_seconds%3600)//60)}m"
-
-        origin_label = "Web Download (Confirmed)" if method == "Direct Match" else "Inferred Web Download"
+                # Icon Logic moved to Lachesis, here we set raw Confidence
+                stories.append({
+                    "Target": target_file,
+                    "Origin": best_match.get("URL", "Unknown"),
+                    "Confidence": confidence,
+                    "Reason": match_reason,
+                    "Evidence": [{
+                        "URL": best_match.get("URL", ""),
+                        "Time": str(best_match.get("Visit_Time", "")),
+                        "Title": str(best_match.get("Title", "")),
+                        "Time_Gap": gap_str
+                    }]
+                })
         
-        return {
-            "Target": target,
-            "Origin": origin_label,
-            "Evidence": [{
-                "Type": "WEB_DOWNLOAD_HISTORY",
-                "Source": f"Chrome History ({method})",
-                "URL": match["URL"],
-                "Time": match["TimeStr"],
-                "LNK_Time": str(seed_dt) if seed_dt else "Unknown",
-                "Time_Gap": gap_display,
-                "Details": f"Title: {match['Title']}"
-            }]
-        }
-
-    def trace(self): pass
-
-if __name__ == "__main__":
-    pass
+        return stories
