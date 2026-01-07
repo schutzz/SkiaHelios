@@ -13,9 +13,9 @@
 
 **SkiaHelios** is a high-resolution, modular DFIR (Digital Forensics & Incident Response) framework built for **speed**, **causality**, **origin tracing**, and **visual narrative**.
 
-Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** supported by **"Chronos" (The Time Lord)**, **"Hercules" (The Referee)**, and the newly evolved **"Tartaros" (The Origin Tracer)** to detect advanced anti-forensics techniques like **Time Paradoxes (System Rollbacks)**, **Evidence Wiping**, and **File Masquerading**.
+Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** orchestrated by **"Hekate"**, supported by **"Chronos" (The Time Lord)**, **"Hercules" (The Referee)**, and the newly evolved **"Tartaros" (The Origin Tracer)** to detect advanced anti-forensics techniques like **Time Paradoxes (System Rollbacks)**, **Evidence Wiping**, and **File Masquerading**.
 
-**Current Version:** v4.55 (Operation Omniscience / The Linker / Deep LNK / Anti-Forensics)
+**Current Version:** v4.55 (Operation Omniscience / The Linker / Deep LNK / Anti-Forensics / Modular Lachesis)
 
 ---
 
@@ -25,15 +25,18 @@ Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture
 graph TD
     %% Define Styles
     classDef input fill:#e1f5fe,stroke:#01579b,stroke-width:2px;
+    classDef core fill:#e8f5e9,stroke:#2e7d32,stroke-width:3px;
     classDef engine fill:#fff3e0,stroke:#ff6f00,stroke-width:2px;
     classDef judge fill:#ffebee,stroke:#b71c1c,stroke-width:3px;
     classDef report fill:#f3e5f5,stroke:#4a148c,stroke-width:2px;
+    classDef submod fill:#ede7f6,stroke:#512da8,stroke-width:1px,stroke-dasharray: 5 5;
 
     %% Input Stage
-    Input[("KAPE Artifacts\n(CSV)")]:::input --> Clotho[("🌀 Clotho\n(Ingestion)")]:::engine
+    Input[("KAPE Artifacts\n(CSV)")]:::input --> Hekate{{"🔥 Hekate\n(The Orchestrator)"}}:::core
     
-    %% Analysis Stage (Themis Logic)
-    Clotho --> Atropos{{"⚖️ Atropos\n(Logic & Routing)"}}:::engine
+    %% Ingestion & Analysis
+    Hekate --> Clotho[("🌀 Clotho\n(Ingestion)")]:::engine
+    Clotho --> Atropos{{"⚖️ Atropos\n(High-Speed Logic)"}}:::engine
     Rules[("📜 Themis Rules\n(YAML)")] -.-> Atropos
     
     %% Specialized Modules
@@ -45,66 +48,87 @@ graph TD
     %% Origin Tracing
     LNKs["Phishing LNKs"] -.-> Tartaros["⛓️ Tartaros v4.1\n(Adaptive Origin Tracing)"]:::engine
     History["Browser History"] -.-> Tartaros
-    Tartaros --> Lachesis
     
-    %% Reporting Stage
-    Chronos --> Lachesis[("🕸️ Lachesis\n(Allotter)\nCausality Repair")]:::report
-    Pandora --> Lachesis
-    Hercules --> Lachesis
-    Aion --> Lachesis
+    %% Reporting Stage (Modular Lachesis)
+    subgraph Lachesis_Module ["🕸️ Lachesis (The Weaver)"]
+        direction TB
+        L_Core[("Core Controller")]:::report
+        L_Intel["Intel (Knowledge Base)"]:::submod
+        L_Enrich["Enricher (Data Fusion)"]:::submod
+        L_Analyzer["Analyzer (Event Scoring)"]:::submod
+        L_Render["Renderer (Markdown/JSON)"]:::submod
+        
+        L_Core --> L_Intel
+        L_Core --> L_Enrich
+        L_Core --> L_Analyzer
+        L_Analyzer --> L_Render
+    end
+
+    Chronos --> L_Core
+    Pandora --> L_Core
+    Hercules --> L_Core
+    Aion --> L_Core
+    Tartaros --> L_Core
     
     %% Output
-    Lachesis --> Report[("📜 Grimoire.md\n(Narrative Report)")]:::report
-    Lachesis --> Pivot[("🎯 Pivot_Config.json\n(Deep Dive)")]:::report
-    Lachesis --> Mermaid[("📊 Attack Flow\n(Visual Graph)")]:::report
+    L_Render --> Report[("📜 Grimoire.md\n(Narrative Report)")]:::report
+    L_Render --> Pivot[("🎯 Pivot_Config.json\n(Deep Dive)")]:::report
+    L_Render --> Mermaid[("📊 Attack Flow\n(Visual Graph)")]:::report
 ```
 
 ---
 
 ## 🚀 Module Breakdown & Features
 
+### 0. The Orchestrator (Hekate)
+*   **Hekate (Triad Controller):** The central command unit (`SH_HekateTriad.py`). It orchestrates the flow of data between all modules, manages arguments, and initiates the final reporting phase.
+
 ### 1. The Triad Architecture (Time, Space, Narrative)
-* **Clotho (Parser):** High-speed ingestion of KAPE artifacts (MFT, USN, EventLogs, Registry) using Rust-based Polars. Optimized for large datasets (millions of rows).
-* **Atropos (Analyzer):** "Themis" rule-based logic to cut the thread of life (separate Signal from Noise). Uses a dual-pass scoring system.
-* **Lachesis (Weaver):** Generates the "Grimoire" (Report) with **Smart Scope Calculation** (Auto-detecting incident window) and **Visual IOCs**.
-    * **Dynamic Analyst Notes (v4.50):** Automatically generates human-readable insights explaining *why* an artifact is critical (e.g., *"LNK targets PowerShell execution"*).
-    * **Causality Visualization:** Annotates "Fake Time" nodes in Mermaid graphs when Time Paradox is detected.
+*   **Clotho (Parser):** High-speed ingestion of KAPE artifacts (MFT, USN, EventLogs, Registry) using Rust-based Polars. Optimized for large datasets (millions of rows).
+*   **Atropos (Analyzer):** "Themis" rule-based logic to cut the thread of life (separate Signal from Noise). Uses a dual-pass scoring system.
+*   **Lachesis (The Weaver - Modular v4.50):** The reporting engine has been refactored into a modular architecture for scalability:
+    *   **Core:** Manages the reporting lifecycle.
+    *   **Intel:** Centralized knowledge base for "Dual-Use Tools", "Noise Lists", and "Threat Tags".
+    *   **Enricher:** Fuses data from multiple sources (e.g., matching LNK targets with Process execution).
+    *   **Analyzer:** Calculates final risk scores and extracts Visual IOCs.
+    *   **Renderer:** Generates the "Grimoire" (Markdown) and structured JSON outputs.
+    *   **Dynamic Analyst Notes:** Automatically generates human-readable insights explaining *why* an artifact is critical.
 
 ### 2. The Judges (Chronos & Hercules) - **[UPDATED]**
-* **Chronos (The Time Lord):**
-    * **Time Paradox Detection:** Detects system clock rollbacks (Timestomping) by analyzing USN Journal physical offsets versus timestamps.
-    * **Rollback Calculation:** Precise calculation of the time delta (e.g., `-35997 seconds`).
-* **Hercules (The Referee - Justice V3):**
-    * **The Linker (Phase 4):** Correlates file artifacts (LNK, Prefetch) with **Browser History** to confirm "Execution Success" vs "Attempt".
-    * **Deep LNK Analysis:** Extracts Target Paths and Arguments to detect **PowerShell encoding**, **Hidden Windows**, and **Script Chaining** (e.g., `🎯 Target: cmd.exe /c powershell...`).
-    * **Anti-Forensics Detection:** Detects usage of wiping tools (e.g., `BCWipe`, `CCleaner`) and flags missing artifacts as "Deleted Evidence".
-    * **Masquerade Killer:** Instantly identifies `.crx` backdoors hiding in non-browser directories.
+*   **Chronos (The Time Lord):**
+    *   **Time Paradox Detection:** Detects system clock rollbacks (Timestomping) by analyzing USN Journal physical offsets versus timestamps.
+    *   **Rollback Calculation:** Precise calculation of the time delta (e.g., `-35997 seconds`).
+*   **Hercules (The Referee - Justice V3):**
+    *   **The Linker (Phase 4):** Correlates file artifacts (LNK, Prefetch) with **Browser History** to confirm "Execution Success" vs "Attempt".
+    *   **Deep LNK Analysis:** Extracts Target Paths and Arguments to detect **PowerShell encoding**, **Hidden Windows**, and **Script Chaining** (e.g., `🎯 Target: cmd.exe /c powershell...`).
+    *   **Anti-Forensics Detection:** Detects usage of wiping tools (e.g., `BCWipe`, `CCleaner`) and flags missing artifacts as "Deleted Evidence".
+    *   **Masquerade Killer:** Instantly identifies `.crx` backdoors hiding in non-browser directories.
 
 ### 3. Intelligent Noise Filtering (Hestia)
-* **Hestia (Gatekeeper):** Aggressive whitelisting of OS noise.
-* **Robust Noise Filter (v4.50):** Regex-based sanitization of `Windows\Notifications`, `INetCache`, and `Temp` folders to remove 99% of false positives.
-* **Inverted Tool Filter:** Whitelists known binaries inside tool folders (e.g., `C:\Program Files\`). Anything else is flagged.
+*   **Hestia (Gatekeeper):** Aggressive whitelisting of OS noise.
+*   **Robust Noise Filter (v4.50):** Regex-based sanitization of `Windows\Notifications`, `INetCache`, and `Temp` folders to remove 99% of false positives.
+*   **Inverted Tool Filter:** Whitelists known binaries inside tool folders (e.g., `C:\Program Files\`). Anything else is flagged.
 
 ### 4. Origin Tracing (Tartaros v4.1) - **[UPDATED]**
-* **Tartaros (The Adaptive Origin Tracer):** Connects isolated artifacts back to their source using advanced heuristics.
-    * **Confidence Hierarchy:** Distinguishes between **Confirmed** (ID/Filename Match) and **Inferred** (Temporal Proximity) origins.
-    * **Adaptive Time Window:** Allows up to **3 hours gap** for strong ID matches (e.g., specific image IDs in LNKs), while keeping strict windows for generic files.
-    * **Honest Reporting:** Explicitly reports `❓ No Trace Found` when evidence is missing, avoiding false positives.
-    * **Output:** Populates the **Initial Access Vector** section with precise URLs, Confidence levels, and time-gap analysis.
+*   **Tartaros (The Adaptive Origin Tracer):** Connects isolated artifacts back to their source using advanced heuristics.
+    *   **Confidence Hierarchy:** Distinguishes between **Confirmed** (ID/Filename Match) and **Inferred** (Temporal Proximity) origins.
+    *   **Adaptive Time Window:** Allows up to **3 hours gap** for strong ID matches (e.g., specific image IDs in LNKs), while keeping strict windows for generic files.
+    *   **Honest Reporting:** Explicitly reports `❓ No Trace Found` when evidence is missing, avoiding false positives.
+    *   **Output:** Populates the **Initial Access Vector** section with precise URLs, Confidence levels, and time-gap analysis.
 
 ### 5. Identity & Context Awareness
-* **Registry Sovereign:** Parses `SOFTWARE` hive directly to identify OS Version (e.g., *Windows 8.1 Enterprise Build 9600*).
-* **Sniper Mode:** Correlates `UserAssist` and `ShellBags` to identify the "Patient Zero" user.
+*   **Registry Sovereign:** Parses `SOFTWARE` hive directly to identify OS Version (e.g., *Windows 8.1 Enterprise Build 9600*).
+*   **Sniper Mode:** Correlates `UserAssist` and `ShellBags` to identify the "Patient Zero" user.
 
 ---
 
 ## 🛠️ Installation & Configuration
 
 ### Prerequisites
-* Python 3.10+
-* Polars (`pip install polars`)
-* Pandas (`pip install pandas`) - *Legacy support*
-* Colorama (`pip install colorama`)
+*   Python 3.10+
+*   Polars (`pip install polars`)
+*   Pandas (`pip install pandas`) - *Legacy support*
+*   Colorama (`pip install colorama`)
 
 ### Configuration (`triage_rules.yaml`)
 SkiaHelios uses an external configuration file for "Themis" rules.
@@ -139,45 +163,46 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
 
 ## 📜 Complete Changelog
 
-### v4.55 - Operation Omniscience (Current) 👁️
-* **[Critical]** **Adaptive Origin Tracing (Tartaros v4.1):** Implemented logic to match artifacts with browser history even with significant time gaps (up to 3 hours) if a unique ID is present.
-* **[Critical]** **The Linker (Phase 4):** Added Network Correlation Analysis to confirm communication success by linking LNK targets to browser history.
-* **[Critical]** **Deep LNK Analysis:** Enhanced LNK parsing to extract target paths and arguments, detecting obfuscated PowerShell commands.
-* **[Critical]** **Anti-Forensics Detection:** Added detection for evidence wiping tools (`BCWipe`, `CCleaner`) and missing artifact flagging.
+### v4.55 - Operation Omniscience & Modular Lachesis (Current) 👁️
+*   **[Architecture]** **Modular Lachesis:** Decomposition of the massive `SH_LachesisWriter.py` into scalable sub-modules (`Core`, `Intel`, `Enricher`, `Analyzer`, `Renderer`).
+*   **[Critical]** **Adaptive Origin Tracing (Tartaros v4.1):** Implemented logic to match artifacts with browser history even with significant time gaps (up to 3 hours) if a unique ID is present.
+*   **[Critical]** **The Linker (Phase 4):** Added Network Correlation Analysis to confirm communication success by linking LNK targets to browser history.
+*   **[Critical]** **Deep LNK Analysis:** Enhanced LNK parsing to extract target paths and arguments, detecting obfuscated PowerShell commands.
+*   **[Critical]** **Anti-Forensics Detection:** Added detection for evidence wiping tools (`BCWipe`, `CCleaner`) and missing artifact flagging.
 
 ### v4.50 - Operation Justice ⚖️
-* **[Critical]** **Time Paradox Detection:** Implemented USN Journal rollback logic in `Chronos`. Physically proves if the attacker rolled back the system clock.
-* **[Critical]** **Justice V3 Engine:**
-    * **LNK Enrichment:** `Target_Path` and Arguments are now visualized in the summary.
-    * **CRX Detection:** Strict whitelist-based masquerade detection for Chrome Extensions.
-    * **Evidence Hierarchy:** Scores are now weighted by Execution (Prefetch) vs Existence (File).
-* **[Report]** **Dynamic Analyst Notes:** Lachesis now generates specific insights for each threat type.
-* **[Core]** **Robust Noise Filter:** Regex-based cleaning of `Notifications` and `Cache` folders.
+*   **[Critical]** **Time Paradox Detection:** Implemented USN Journal rollback logic in `Chronos`. Physically proves if the attacker rolled back the system clock.
+*   **[Critical]** **Justice V3 Engine:**
+    *   **LNK Enrichment:** `Target_Path` and Arguments are now visualized in the summary.
+    *   **CRX Detection:** Strict whitelist-based masquerade detection for Chrome Extensions.
+    *   **Evidence Hierarchy:** Scores are now weighted by Execution (Prefetch) vs Existence (File).
+*   **[Report]** **Dynamic Analyst Notes:** Lachesis now generates specific insights for each threat type.
+*   **[Core]** **Robust Noise Filter:** Regex-based cleaning of `Notifications` and `Cache` folders.
 
 ### v4.43 - The Story Inference Update
-* **[Tartaros]** Upgraded to **v3.0 Story Inference Mode**. Implemented "Time Cluster" logic.
-* **[Lachesis]** Implemented **Deep History Hunter**: Recursive disk scanning for Browser History.
+*   **[Tartaros]** Upgraded to **v3.0 Story Inference Mode**. Implemented "Time Cluster" logic.
+*   **[Lachesis]** Implemented **Deep History Hunter**: Recursive disk scanning for Browser History.
 
 ### v4.32 - The Robustness Update
-* **[Core]** Removed all silent `try-except-pass` blocks.
-* **[Lachesis]** **Scope Self-Correction:** Calculation of incident window now includes "Visual IOCs".
+*   **[Core]** Removed all silent `try-except-pass` blocks.
+*   **[Lachesis]** **Scope Self-Correction:** Calculation of incident window now includes "Visual IOCs".
 
 ### v4.28 - The Synapse (Tartaros Integration)
-* **[Logic]** Implemented memory-to-memory data passing between Lachesis and Tartaros.
-* **[Report]** "Initial Access Vector" section now displays download URLs.
+*   **[Logic]** Implemented memory-to-memory data passing between Lachesis and Tartaros.
+*   **[Report]** "Initial Access Vector" section now displays download URLs.
 
 ### v4.25 - The Critical Bypass
-* **[Logic]** Artifacts with Score >= 250 or "MASQUERADE" tag now **bypass** the Hestia noise filter.
+*   **[Logic]** Artifacts with Score >= 250 or "MASQUERADE" tag now **bypass** the Hestia noise filter.
 
 ### v4.20 - Hercules "The Sovereign"
-* **[Hercules]** Added native Registry parsing for OS identification.
+*   **[Hercules]** Added native Registry parsing for OS identification.
 
 ### v4.12 - The Silencer (Legacy)
-* **[Hestia]** Introduced "Inverted Tool Filter".
-* **[Chronos]** 95% noise reduction in timeline generation.
+*   **[Hestia]** Introduced "Inverted Tool Filter".
+*   **[Chronos]** 95% noise reduction in timeline generation.
 
 ### v4.0 - Two-Pass Strategy (Legacy)
-* **[Architecture]** Split Pandora into Pass 1 (Triage) and Pass 2 (Deep Dive).
+*   **[Architecture]** Split Pandora into Pass 1 (Triage) and Pass 2 (Deep Dive).
 
 ---
 
@@ -195,7 +220,7 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
 * [x] **v4.32:** **Robustness & Full JSON/Pivot Export**
 * [x] **v4.43:** **Tartaros v3.0 (Story Inference) & Deep Hunter**
 * [x] **v4.50:** **Operation Justice (Time Paradox & Masquerade Killer)**
-* [x] **v4.55:** **The Linker & Deep LNK (Network Correlation & Anti-Forensics)**
+* [x] **v4.55:** **The Linker, Deep LNK, & Modular Lachesis (Refactored)**
 * [ ] **v5.0:** **"Nemesis" (Automated Remediation Suggestion)** - *Planned*
 * [ ] **v5.x:** **LLM Integration** (Auto-summarization of Technical Findings) - *Planned*
 
@@ -203,9 +228,9 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
 
 ## ⚠️ Known Issues & Solutions
 
-* **Encoding:** Some KAPE CSVs use inconsistent encoding (UTF-8 vs CP1252). Tartaros v1.3+ now attempts `utf-8`, `utf-8-sig`, and `cp1252` automatically.
-* **Mermaid Rendering:** Special characters in filenames (e.g., `{}`) previously broke graphs. Lachesis v4.31+ sanitizes these to `()` automatically.
-* **Polars Version:** Requires Polars 0.20+ for `read_csv` compatibility.
+*   **Encoding:** Some KAPE CSVs use inconsistent encoding (UTF-8 vs CP1252). Tartaros v1.3+ now attempts `utf-8`, `utf-8-sig`, and `cp1252` automatically.
+*   **Mermaid Rendering:** Special characters in filenames (e.g., `{}`) previously broke graphs. Lachesis v4.31+ sanitizes these to `()` automatically.
+*   **Polars Version:** Requires Polars 0.20+ for `read_csv` compatibility.
 
 ---
 
