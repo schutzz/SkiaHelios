@@ -1,0 +1,51 @@
+{
+  "Case_Context": {
+    "Hostname": "4ORENSICS",
+    "Primary_User": "Hunter",
+    "Generated_At": "2026-01-07T19:44:27.804495"
+  },
+  "Deep_Dive_Targets": [
+    {
+      "Target_File": "extension_0_52.crx",
+      "Target_Path": "C:\\Program Files (x86)\\Adobe",
+      "Reason": "Critical Score [DROP]",
+      "Timestamp_Hint": "2016-06-21T00:02:50"
+    },
+    {
+      "Target_File": "Beautiful-Pictures-Of-Cute-Animals-6.jpg.lnk",
+      "Target_Path": "C:\\Users\\Hunter\\AppData\\Roaming\\Microsoft\\Windows\\Recent",
+      "Reason": "Critical Score [DROP]",
+      "Timestamp_Hint": "2016-06-21T12:01:46"
+    },
+    {
+      "Target_File": "Unknown",
+      "Target_Path": "",
+      "Reason": "High Score (Timestomp) [DROP]",
+      "Timestamp_Hint": "Rollback: -35997 sec"
+    },
+    {
+      "Target_File": "pythonw.exe",
+      "Target_Path": "c:\\python27\\pythonw.exe",
+      "Reason": "Dual-Use Tool [DROP]",
+      "Timestamp_Hint": ""
+    },
+    {
+      "Target_File": "ccleaner.exe",
+      "Target_Path": "C:\\Program Files\\CCleaner\\ccleaner.exe",
+      "Reason": "Persistence",
+      "Timestamp_Hint": "2016-06-21T12:01:44"
+    },
+    {
+      "Target_File": "Beautiful-Pictures.lnk",
+      "Target_Path": "Process",
+      "Reason": "Execution",
+      "Timestamp_Hint": "2016-06-21T12:01:46.054037"
+    },
+    {
+      "Target_File": "ccleaner.exe",
+      "Target_Path": "Process",
+      "Reason": "Evidence Destruction",
+      "Timestamp_Hint": "2016-06-21T12:01:44.005640"
+    }
+  ]
+}

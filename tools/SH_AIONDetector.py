@@ -34,7 +34,17 @@ class AIONEngine:
         self.loader = ThemisLoader()
         
         # Load Scan Targets from YAML
-        self.reg_targets = self.loader.get_persistence_targets("Registry")
+        # Load Scan Targets from YAML
+        raw_targets = self.loader.get_persistence_targets("Registry")
+        self.reg_targets = []
+        for t in raw_targets:
+            if isinstance(t, dict):
+                self.reg_targets.append(t.get("pattern", ""))
+            else:
+                self.reg_targets.append(str(t))
+        
+        self.reg_targets = [t for t in self.reg_targets if t]
+
         if not self.reg_targets:
             print("[!] Warning: No Registry targets found in rules. Using fallback.")
             self.reg_targets = [r"Run", r"Services"]

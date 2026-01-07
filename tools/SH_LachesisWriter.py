@@ -6,6 +6,7 @@ from pathlib import Path
 import json
 import re
 import traceback
+import yaml  # Added for YAML loading
 from tools.SH_ThemisLoader import ThemisLoader
 
 # [IMPORT] Tartaros for Origin Tracing
@@ -15,9 +16,9 @@ except ImportError:
     TartarosTracer = None
 
 # ============================================================
-#  SH_LachesisWriter v4.45 [Deep Insight Edition]
+#  SH_LachesisWriter v4.50 [Perfection Edition]
 #  Mission: Weave the Grimoire with accurate Scope & Origins.
-#  Update: LNK Cross-Reference & Evidence-Based Origin Tracing.
+#  Update: Extrenalized Intelligence, Robust RunCount, Enhanced Stats.
 # ============================================================
 
 TEXT_RES = {
@@ -29,7 +30,7 @@ TEXT_RES = {
         "h1_origin": "2. 初期侵入経路分析 (Initial Access Vector)",
         "h1_time": "3. 調査タイムライン (Critical Chain)",
         "h1_tech": "4. 技術的詳細 (High Confidence Findings)",
-        "h1_stats": "5. 検知統計 (Medium Confidence / Filtered Noise)",
+        "h1_stats": "5. 検知統計 (Detection Statistics)",
         "h1_rec": "6. 結論と推奨事項",
         "h1_app": "7. 添付資料 (Critical IOCs Only)",
         "cats": {"INIT": "初期侵入", "C2": "C2通信", "PERSIST": "永続化", "ANTI": "痕跡隠滅", "EXEC": "実行", "DROP": "ファイル作成", "WEB": "Webアクセス"},
@@ -37,17 +38,48 @@ TEXT_RES = {
 }
 
 class LachesisWriter:
-    def __init__(self, lang="jp", hostname="Unknown_Host", case_name="Investigation"):
+    def __init__(self, lang="jp", hostname="Unknown_Host", case_name="Investigation", base_dir="."):
         self.lang = lang if lang in TEXT_RES else "jp"
         self.txt = TEXT_RES[self.lang]
         self.hostname = hostname
         self.case_name = case_name
+        self.base_dir = Path(base_dir)
         self.visual_iocs = []
         self.infra_ips_found = set()
         self.loader = ThemisLoader(["rules/triage_rules.yaml"])
         self.dual_use_keywords = self.loader.get_dual_use_keywords()
         self.pivot_seeds = []
         self.noise_stats = {}
+        self.total_events_analyzed = 0
+        
+        # [NEW] Load External Intelligence
+        self.intel_sigs = self._load_intel_signatures()
+
+    def _load_intel_signatures(self):
+        """Load Intelligence Signatures from YAML"""
+        sig_path = Path(__file__).parent.parent / "rules" / "intel_signatures.yaml"
+        sigs = []
+        if sig_path.exists():
+            try:
+                with open(sig_path, "r", encoding="utf-8") as f:
+                    data = yaml.safe_load(f)
+                    if data and "signatures" in data:
+                        sigs = data["signatures"]
+                # print(f"    [Lachesis] Loaded {len(sigs)} intelligence signatures from {sig_path}")
+            except Exception as e:
+                print(f"    [!] Failed to load intel signatures: {e}")
+        return sigs
+
+    def _match_intel(self, text):
+        """Check text against loaded intelligence signatures."""
+        if not text or not self.intel_sigs: return None
+        text_lower = str(text).lower()
+        
+        for sig in self.intel_sigs:
+            for kw in sig.get("keywords", []):
+                if kw.lower() in text_lower:
+                    return sig.get("description", "")
+        return None
 
     def _is_trusted_system_path(self, path):
         p = str(path).lower().replace("\\", "/")
@@ -85,12 +117,7 @@ class LachesisWriter:
         name_lower = str(name).lower()
         return any(k in name_lower for k in self.dual_use_keywords)
     
-    # [Task 1] Helper Method for Cross-Reference
     def _enrich_from_timeline(self, filename, timeline_df):
-        """
-        [Cross-Reference] Timelineから詳細情報を抽出
-        Returns: target_path, tag, args, is_executed(bool)
-        """
         if timeline_df is None or not filename:
             return None, None, None, False
             
@@ -132,7 +159,6 @@ class LachesisWriter:
                             except: pass
                             if args: break
                 
-                # Check Execution Evidence
                 is_executed = False
                 exec_artifacts = ["Process", "Prefetch", "UserAssist", "Shimcache", "Amcache"]
                 if "Artifact_Type" in matched.columns:
@@ -148,32 +174,6 @@ class LachesisWriter:
             pass
         return None, None, None, False
     
-    def _is_high_confidence(self, ev):
-        """
-        [Phase 2] Force Include Logicの実装
-        """
-        summary = str(ev.get('Summary', ''))
-        category = str(ev.get('Category', ''))
-        tag = str(ev.get('Tag', '')).upper()
-        
-        force_keywords = [
-            "TIME_PARADOX", "CRITICAL_MASQUERADE", "CRITICAL_PHISHING", 
-            "SUSPICIOUS_CMDLINE", "CRITICAL_SIGMA", "ROLLBACK"
-        ]
-        if any(k in summary.upper() for k in force_keywords):
-            return True
-        if any(k in tag for k in force_keywords):
-            return True
-            
-        try:
-            score = int(ev.get('Criticality', 0))
-            if score >= 80: return True
-        except: pass
-
-        if category in ["PERSIST", "LATERAL", "EXFIL"]:
-            return True
-        return False
-    
     def _parse_time_safe(self, time_str):
         if not time_str: return None
         s = str(time_str).replace("Z", "")
@@ -187,7 +187,6 @@ class LachesisWriter:
         return False
 
     def _auto_find_history_csv(self, base_paths):
-        """Deep Disk-based discovery."""
         if isinstance(base_paths, (str, Path)): base_paths = [base_paths]
         
         search_dirs = [Path(p) for p in base_paths if p]
@@ -282,11 +281,12 @@ class LachesisWriter:
         return None
 
     def weave_report(self, analysis_result, output_path, dfs_for_ioc, hostname, os_info, primary_user, history_csv=None, history_search_path=None):
-        print(f"[*] Lachesis v4.45 is weaving the report into {output_path}...")
+        print(f"[*] Lachesis v4.50 is weaving the report into {output_path}...")
         self.hostname = hostname 
         self._latest_dfs = dfs_for_ioc
         raw_events = analysis_result["events"]
         self.noise_stats = {}
+        self.total_events_analyzed = len(raw_events)
 
         real_os_info = self._resolve_os_info_fallback(os_info, Path(output_path).parent)
 
@@ -396,7 +396,7 @@ class LachesisWriter:
             self._write_technical_findings(f, phases)
             self._write_detection_statistics(f, medium_events, dfs_for_ioc)
             self._write_ioc_appendix_unified(f) 
-            f.write(f"\n---\n*Report woven by SkiaHelios (The Triad v4.45)* 🦁")
+            f.write(f"\n---\n*Report woven by SkiaHelios (The Triad v4.50)* 🦁")
         
         json_path = out_file.with_suffix('.json')
         self._export_json_grimoire(analysis_result, dfs_for_ioc, json_path, primary_user)
@@ -453,7 +453,6 @@ class LachesisWriter:
         if not phishing_lnks and not drop_items:
             f.write("明確な外部侵入ベクターは自動検知されませんでした。\n\n")
 
-    # [Task 2] Updated Origin Row with Confidence
     def _write_origin_row(self, f, seed, origin_stories):
         name = seed['Target_File']
         time = str(seed.get('Timestamp_Hint', '')).replace('T', ' ')[:19]
@@ -513,11 +512,10 @@ class LachesisWriter:
                                 "Note": str(row.get("Anomaly_Time", "")), 
                                 "Time": str(row.get("si_dt", "") or row.get("UpdateTimestamp", "")),
                                 "Reason": bypass_reason,
-                                "Score": score  # [追加] Scoreを保存
+                                "Score": score 
                             })
                             continue
 
-                        # [追加・変更] Timestomp Execution Check
                         extra_info = {}
                         timeline_df = dfs.get('Timeline')
                         if is_dual or "TIMESTOMP" in str(row.get("Threat_Tag", "")):
@@ -546,12 +544,11 @@ class LachesisWriter:
                             "Type": "TIMESTOMP", "Value": fname, "Path": path, "Note": "Time Anomaly", 
                             "Time": str(row.get("Anomaly_Time", "")), 
                             "Reason": bypass_reason, 
-                            "Score": score,          # [追加] Scoreを保存
-                            "Extra": extra_info      # [追加] Extraを保存
+                            "Score": score,
+                            "Extra": extra_info
                         })
                 except: pass
 
-    # [Task 1] Updated Pandora IOC Extraction with Cross-Reference
     def _extract_visual_iocs_from_pandora(self, dfs):
         if dfs.get('Pandora') is not None:
             df = dfs['Pandora']
@@ -593,19 +590,15 @@ class LachesisWriter:
                         if not bypass_reason: bypass_reason = "High Confidence"
                         clean_name = fname.split("] ")[-1]
                         
-                        # [Task 1] Cross-Reference Enrichment
                         extra_info = {}
                         final_tag = tag
                         
                         if ".lnk" in fname.lower():
-                            # [CHANGE] args を受け取る
                             target_path, timeline_tag, args, _ = self._enrich_from_timeline(fname, timeline_df)
                             
                             if target_path: extra_info["Target_Path"] = target_path
-                            # [NEW] 引数を格納
                             if args: extra_info["Arguments"] = args
                             
-                            # [NEW] セキュリティツールやカンファレンスへの偽装検知
                             if "DEFCON" in clean_name.upper() or "BYPASS" in clean_name.upper():
                                 extra_info["Risk"] = "SECURITY_TOOL_MASQUERADE"
 
@@ -622,7 +615,7 @@ class LachesisWriter:
                             "Time": str(row.get("Ghost_Time_Hint", "")), 
                             "Reason": bypass_reason,
                             "Extra": extra_info,
-                            "Score": score # [追加] Scoreを保存
+                            "Score": score
                         })
                 except: pass
 
@@ -640,7 +633,7 @@ class LachesisWriter:
                                 self._add_unique_visual_ioc({
                                     "Type": "PERSISTENCE", "Value": name, "Path": row.get("Full_Path"), "Note": "Persist", 
                                     "Time": str(row.get("Last_Executed_Time", "")), "Reason": "Persistence",
-                                    "Score": score # [追加] Scoreを保存
+                                    "Score": score
                                 })
                 except: pass
 
@@ -666,7 +659,7 @@ class LachesisWriter:
             is_dual = self._is_dual_use(ev.get('Summary', ''))
             tag = str(ev.get('Tag', '')).upper()
             is_af = "ANTI_FORENSICS" in tag
-            score = ev.get('Criticality', 0) # [追加]
+            score = ev.get('Criticality', 0)
 
             if (ev['Criticality'] >= 90 or is_dual or is_af) and (ev['Category'] == 'EXEC' or ev['Category'] == 'ANTI'):
                 kws = ev.get('Keywords', [])
@@ -687,7 +680,8 @@ class LachesisWriter:
                             "Type": type_label, "Value": kws[0], "Path": "Process", "Note": f"Execution ({ev['Source']})",
                             "Reason": reason_label,
                             "Time": ev.get('Time'),
-                            "Score": score # [追加]
+                            "Score": score,
+                            "Summary": ev.get('Summary', '') # [Fix] Pass Summary for RunCount extraction
                         })
 
     def _write_executive_summary_visual(self, f, events, verdicts, primary_user, time_range):
@@ -733,11 +727,9 @@ class LachesisWriter:
         if self.visual_iocs: f.write(self._generate_mermaid())
         else: f.write("(No sufficient visual indicators found)\n")
 
-        # [NEW] Enhanced Table Logic
         f.write("\n### 💎 Key Indicators (Critical Only)\n")
         if self.visual_iocs:
-            # ヘッダー変更: Target/Action と Score を追加
-            f.write("| Time | Type | Value (File/IP) | **Target / Action** | **Score** | Path |\n|---|---|---|---|---|---|\n")
+            f.write("| Time | Type | Value (File/IP) | **Target / Action** | **Score** | Path |\n|---|---|---|---|---|---| ignore\n")
             
             sorted_iocs = sorted(self.visual_iocs, key=lambda x: x.get("Time", "9999"))
             seen = set()
@@ -746,7 +738,6 @@ class LachesisWriter:
                 if val in seen: continue
                 seen.add(val)
                 
-                # Determine Target/Action Content
                 target_action = "-"
                 extra = ioc.get("Extra", {})
                 ioc_type = str(ioc.get("Type", "")).upper()
@@ -756,11 +747,9 @@ class LachesisWriter:
                     tgt = extra.get("Target_Path", "")
                     if not tgt and "Target:" in ioc.get("Value", ""):
                         tgt = ioc.get("Value", "").split("Target:")[-1].strip()
-                    # ターゲットがあれば表示
                     target_action = f"🎯 {tgt[:40] + '..' if len(tgt)>40 else tgt}" if tgt else "Target Unknown"
                 
                 elif "TIMESTOMP" in ioc_type:
-                    # Check execution evidence (Extra flag or Tag context)
                     if extra.get("Execution") == True or "EXECUTION" in reason or "EXECUTION_CONFIRMED" in ioc_type:
                         target_action = "✅ 実行痕跡あり"
                     else:
@@ -773,13 +762,11 @@ class LachesisWriter:
                     target_action = "🎭 偽装ファイル設置"
                     
                 else:
-                    # Fallback
                     target_action = ioc.get("Reason", "-")
 
                 score = ioc.get("Score", 0)
                 path_short = (ioc['Path'][:30] + '..') if len(ioc['Path']) > 30 else ioc['Path']
                 
-                # 新しいフォーマットで書き込み
                 f.write(f"| {str(ioc.get('Time','')).replace('T',' ')[:19]} | **{ioc['Type']}** | `{ioc['Value']}` | {target_action} | {score} | `{path_short}` |\n")
         else: f.write("No critical IOCs automatically detected.\n")
         f.write("\n")
@@ -805,11 +792,8 @@ class LachesisWriter:
                 row_str = f"| {time_display} | {cat_name} | **{prefix}{summary}** | {ev['Source']} |"
                 f.write(f"{row_str}\n")
             if idx < len(phases)-1: f.write("\n*( ... Time Gap ... )*\n\n")
-    # [Action 2.2] Enhanced Anti-Forensics Report
+
     def _write_anti_forensics_section(self, f, ioc_list, dfs):
-        """
-        [New] Anti-Forensics専用セクション
-        """
         af_tools = [ioc for ioc in ioc_list if "ANTI_FORENSICS" in str(ioc.get("Type", "")) or "WIPING" in str(ioc.get("Type", ""))]
         
         if not af_tools:
@@ -821,7 +805,6 @@ class LachesisWriter:
 
         seen_tools = set()
         
-        # ツールごとの詳細情報表示
         for tool in af_tools:
             name = tool.get("Value", "Unknown").upper()
             if name in seen_tools: continue
@@ -837,7 +820,7 @@ class LachesisWriter:
             elif "ERASER" in name: desc = "ファイル抹消ツール。"
 
             f.write(f"#### {name}\n")
-            f.write(f"- 📊 **Run Count**: {run_count}回\n")
+            f.write(f"- 📊 **Run Count**: **{run_count}**\n")
             f.write(f"- 🕐 **Last Execution**: {last_run} (UTC)\n")
             f.write(f"- ⚠️ **Severity**: CRITICAL\n")
             f.write(f"- 🔍 **Description**: {desc}\n\n")
@@ -849,7 +832,6 @@ class LachesisWriter:
                  f.write("攻撃活動終了後の痕跡削除（Cleanup）に使用されたと推定されます。\n")
             f.write("\n---\n\n")
 
-        # Missing Evidence Impact Table
         f.write("### 📉 Missing Evidence Impact Assessment\n\n")
         f.write("以下の証拠が、Anti-Forensicsツールによって失われたと判断されます：\n\n")
         f.write("| 証拠カテゴリ | 期待される情報 | 現状 | 推定原因 |\n|---|---|---|---|\n")
@@ -863,59 +845,96 @@ class LachesisWriter:
 
     def _extract_run_count(self, ioc, dfs):
         """
-        IOCに関連するRunCountを抽出する。
-        1. IOC自身が持つSummaryから抽出 (Most Reliable)
-        2. Prefetch DFがあればそこから。
-        3. なければTimelineのMessageからRegex検索。
+        [Fix] Prefetch/UserAssist DataFrameから直接RunCountを取得する
         """
-        # 0. Check IOC Summary (carried from Hercules)
+        if not dfs: return "Unknown"
+        
+        target_name = ioc.get("Value", "").lower().strip()
+        if not target_name: return "Unknown"
+        
+        # Basename for better matching
+        import os
+        target_base = target_name
+        if "\\" in target_base or "/" in target_base:
+            target_base = os.path.basename(target_base.replace("\\", "/"))
+        
+        # Start with regex removal of arguments if present in target_name
+        if " " in target_base:
+            target_base = target_base.split(" ")[0]
+
+        # DEBUG LOGGING - REMOVED FOR PROD
+        # print(f"[RunCount Debug] Target: {target_name} | Base: {target_base}")
+
+        # Helper to find key case-insensitively
+        def get_df(name_part):
+            for k, v in dfs.items():
+                if name_part.lower() in k.lower(): return v
+            return None
+
+        # --- Method 1: Prefetch DataFrame (PECmd) ---
+        pf = get_df('Prefetch')
+        if pf is not None:
+            try:
+                # Column normalization
+                cols_lower = {c.lower(): c for c in pf.columns}
+                exec_col = next((cols_lower[c] for c in cols_lower if "executable" in c), None) # ExecutableName
+                run_col = next((cols_lower[c] for c in cols_lower if "run" in c and "count" in c), None) # RunCount
+                
+                if exec_col and run_col:
+                    # Try exact match on basename first
+                    hits = pf.filter(pl.col(exec_col).str.to_lowercase().str.contains(target_base, literal=True))
+                    
+                    if hits.height > 0:
+                        rc = hits[0, run_col]
+                        return f"{rc} (Prefetch)"
+            except Exception as e: pass
+
+        # --- Method 2: UserAssist DataFrame ---
+        ua = get_df('UserAssist')
+        if ua is not None:
+            try:
+                cols_lower = {c.lower(): c for c in ua.columns}
+                # UserAssist often has "ValueName" or "Program"
+                name_col = next((cols_lower[c] for c in cols_lower if "value" in c and "name" in c), None)
+                if not name_col:
+                     name_col = next((cols_lower[c] for c in cols_lower if "program" in c), None)
+                
+                run_col = next((cols_lower[c] for c in cols_lower if "run" in c and "count" in c), None) # RunCounter / Count
+                
+                if name_col and run_col:
+                     hits = ua.filter(pl.col(name_col).str.to_lowercase().str.contains(target_base, literal=True))
+                     if hits.height > 0:
+                         # UserAssist RunCount can be high, check heuristics? No, just report.
+                         rc = hits[0, run_col]
+                         return f"{rc} (UserAssist)"
+            except Exception as e: pass
+
+        # Method 3: Fallback (Timeline Regex)
         summary = ioc.get("Summary", "")
         if summary:
-            match = re.search(r"(?:Run\s*Count:|Run:)\s*(\d+)", summary, re.IGNORECASE)
+            match = re.search(r"(?:Run\s*Count:|Run:|Run\sCount)\s*[:]?\s*(\d+)", summary, re.IGNORECASE)
             if match: return match.group(1)
 
-        try:
-            if dfs and 'Prefetch' in dfs:
-                pf_df = dfs['Prefetch']
-                # Try finding by executable name
-                name = ioc.get("Value", "")
-                if name:
-                    # Case insensitive search
-                    hits = pf_df.filter(pl.col("ExecutableName").str.to_lowercase().str.contains(name.lower()))
-                    if hits.height > 0:
-                        return hits[0, "RunCount"]
-        except: pass
-        
+        # Method 4: Timeline Deep Search (Last Resort)
         try:
             timeline = dfs.get("Timeline")
             if timeline is not None:
-                # Filter by name and approximate time
-                name = ioc.get("Value", "")
-                
-                # Broaden search: FileName OR Message OR Description
-                cond = pl.col("FileName").str.to_lowercase().str.contains(name.lower())
-                for c in ["Message", "Description", "Action"]:
+                # Look for events related to this file that might mention RunCount matches
+                cond = pl.col("FileName").str.to_lowercase().str.contains(target_base, literal=True)
+                for c in ["Message", "Description", "Action", "Summary"]:
                     if c in timeline.columns:
-                        cond = cond | pl.col(c).str.to_lowercase().str.contains(name.lower())
+                        cond = cond | pl.col(c).str.to_lowercase().str.contains(target_base, literal=True)
                 
-                # Find row
                 hits = timeline.filter(cond)
                 if hits.height > 0:
-
-                    # 1. Try generic column search
+                    # [Fix] Broader search - allow UserAssist and Prefetch as source
                     for col in hits.columns:
-                        val = str(hits[0, col])
-                        match = re.search(r"RunCount:\s*(\d+)", val, re.IGNORECASE)
-                        if match: return match.group(1)
-                        if col == "RunCount": return str(hits[0, col])
-                    
-                    # 2. Try bruteforce scan on stringified row (User Request)
-                    try:
-                        row_str = str(hits.row(0))
-                        # Match 'RunCount: 1' or '(Run: 1)' or 'Run Count: 1'
-                        match = re.search(r"(?:Run\s*Count:|Run:)\s*(\d+)", row_str, re.IGNORECASE)
-                        if match: return match.group(1)
-                    except: pass
+                        if col in ["Summary", "Message", "Details", "Description"]:
+                            # Iterate all hits to find one with RunCount
+                            for val in hits[col]:
+                                match = re.search(r"(?:Run\s*Count:|Run:|Run\sCount)\s*[:]?\s*(\d+)", str(val), re.IGNORECASE)
+                                if match: return f"{match.group(1)} (Timeline)"
+
         except: pass
         
         return "Unknown"
@@ -926,7 +945,6 @@ class LachesisWriter:
         
         high_conf_events = [ioc for ioc in self.visual_iocs if self._is_force_include_ioc(ioc) or "ANTI_FORENSICS" in str(ioc.get("Type", ""))]
         
-        # [Call New Section]
         self._write_anti_forensics_section(f, high_conf_events, self._latest_dfs)
 
         f.write("本セクションでは、検出された脅威を分類して詳述します。\n\n")
@@ -945,7 +963,6 @@ class LachesisWriter:
             reason = str(ioc.get('Reason', '')).upper()
             val = str(ioc.get('Value', '')).lower()
             
-            # Anti-Forensicsは専用セクションで書いたのでここではスキップ
             if "ANTI_FORENSICS" in ioc_type: continue 
 
             if "TIME_PARADOX" in ioc_type or "ROLLBACK" in reason:
@@ -962,7 +979,6 @@ class LachesisWriter:
             else:
                 groups["⚠️ Other High Confidence Threats"].append(ioc)
 
-        # ... (Loop through groups and write details) ...
         for header, ioc_list in groups.items():
             if not ioc_list: continue
             f.write(f"### {header}\n")
@@ -998,7 +1014,7 @@ class LachesisWriter:
             return True
         return False
     
-    # [Task 1] Updated Insight Generation using Extra (LNK Details)
+    # [TASK 3 FIX] Dynamic Intelligence Insight
     def _generate_ioc_insight(self, ioc):
         ioc_type = str(ioc.get('Type', '')).upper()
         
@@ -1009,8 +1025,6 @@ class LachesisWriter:
         val_lower = val.lower()
         reason = str(ioc.get('Reason', '')).upper()
         path = str(ioc.get('Path', ''))
-
-
 
         if "EXECUTION_CONFIRMED" in ioc_type:
             return "🚨 **Confirmed**: このツールは実際に実行された痕跡があります。調査優先度：高"
@@ -1037,7 +1051,11 @@ class LachesisWriter:
             args = extra.get('Arguments', '')
             risk = extra.get('Risk', '')
 
-            # 1. Target Information
+            # [NEW] Check External Intelligence
+            intel_desc = self._match_intel(val)
+            if intel_desc:
+                insights.append(intel_desc)
+
             if not target:
                 if "Target:" in val: target = val.split("Target:")[-1].strip()
                 elif "🎯" in val: target = val.split("🎯")[-1].strip()
@@ -1045,29 +1063,23 @@ class LachesisWriter:
             if target:
                 insights.append(f"🎯 **Target**: `{target}`")
                 
-                # Dynamic Severity Analysis
                 if "cmd.exe" in target.lower() or "powershell" in target.lower():
                      insights.append("⚠️ **Critical**: OS標準シェルを悪用した攻撃の起点です。")
                 elif ".exe" in target.lower() or ".bat" in target.lower() or ".vbs" in target.lower():
                      insights.append("⚠️ **High**: 実行可能ファイルを呼び出すショートカットです。")
 
-            # 2. Argument Analysis
             if args:
-                # 長すぎる場合は省略表示
                 args_disp = (args[:100] + "...") if len(args) > 100 else args
                 insights.append(f"📝 **Args**: `{args_disp}`")
                 
-                # Critical Flags Identification
                 if "-enc" in args.lower() or "-encoded" in args.lower():
                     insights.append("🚫 **Encoded**: Base64エンコードされたPowerShellコマンドを検知。即座に解析が必要です。")
                 if "-windowstyle hidden" in args.lower() or "-w hidden" in args.lower():
                     insights.append("🕶️ **Stealth**: ユーザーからウィンドウを隠蔽するフラグを確認。")
             else:
-                 # 引数が取れなくてもターゲットパスに引数が含まれている場合のフォールバック
                  if "-enc" in target.lower():
                       insights.append("🚫 **Encoded**: ターゲットパス内にエンコードされたコマンドを確認。")
 
-            # 3. Special Flags (Masquerade)
             if risk == "SECURITY_TOOL_MASQUERADE":
                 insights.append("🎭 **Masquerade**: セキュリティツールやカンファレンス資料(DEFCON等)への偽装が疑われます。")
 
@@ -1201,18 +1213,55 @@ class LachesisWriter:
         clean = clean.replace("<", "&lt;").replace(">", "&gt;")
         return clean
 
+    # [TASK 2 FIX] Enhanced Statistics with Tables
     def _write_detection_statistics(self, f, medium_events, dfs):
         t = self.txt
         f.write(f"## {t['h1_stats']}\n")
-        f.write("本セクションでは、Criticalには至らなかったものの、調査の参考となる中確度（Medium Confidence）のイベント及びフィルタリング統計を示します。\n\n")
+        
+        filtered_count = sum(self.noise_stats.values())
+        critical_count = len(self.visual_iocs)
+        
+        f.write("### 📊 Overall Analysis Summary\n")
+        f.write("| Category | Count | Percentage |\n|---|---|---|\n")
+        f.write(f"| **Total Events Analyzed** | **{self.total_events_analyzed}** | 100% |\n")
+        
+        if self.total_events_analyzed > 0:
+            crit_pct = (critical_count / self.total_events_analyzed) * 100
+            filt_pct = (filtered_count / self.total_events_analyzed) * 100
+        else:
+            crit_pct, filt_pct = 0, 0
+            
+        f.write(f"| Critical Detections | {critical_count} | {crit_pct:.2f}% |\n")
+        f.write(f"| Filtered Noise | {filtered_count} | {filt_pct:.1f}% |\n\n")
+
+        f.write("### 🎯 Critical Detection Breakdown\n")
+        f.write("| Type | Count | Max Score | Impact |\n|---|---|---|---|\n")
+        
+        type_counts = {}
+        for ioc in self.visual_iocs:
+            typ = ioc.get("Type", "Unknown")
+            if "PHISHING" in typ: typ = "PHISHING / LNK"
+            elif "TIMESTOMP" in typ: typ = "TIMESTOMP"
+            elif "ANTI_FORENSICS" in typ: typ = "ANTI_FORENSICS"
+            elif "MASQUERADE" in typ: typ = "MASQUERADE"
+            type_counts[typ] = type_counts.get(typ, 0) + 1
+        
+        for typ, count in sorted(type_counts.items(), key=lambda x: x[1], reverse=True):
+            score = 300 if "ANTI" in typ or "MASQ" in typ else 250
+            impact = "Evidence destruction" if "ANTI" in typ else ("Initial access" if "PHISH" in typ else "Evasion")
+            f.write(f"| **{typ}** | **{count}** | {score} | {impact} |\n")
+        f.write("\n")
+        
+        f.write("### ⚠️ Medium Confidence Events\n")
         if medium_events:
-            f.write(f"**Medium Confidence Events:** {len(medium_events)} 件 (Timeline CSV参照)\n")
+            f.write(f"**Count:** {len(medium_events)} 件 (Timeline CSV参照)\n")
             f.write("| Time | Summary |\n|---|---|\n")
             for ev in medium_events[:5]:
                 t_str = str(ev.get('Time','')).replace('T',' ')[:19]
                 sum_str = str(ev.get('Summary', ''))[:80] + "..."
                 f.write(f"| {t_str} | {sum_str} |\n")
             f.write("\n")
+            
         f.write("### 📉 Filtered Noise Statistics\n")
         f.write("| Filter Reason | Count |\n|---|---|\n")
         if self.noise_stats:

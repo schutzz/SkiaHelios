@@ -1,0 +1,27 @@
+# SkiaHelios Intelligence Signatures
+# Description: Keywords and patterns to identify high-risk artifacts based on threat intelligence.
+
+signatures:
+  - id: "DEFCON_MASQUERADE"
+    keywords: ["zoltan", "defcon", "bypass firewalls", "bypass_firewalls"]
+    risk: "SECURITY_RESEARCHER_MASQUERADE"
+    confidence: "HIGH"
+    description: "⚠️ **高度な偽装工作**: このファイル名は、実在するDEFCON 22 (2014) のプレゼンテーション「Bypass Firewalls, Application White Lists, Secure File Transfers (Zoltan Balazs氏)」と一致します。攻撃者がセキュリティ研究者やペンテスターを装い、ターゲット（セキュリティ担当者等）の警戒心を下げるソーシャルエンジニアリングの可能性があります。"
+
+  - id: "CREDENTIAL_LURE"
+    keywords: ["password", "accounts", "passwords", "creds", "credential", "login"]
+    risk: "SENSITIVE_DATA_EXPOSURE"
+    confidence: "MEDIUM"
+    description: "⚠️ **機密情報の露出**: パスワードやアカウント情報を示唆するファイル名です。攻撃者が関心を持つファイル、または攻撃者が作成したダンプファイルの可能性があります。"
+
+  - id: "FINANCIAL_LURE"
+    keywords: ["salary", "bonus", "payroll", "invoice", "payment"]
+    risk: "FINANCIAL_DATA_LURE"
+    confidence: "MEDIUM"
+    description: "⚠️ **財務情報ルアー**: 給与や請求書に関連するファイル名は、フィッシングや標的型攻撃で頻繁に使用されるルアー（囮）です。"
+
+  - id: "VULNERABILITY_EXPLOIT"
+    keywords: ["cve-", "exploit", "poc", "weaponized"]
+    risk: "EXPLOIT_TOOL"
+    confidence: "HIGH"
+    description: "🚨 **Exploit Artifact**: 脆弱性悪用コードまたはPoCに関連するファイル名を検知しました。"
