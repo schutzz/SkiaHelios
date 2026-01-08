@@ -1,10 +1,10 @@
-# SkiaHelios v5.2 - The Causality & Justice Engine (Perfection)
+# SkiaHelios v5.3 - The Causality & Justice Engine (Operation Dragnet)
 
 ![SkiaHelios CI](https://github.com/schutzz/SkiaHelios/actions/workflows/test.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
 ![Polars](https://img.shields.io/badge/Engine-Polars_0.20%2B-orange?logo=polars)
 ![Mermaid](https://img.shields.io/badge/Report-Mermaid_Visuals-ff69b4?logo=mermaid)
-![Tests](https://img.shields.io/badge/Tests-50%2F50_PASS-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-55%2F55_PASS-brightgreen)
 ![Status](https://img.shields.io/badge/Status-Perfection_Achieved-gold)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey)
 
@@ -13,9 +13,9 @@
 
 **SkiaHelios** is a high-resolution, modular DFIR (Digital Forensics & Incident Response) framework built for **speed**, **causality**, **origin tracing**, and **visual narrative**.
 
-Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** orchestrated by **"Hekate"**, supported by **"Chronos" (The Time Lord)**, **"Hercules" (The Referee)**, and the newly evolved **"Tartaros" (The Origin Tracer)** to detect advanced anti-forensics techniques like **Time Paradoxes (System Rollbacks)**, **Evidence Wiping**, and **File Masquerading**.
+Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** orchestrated by **"Hekate"**, supported by **"Chronos" (The Time Lord)**, **"Hercules" (The Referee)**, and the newly integrated **"PlutosGate" (Network Hunter)** to detect advanced network threats like **Lateral Movement**, **Data Exfiltration**, and **Time Paradoxes**.
 
-**Current Version:** v5.2 (Operation Perfection / Smart LNK Grouping / Statistics Fix / Remediation Engine)
+**Current Version:** v5.3 (Operation Dragnet / Network Thermodynamics / Exfil Hunter / Email Forensics)
 
 ---
 
@@ -44,13 +44,14 @@ graph TD
     Atropos --> Pandora["📦 Pandora\n(File & Masquerade)"]:::engine
     Atropos --> Hercules["⚖️ Hercules\n(Justice V3 Engine)\nLNK & CRX Hunter"]:::judge
     Atropos --> Aion["👁️ AION\n(Persistence)"]:::engine
+    Atropos --> Plutos["⚡ PlutosGate\n(Network & Exfil)\nThermodynamics Engine"]:::judge
     
     %% Origin Tracing
     LNKs["Phishing LNKs"] -.-> Tartaros["⛓️ Tartaros v4.1\n(Adaptive Origin Tracing)"]:::engine
     History["Browser History"] -.-> Tartaros
     
     %% Reporting Stage (Modular Lachesis)
-    subgraph Lachesis_Module ["🕸️ Lachesis v5.2 (The Weaver)"]
+    subgraph Lachesis_Module ["🕸️ Lachesis v5.3 (The Weaver)"]
         direction TB
         L_Core[("Core Controller")]:::report
         L_Intel["Intel (Knowledge Base)"]:::submod
@@ -69,6 +70,7 @@ graph TD
     Hercules --> L_Core
     Aion --> L_Core
     Tartaros --> L_Core
+    Plutos --> L_Core
     
     %% Output
     L_Render --> Report[("📜 Grimoire.md\n(Narrative Report)")]:::report
@@ -84,24 +86,28 @@ graph TD
 * **Hekate (Triad Controller):** The central command unit (`SH_HekateTriad.py`). It orchestrates the flow of data between all modules, manages arguments, and initiates the final reporting phase.
 
 ### 1. The Triad Architecture (Time, Space, Narrative)
-* **Clotho (Parser):** High-speed ingestion of KAPE artifacts (MFT, USN, EventLogs, Registry) using Rust-based Polars. Optimized for large datasets (millions of rows).
+* **Clotho (Parser):** High-speed ingestion of KAPE artifacts (MFT, USN, EventLogs, Registry, SRUM) using Rust-based Polars. Optimized for large datasets (millions of rows).
 * **Atropos (Analyzer):** "Themis" rule-based logic to cut the thread of life (separate Signal from Noise). Uses a dual-pass scoring system.
-* **Lachesis (The Weaver - Modular v5.2):** The reporting engine has been refactored into a modular architecture for scalability:
+* **Lachesis (The Weaver - Modular v5.3):** The reporting engine has been refactored into a modular architecture for scalability:
     * **Smart Grouping (v5.2):** Automatically differentiates "High Interest" LNKs (e.g., Confirmed Downloads) from generic noise-like artifacts.
     * **Remediation Engine:** Generates a prioritized "Recommended Actions" table (P0/P1) compliant with NIST SP 800-61.
     * **Enricher:** Fuses data from multiple sources (e.g., matching LNK targets with Process execution).
-    * **Analyzer:** Calculates final risk scores and extracts Visual IOCs.
-    * **Renderer:** Generates the "Grimoire" (Markdown) and structured JSON outputs with perfect statistical accuracy.
+    * **Renderer:** Generates the "Grimoire" (Markdown) with **Mermaid Visuals** and **Aggregated Critical Tables**.
 
-### 2. The Judges (Chronos & Hercules) - **[UPDATED]**
+### 2. The Judges (Chronos, Hercules & Plutos) - **[UPDATED]**
 * **Chronos (The Time Lord):**
     * **Time Paradox Detection:** Detects system clock rollbacks (Timestomping) by analyzing USN Journal physical offsets versus timestamps.
     * **Rollback Calculation:** Precise calculation of the time delta (e.g., `-35997 seconds`).
 * **Hercules (The Referee - Justice V3):**
     * **The Linker (Phase 4):** Correlates file artifacts (LNK, Prefetch) with **Browser History** to confirm "Execution Success" vs "Attempt".
-    * **Deep LNK Analysis:** Extracts Target Paths and Arguments to detect **PowerShell encoding**, **Hidden Windows**, and **Script Chaining** (e.g., `🎯 Target: cmd.exe /c powershell...`).
+    * **Deep LNK Analysis:** Extracts Target Paths and Arguments to detect **PowerShell encoding**, **Hidden Windows**, and **Script Chaining**.
     * **Anti-Forensics Detection:** Detects usage of wiping tools (e.g., `BCWipe`, `CCleaner`) and flags missing artifacts as "Deleted Evidence".
     * **Masquerade Killer:** Instantly identifies `.crx` backdoors hiding in non-browser directories.
+* **PlutosGate (The Network Hunter - v3.4):** **[NEW]**
+    * **Network Thermodynamics:** Uses **SRUM** to calculate "Heat Scores" based on data burst volume (BytesSent/Received).
+    * **Exfil Correlation (The Trinity):** Correlates **SRUM (Heat)**, **Browser History (URL)**, and **MFT (File Creation)** to prove data theft intent.
+    * **Email Hunter:** Detects `.pst/.ost` theft (Local MFT scan) and "Sent" actions in Webmail (History scan).
+    * **Safe-Mode Map:** Generates Mermaid network topology without encoding errors.
 
 ### 3. Intelligent Noise Filtering (Hestia)
 * **Hestia (Gatekeeper):** Aggressive whitelisting of OS noise.
@@ -141,7 +147,7 @@ dual_use_tools:
 ```
 
 ### Standard Triage Execution
-To run the full pipeline including **Justice V3 Engine** and **Time Paradox Detection**:
+To run the full pipeline including **PlutosGate**, **Justice V3 Engine** and **Time Paradox Detection**:
 
 ```bash
 python SH_HekateTriad.py \
@@ -162,7 +168,13 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
 
 ## 📜 Complete Changelog
 
-### v5.2 - Operation Perfection (Current) 🦁
+### v5.3 - Operation Dragnet (Current) ⚡
+* **[PlutosGate]** **Exfil Hunter:** Implemented "Trinity Correlation" (SRUM x Browser x MFT) to detect confirmed data exfiltration events (e.g., zipping and uploading source code).
+* **[PlutosGate]** **Email Forensics:** Added detection logic for `.pst/.ost` file theft and webmail "Sent" activities.
+* **[Lachesis]** **Safe-Mode Visuals:** Fixed Mermaid Lexical Errors by switching to Named Colors (#ffffff -> white).
+* **[Lachesis]** **Aggregated Reporting:** "Critical Threats" table now aggregates high-volume events (like mass email copying) into single summary lines.
+
+### v5.2 - Operation Perfection 🦁
 * **[Lachesis]** **Smart LNK Grouping:** Automatically differentiates "High Interest" LNKs (e.g., Confirmed Downloads, DEFCON Masquerade) from generic noise-like artifacts to prevent report clutter.
 * **[Lachesis]** **Medium Event Breakdown:** Provides detailed category distribution and "Top 5" examples for medium confidence events.
 * **[Core]** **Statistics Fix:** Corrected the calculation logic for "Filtered Noise" percentage (now treated as "Excluded" rather than part of the analysis base).
@@ -238,6 +250,7 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
 * [x] **v4.55:** **The Linker, Deep LNK, & Modular Lachesis (Refactored)**
 * [x] **v5.0:** **"Nemesis" (Automated Remediation Suggestion)**
 * [x] **v5.2:** **Operation Perfection (Smart Reporting & Statistical Accuracy)**
+* [x] **v5.3:** **Operation Dragnet (PlutosGate v3.4 - Network Thermodynamics & Exfil Hunter)**
 * [ ] **v5.x:** **LLM Integration** (Auto-summarization of Technical Findings) - *Planned*
 
 ---

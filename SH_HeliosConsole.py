@@ -193,6 +193,26 @@ def main():
         "--out", str(aion_out)
     ], "AION")
     
+    # ==========================================
+    # [7.5] PLUTOS GATE (Network & Exfil) -> NEW
+    # ==========================================
+    plutos_out = out_dir / "Plutos_Report.csv"
+    plutos_net_out = out_dir / "Plutos_Network_Details.csv"
+    
+    plutos_cmd = [
+        "python", "-m", "tools.SH_PlutosGate",
+        "--dir", str(kape_csv_dir),
+        "--pandora", str(ghost_report),
+        "--out", str(plutos_out),
+        "--net-out", str(plutos_net_out)
+    ]
+    
+    # Deep Diveモードなら期間指定も渡して範囲を絞る
+    if args.deep and scan_start and scan_end:
+         plutos_cmd.extend(["--start", scan_start, "--end", scan_end])
+
+    run_stage(plutos_cmd, "PLUTOS (Network & Lateral)")
+    
     # [8] Hekate -> Raw と CSV の両方を渡す！
     hekate_cmd = [
         "python", "SH_HekateTriad.py",

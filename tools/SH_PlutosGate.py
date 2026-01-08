@@ -5,11 +5,12 @@ import os
 import glob
 import re
 import ipaddress
+from datetime import datetime
 
 # ============================================================
-#  SH_PlutosGate v2.6 [Fix: Port Export]
+#  SH_PlutosGate v3.4 [MFT Fix]
 #  Mission: Detect Internal Exfiltration & Lateral Movement
-#  Update: Explicitly export 'Remote_Port' for Lachesis IOC handling.
+#  Update: Fixed MFT/History file targeting (Pattern Strictness)
 # ============================================================
 
 def print_logo():
@@ -17,80 +18,93 @@ def print_logo():
        ______   __       __  __   ______   ______   ______    
       /\  == \ /\ \     /\ \/\ \ /\__  _\/\  __ \ /\  ___\   
       \ \  _-/ \ \ \____\ \ \_\ \\/_/\ \/\ \ \/\ \\ \___  \  
-       \ \_\    \ \_____\ \_____\  \ \_\ \ \_____\\/\_____\ 
+       \ \_\    \ \_____\  \ \_\ \ \_____\\/\_____\ 
       
-      [ SH_PlutosGate v2.6 ]
+      [ SH_PlutosGate v3.4 ]
       "The Heat of the Evidence burns away the Lies."
     """)
 
 class PlutosGate:
-    """
-    [Plutos: The Wealth Giver (of Evidence)]
-    v2.6: ネットワークログ、SRUM、ファイアウォールログを解析し、
-    外部通信(C2)と内部横展開(Lateral)を熱量(Heat Score)で判定する。
-    """
     def __init__(self, kape_dir, pandora_csv=None, start_time=None, end_time=None):
         self.kape_dir = kape_dir
         self.pandora_df = self._load_pandora(pandora_csv) if pandora_csv else None
         self.start_time = start_time
         self.end_time = end_time
-        self.evtx_df = self._load_evtx()
         
-        # Lateral Movement Tools (Living off the Land)
-        self.lateral_processes = [
-            "psexec.exe", "psexesvc.exe", "wsmprovhost.exe", "wmiprvse.exe", 
-            "powershell.exe", "pwsh.exe", "wmic.exe", "bitsadmin.exe", 
-            "certutil.exe", "schtasks.exe", "sc.exe", "net.exe", "reg.exe",
-            "rundll32.exe", "regsvr32.exe", "curl.exe", "wget.exe", "7z.exe", "rar.exe"
+        # 設定: ヒートスコア計算用プロセス
+        self.high_heat_processes = [
+            "mstsc.exe", "svchost.exe", "7z.exe", "rar.exe", "curl.exe", 
+            "wget.exe", "powershell.exe", "psexesvc.exe", "chrome.exe", "msedge.exe",
+            "rundll32.exe", "regsvr32.exe", "wmic.exe", "git.exe", "ssh.exe",
+            "outlook.exe", "thunderbird.exe", "hxoutlook.exe"
+        ]
+        self.burst_threshold = 50 * 1024 * 1024  # 50MB
+
+        # 監視対象ドメイン定義 (Dragnet)
+        self.exfil_domains = [
+            # Cloud Storage
+            r"drive\.google", r"docs\.google", r"dropbox", r"onedrive", r"sharepoint", 
+            r"box\.com", r"icloud", r"pcloud", r"kdrive", r"amazon\.com/clouddrive",
+            # File Transfer / Sharing
+            r"wetransfer", r"sendspace", r"mediafire", r"mega\.nz", r"gofile\.io", 
+            r"anonfiles", r"file\.io", r"transfer\.sh", r"ufile\.io", r"sendgb", 
+            # Code Repositories
+            r"github\.com", r"gitlab\.com", r"bitbucket", r"pastebin",
+            # Webmail Providers
+            r"mail\.google", r"outlook\.live", r"mail\.yahoo", r"proton\.me", r"tutanota"
+        ]
+        
+        # URL不審キーワード
+        self.suspicious_url_keywords = [
+            r"/upload", r"attachment", r"share", r"dl=0", r"export"
         ]
 
-    def _load_csv(self, pattern):
-        """KAPE出力ディレクトリからパターンに一致するCSVを検索して読み込む"""
+        # メール送出を示唆するキーワード (URL/Title)
+        self.mail_action_keywords = [
+            r"sent", r"compose", r"draft", r"outbox", r"send", r"attachment", r"upload"
+        ]
+
+    def _load_csv(self, pattern, columns=None):
+        """高速読み込み用ラッパー (LazyFrame)"""
         search_path = os.path.join(self.kape_dir, "**", pattern)
         files = glob.glob(search_path, recursive=True)
         if not files: return None
+        
+        target_file = files[0]
+        
         try:
-            # 型推論エラーを防ぐため、まずは全カラム文字列として読み込む
-            return pl.read_csv(files[0], ignore_errors=True, infer_schema_length=0)
+            lf = pl.scan_csv(target_file, ignore_errors=True, infer_schema_length=10000)
+            if columns:
+                # 実際に存在するカラムだけを選択 (Missing Columns Error回避)
+                available_cols = [c for c in columns if c in lf.collect_schema().names()]
+                if not available_cols:
+                    print(f"[!] Warning: None of the requested columns {columns} found in {os.path.basename(target_file)}")
+                    return None
+                lf = lf.select(available_cols)
+            return lf 
         except Exception as e:
             print(f"[!] Error loading {pattern}: {e}")
             return None
 
     def _load_pandora(self, path):
         if path and os.path.exists(path):
-            try:
-                return pl.read_csv(path, ignore_errors=True, infer_schema_length=0)
+            try: return pl.read_csv(path, ignore_errors=True, infer_schema_length=0)
             except: pass
         return None
 
-    def _load_evtx(self):
-        print("[*] Hunting for Network Events (Evtx)...")
-        df = self._load_csv("*EvtxECmd*.csv")
-        if df is None: return None
-        if "EventId" not in df.columns: return None
-        # EID 3: Sysmon Net, 5156: WFP Allow, 5157: Block, 5154: Listen
-        target_eids = ["3", "5156", "5154", "5157"]
-        return df.filter(pl.col("EventId").cast(pl.Utf8).is_in(target_eids))
-
     def _is_internal_ip(self, ip_str):
-        """ RFC1918 & Localhost Check """
         if not ip_str or ip_str in ["-", "", "127.0.0.1", "::1", "0:0:0:0:0:0:0:1"]: return True
         try:
             ip = ipaddress.ip_address(ip_str)
             return ip.is_private
-        except:
-            return False
+        except: return False
 
+    # ---------------------------------------------------------
+    # Feature 1: Lateral Movement
+    # ---------------------------------------------------------
     def analyze_lateral_movement(self):
-        """ 
-        [Lateral Movement Detection]
-        1. USB Artifacts
-        2. RDP Drive Redirection
-        3. Admin Share Drops (v2.4 Logic)
-        """
         print("[*] Phase 1: Analyzing Lateral Movement (Admin Shares, RDP, USB)...")
         hits = []
-
         if self.pandora_df is not None:
             # 1. USB Artifacts
             usb_ghosts = self.pandora_df.filter(pl.col("ParentPath").str.contains(r"(?i)^[D-Z]:\\")).select(["Ghost_FileName", "ParentPath", "Risk_Tag"])
@@ -102,10 +116,7 @@ class PlutosGate:
                 ]))
             
             # 2. RDP Drive Redirection
-            rdp_ghosts = self.pandora_df.filter(
-                pl.col("ParentPath").str.to_lowercase().str.contains("tsclient")
-            ).select(["Ghost_FileName", "ParentPath", "Risk_Tag"])
-            
+            rdp_ghosts = self.pandora_df.filter(pl.col("ParentPath").str.to_lowercase().str.contains("tsclient")).select(["Ghost_FileName", "ParentPath", "Risk_Tag"])
             if rdp_ghosts.height > 0:
                 hits.append(rdp_ghosts.with_columns([
                     pl.lit("RDP_DRIVE_REDIRECTION").alias("Plutos_Verdict"),
@@ -119,7 +130,6 @@ class PlutosGate:
                 pl.col("ParentPath").str.contains(admin_share_pattern) &
                 pl.col("Ghost_FileName").str.contains(r"(?i)\.(exe|bat|ps1|7z|zip|dll)$")
             ).select(["Ghost_FileName", "ParentPath", "Risk_Tag"])
-            
             if lateral_drops.height > 0:
                 hits.append(lateral_drops.with_columns([
                     pl.lit("LATERAL_TOOL_DROP").alias("Plutos_Verdict"),
@@ -130,162 +140,253 @@ class PlutosGate:
         if hits: return pl.concat(hits)
         return None
 
-    def analyze_network_traffic(self):
-        """
-        SRUM (Heat Analysis) & EVTX (Connection Scoring)
-        """
-        print("[*] Phase 2: Analyzing Network Thermodynamics (SRUM & EVTX)...")
+    # ---------------------------------------------------------
+    # Feature 2: Network Thermodynamics (Vectorized)
+    # ---------------------------------------------------------
+    def analyze_network_traffic_fast(self):
+        print("[*] Phase 2: Analyzing Network Thermodynamics (Vectorized)...")
         
-        # --- Part A: SRUM Thermodynamics (v2.5 Updated) ---
-        df_srum = self._load_csv("*SRUM*Network*.csv")
-        srum_hits = []
-        
-        if df_srum is not None:
-            # カラム名の揺らぎ吸収
-            app_col = next((c for c in ["ExeInfo", "AppId", "AppName", "Process"] if c in df_srum.columns), None)
-            sent_col = next((c for c in ["BytesSent", "Bytes_Sent"] if c in df_srum.columns), None)
-            recv_col = next((c for c in ["BytesReceived", "Bytes_Received"] if c in df_srum.columns), None)
-            time_col = next((c for c in ["Timestamp", "Time", "Date"] if c in df_srum.columns), "Timestamp") # Default name if missing
+        # --- SRUM Analysis ---
+        # Usageログをピンポイント指定
+        lf_srum = self._load_csv("*SRUM*NetworkUsage*.csv") 
+        srum_res = None
+        evtx_res = None
 
-            if app_col and sent_col and recv_col:
-                print("   -> Calculating SRUM Heat Scores...")
-                
-                BURST_THRESHOLD = 50 * 1024 * 1024 # 50MB
-                HIGH_HEAT_PROCESSES = {
-                    "mstsc.exe": 50, "svchost.exe": 20, "7z.exe": 80, "rar.exe": 80, 
-                    "curl.exe": 60, "wget.exe": 60, "powershell.exe": 40, "psexesvc.exe": 90,
-                    "chrome.exe": 10, "msedge.exe": 10
-                }
-                
-                # Polarsでの処理（高速化のため式で処理）
-                df_srum = df_srum.with_columns([
-                    pl.col(sent_col).cast(pl.Float64, strict=False).fill_null(0).alias("_sent"),
-                    pl.col(recv_col).cast(pl.Float64, strict=False).fill_null(0).alias("_recv"),
-                    pl.col(app_col).str.to_lowercase().alias("_app_lower")
-                ])
-                
-                # フィルタリング: バースト または 危険なプロセス
-                burst_mask = (pl.col("_sent") > BURST_THRESHOLD) | (pl.col("_recv") > BURST_THRESHOLD)
-                proc_pattern = "|".join([re.escape(p) for p in HIGH_HEAT_PROCESSES.keys()])
-                proc_mask = pl.col("_app_lower").str.contains(proc_pattern)
-                
-                candidates = df_srum.filter(burst_mask | proc_mask)
-                
-                for row in candidates.iter_rows(named=True):
-                    sent = int(row["_sent"])
-                    recv = int(row["_recv"])
-                    app_full = str(row.get(app_col, ""))
-                    app_name = app_full.lower().split('\\')[-1]
-                    
-                    heat_score = 0
-                    tags = []
-                    
-                    # Volume Heat
-                    if sent > BURST_THRESHOLD:
-                        heat_score += 60
-                        tags.append(f"DATA_EXFIL_BURST({sent//1024//1024}MB)")
-                    elif recv > BURST_THRESHOLD:
-                        heat_score += 40
-                        tags.append(f"DOWNLOAD_BURST({recv//1024//1024}MB)")
-                        
-                    # Process Heat
-                    base_score = 0
-                    for p_name, score in HIGH_HEAT_PROCESSES.items():
-                        if p_name in app_name:
-                            base_score = score
-                            break
-                    
-                    if base_score > 0:
-                        heat_score += base_score
-                        # バーストしていればボーナス
-                        if (sent + recv) > (10 * 1024 * 1024):
-                            heat_score += 20
-                            
-                    if heat_score >= 80:
-                        verdict = "HIGH_HEAT_ACTIVITY"
-                        if "mstsc" in app_name: verdict = "RDP_TUNNEL_SUSPICION"
-                        
-                        srum_hits.append({
-                            "Timestamp": row.get(time_col),
-                            "Plutos_Verdict": verdict,
-                            "Remote_IP": "Unknown (SRUM)",
-                            "Process": app_full,
-                            "Detail": f"Sent: {sent:,} / Recv: {recv:,} | Score: {heat_score}",
-                            "Tags": ", ".join(tags),
-                            "Heat_Score": heat_score
-                        })
+        if lf_srum is not None:
+            schema = lf_srum.collect_schema().names()
+            app_col = next((c for c in ["ExeInfo", "AppId", "AppName", "Process"] if c in schema), "AppId")
+            sent_col = next((c for c in ["BytesSent", "Bytes_Sent"] if c in schema), "BytesSent")
+            recv_col = next((c for c in ["BytesReceived", "Bytes_Received"] if c in schema), "BytesReceived")
+            time_col = next((c for c in ["Timestamp", "Time", "Date"] if c in schema), "Timestamp")
+
+            if sent_col not in schema:
+                print(f"[!] SRUM Skip: 'BytesSent' column not found in {schema}")
             else:
-                print(f"[!] SRUM Analysis skipped: Missing columns in {df_srum.columns}")
+                score_expr = pl.lit(0)
+                for proc in self.high_heat_processes:
+                    score_add = 50 if proc in ["mstsc.exe", "psexesvc.exe"] else 20
+                    score_expr = score_expr + pl.when(pl.col(app_col).str.to_lowercase().str.contains(proc)).then(score_add).otherwise(0)
 
-        # --- Part B: Event Logs (EVTX) ---
-        evtx_hits = []
-        if self.evtx_df is not None:
-            cols = self.evtx_df.columns
-            dst_ip_col = next((c for c in ["DestinationIp", "DestAddress", "DestinationAddress"] if c in cols), None)
-            dst_port_col = next((c for c in ["DestinationPort", "DestPort"] if c in cols), None)
-            img_col = next((c for c in ["Image", "Application", "ProcessName"] if c in cols), "Unknown_App")
-            time_col = next((c for c in ["TimeCreated", "Timestamp_UTC"] if c in cols), "Time")
+                score_expr = score_expr + \
+                             pl.when(pl.col(sent_col).cast(pl.Float64, strict=False).fill_null(0) > self.burst_threshold).then(60).otherwise(0) + \
+                             pl.when(pl.col(recv_col).cast(pl.Float64, strict=False).fill_null(0) > self.burst_threshold).then(40).otherwise(0)
 
-            if dst_ip_col:
-                noise_ips = ["0.0.0.0", "255.255.255.255"]
-                multicast = r"^(224\.|239\.|ff02::)"
-                
-                net_evts = self.evtx_df.filter(
-                    ~pl.col(dst_ip_col).is_in(noise_ips) &
-                    ~pl.col(dst_ip_col).str.contains(multicast)
+                q_srum = (
+                    lf_srum
+                    .with_columns([
+                        score_expr.alias("Heat_Score"),
+                        (pl.col(sent_col).cast(pl.Float64, strict=False).fill_null(0) + pl.col(recv_col).cast(pl.Float64, strict=False).fill_null(0)).alias("Total_Bytes")
+                    ])
+                    .filter(pl.col("Heat_Score") >= 60)
+                    .select([
+                        pl.col(time_col).alias("Timestamp"),
+                        pl.col(app_col).alias("Process"),
+                        pl.col(sent_col).cast(pl.Int64),
+                        pl.col(recv_col).cast(pl.Int64),
+                        pl.col("Heat_Score"),
+                        pl.lit("SRUM_HIGH_HEAT").alias("Plutos_Verdict"),
+                        pl.lit("Unknown (SRUM)").alias("Remote_IP"),
+                        pl.lit("").alias("Remote_Port"),
+                        pl.lit("Potential Exfiltration/Tunneling").alias("Tags")
+                    ])
                 )
-                if self.start_time: net_evts = net_evts.filter(pl.col(time_col) >= self.start_time)
-                if self.end_time:   net_evts = net_evts.filter(pl.col(time_col) <= self.end_time)
+                try: srum_res = q_srum.collect()
+                except Exception as e: print(f"[!] SRUM Analysis Error: {e}")
 
-                if net_evts.height > 0:
-                    for row in net_evts.iter_rows(named=True):
-                        ip = str(row.get(dst_ip_col, ""))
-                        proc = str(row.get(img_col, "")).lower()
-                        proc_name = proc.split("\\")[-1]
-                        
-                        heat_score = 0
-                        tags = []
-                        
-                        is_internal = self._is_internal_ip(ip)
-                        
-                        # 1. Lateral Tool
-                        if proc_name in self.lateral_processes:
-                            heat_score += 40
-                            tags.append("LATERAL_TOOL")
-                        
-                        # 2. Connection Context
-                        if is_internal:
-                            port = str(row.get(dst_port_col, ""))
-                            if port in ["445", "135", "5985", "5986"]:
-                                heat_score += 30
-                                tags.append("SMB_WMI_WINRM")
-                                if proc_name in self.lateral_processes:
-                                    heat_score += 20
-                        
-                        # 3. External C2
-                        if not is_internal and proc_name in ["powershell.exe", "cmd.exe", "rundll32.exe", "regsvr32.exe"]:
-                            heat_score += 60
-                            tags.append("POTENTIAL_C2")
-                            
-                        # Verdict
-                        if heat_score >= 60:
-                            verdict = "LATERAL_MOVEMENT" if is_internal else "C2_COMMUNICATION"
-                            # [Fix] Remote_Port を明示的に含める
-                            evtx_hits.append({
-                                "Timestamp": row.get(time_col),
-                                "Process": proc,
-                                "Remote_IP": ip,
-                                "Remote_Port": row.get(dst_port_col),
-                                "Plutos_Verdict": verdict,
-                                "Tags": ", ".join(tags),
-                                "Heat_Score": heat_score,
-                                "Detail": f"Port: {row.get(dst_port_col)} | Tags: {tags}"
-                            })
+        # --- EVTX Analysis ---
+        lf_evtx = self._load_csv("*EvtxECmd*.csv")
+        if lf_evtx is not None:
+            schema = lf_evtx.collect_schema().names()
+            if "EventId" in schema:
+                dst_ip_col = next((c for c in ["DestinationIp", "DestAddress", "DestinationAddress"] if c in schema), None)
+                dst_port_col = next((c for c in ["DestinationPort", "DestPort"] if c in schema), None)
+                img_col = next((c for c in ["Image", "Application", "ProcessName"] if c in schema), "Unknown_App")
+                time_col = next((c for c in ["TimeCreated", "Timestamp_UTC"] if c in schema), "Time")
 
-        df_srum_res = pl.DataFrame(srum_hits) if srum_hits else None
-        df_evtx_res = pl.DataFrame(evtx_hits) if evtx_hits else None
+                if dst_ip_col and dst_port_col:
+                    noise_ips = ["0.0.0.0", "255.255.255.255", "127.0.0.1", "::1"]
+                    target_eids = [3, 5156, 5154, 5157]
+                    
+                    q_evtx = (
+                        lf_evtx
+                        .filter(pl.col("EventId").cast(pl.Int64, strict=False).is_in(target_eids))
+                        .filter(~pl.col(dst_ip_col).is_in(noise_ips))
+                        .filter(~pl.col(dst_ip_col).str.starts_with("224."))
+                        .filter(~pl.col(dst_ip_col).str.starts_with("ff02"))
+                        .with_columns([
+                            pl.col(time_col).alias("Timestamp"),
+                            pl.col(img_col).alias("Process"),
+                            pl.col(dst_ip_col).alias("Remote_IP"),
+                            pl.col(dst_port_col).cast(pl.Utf8).alias("Remote_Port"),
+                            pl.lit(0).alias("Heat_Score")
+                        ])
+                    )
+                    try: 
+                        evtx_raw = q_evtx.collect()
+                        if evtx_raw.height > 0:
+                            evtx_res = evtx_raw.with_columns([
+                                pl.lit("NETWORK_CONNECTION").alias("Plutos_Verdict"),
+                                pl.lit("EVTX_TRACE").alias("Tags")
+                            ]).select(["Timestamp", "Process", "Remote_IP", "Remote_Port", "Heat_Score", "Plutos_Verdict", "Tags"])
+                    except Exception as e: print(f"[!] EVTX Analysis Error: {e}")
+
+        return srum_res, evtx_res
+
+    # ---------------------------------------------------------
+    # Feature 3: Exfiltration Correlation
+    # ---------------------------------------------------------
+    def analyze_exfiltration_correlation(self):
+        print("[*] Phase 3: Correlating Exfiltration (SRUM x Browser x MFT)...")
         
-        return df_srum_res, df_evtx_res
+        lf_srum = self._load_csv("*SRUM*NetworkUsage*.csv")
+        # [FIX] History読み込みを厳格化（ClioGet出力に限定）
+        lf_hist = self._load_csv("Browser_History*.csv") 
+        # [FIX] MFT読み込みを厳格化（Bootセクタ誤爆回避）
+        lf_mft  = self._load_csv("*$MFT_Output.csv")     
+
+        if lf_srum is None or lf_hist is None or lf_mft is None:
+            print("[-] Missing artifacts for correlation.")
+            return None
+
+        # Preprocessing
+        def parse_date(col_name):
+            return pl.coalesce([
+                pl.col(col_name).str.to_datetime("%Y-%m-%d %H:%M:%S", strict=False),
+                pl.col(col_name).str.to_datetime("%Y-%m-%d %H:%M:%S%.f", strict=False),
+                pl.col(col_name).str.to_datetime("%m/%d/%Y %H:%M:%S", strict=False)
+            ])
+
+        # SRUM setup
+        srum_cols = lf_srum.collect_schema().names()
+        srum_time = next((c for c in ["Timestamp", "Time", "Date"] if c in srum_cols), "Timestamp")
+        srum_sent = next((c for c in ["BytesSent", "Bytes_Sent"] if c in srum_cols), "BytesSent")
+        srum_app  = next((c for c in ["ExeInfo", "AppId", "AppName", "Process"] if c in srum_cols), "AppId")
+
+        if srum_sent not in srum_cols:
+            print(f"[!] Correlation Skip: 'BytesSent' missing in SRUM.")
+            return None
+
+        q_srum = (
+            lf_srum
+            .filter(pl.col(srum_sent).cast(pl.Float64, strict=False) > 10_000_000) # 10MB
+            .with_columns(parse_date(srum_time).alias("Timestamp_DT"))
+            .drop_nulls("Timestamp_DT")
+            .select([pl.col("Timestamp_DT").alias("Timestamp"), pl.col(srum_app).alias("AppId"), pl.col(srum_sent).alias("BytesSent")])
+            .sort("Timestamp")
+        )
+
+        # Browser
+        hist_cols = lf_hist.collect_schema().names()
+        hist_url = next((c for c in ["URL", "ValueData", "Url"] if c in hist_cols), "URL")
+        hist_time = next((c for c in ["VisitTime", "LastWriteTimestamp"] if c in hist_cols), "VisitTime")
+        hist_title = next((c for c in ["Title", "ValueName"] if c in hist_cols), "Title")
+
+        domain_pattern = "|".join(self.exfil_domains)
+        keyword_pattern = "|".join(self.suspicious_url_keywords)
+        combined_pattern = f"(?i)({domain_pattern}|{keyword_pattern})"
+
+        q_hist = (
+            lf_hist
+            .filter(pl.col(hist_url).str.contains(combined_pattern))
+            .with_columns(parse_date(hist_time).alias("VisitTime_DT"))
+            .drop_nulls("VisitTime_DT")
+            .select([pl.col("VisitTime_DT").alias("VisitTime"), pl.col(hist_url).alias("URL"), pl.col(hist_title).alias("Title")])
+            .sort("VisitTime")
+        )
+
+        # MFT
+        mft_cols = lf_mft.collect_schema().names()
+        mft_name = next((c for c in ["FileName", "Name"] if c in mft_cols), "FileName")
+        mft_time = next((c for c in ["StandardInformation_Created", "Created0x10", "SI_Created"] if c in mft_cols), "Created0x10")
+        mft_size = next((c for c in ["FileSize", "Size"] if c in mft_cols), "FileSize")
+
+        q_mft = (
+            lf_mft
+            .filter(pl.col(mft_name).str.contains(r"(?i)\.(zip|rar|7z|xlsx|docx|pdf|csv)$"))
+            .with_columns(parse_date(mft_time).alias("Created_DT"))
+            .drop_nulls("Created_DT")
+            .select([pl.col("Created_DT").alias("FileCreated"), pl.col(mft_name).alias("FileName"), pl.col(mft_size).alias("FileSize")])
+            .sort("FileCreated")
+        )
+
+        try:
+            joined = q_srum.join_asof(q_hist, left_on="Timestamp", right_on="VisitTime", strategy="backward", tolerance="1h")
+            final_q = joined.join_asof(q_mft, left_on="Timestamp", right_on="FileCreated", strategy="backward", tolerance="2h")
+
+            result = final_q.filter(
+                pl.col("URL").is_not_null() | pl.col("FileName").is_not_null()
+            ).collect()
+            return result
+        except Exception as e:
+            print(f"[!] Correlation Error: {e}")
+            return None
+
+    # ---------------------------------------------------------
+    # Feature 4: Email Hunter
+    # ---------------------------------------------------------
+    def analyze_email_artifacts(self):
+        print("[*] Phase 4: Hunting Email Artifacts (PST/OST & Webmail Actions)...")
+        hits = []
+
+        # A. Local Email Archives
+        lf_mft = self._load_csv("*$MFT_Output.csv") # ここも修正
+        if lf_mft is not None:
+            cols = lf_mft.collect_schema().names()
+            mft_path = next((c for c in ["ParentPath", "ParentFolder"] if c in cols), "ParentPath")
+            mft_name = next((c for c in ["FileName", "Name"] if c in cols), "FileName")
+            mft_time = next((c for c in ["StandardInformation_Created", "Created0x10"] if c in cols), "Created0x10")
+
+            q_mail_files = (
+                lf_mft
+                .filter(pl.col(mft_name).str.contains(r"(?i)\.(pst|ost|eml|msg)$"))
+                .filter(~pl.col(mft_path).str.to_lowercase().str.contains(r"appdata|microsoft\\outlook"))
+                .select([
+                    pl.col(mft_time).alias("Timestamp"),
+                    pl.col(mft_name).alias("Artifact"),
+                    pl.col(mft_path).alias("Path"),
+                    pl.lit("SUSPICIOUS_EMAIL_ARCHIVE").alias("Verdict")
+                ])
+            )
+            try:
+                res_files = q_mail_files.collect()
+                if res_files.height > 0:
+                    hits.append(res_files)
+            except: pass
+
+        # B. Webmail Actions
+        lf_hist = self._load_csv("Browser_History*.csv") # 修正
+        if lf_hist is not None:
+            cols = lf_hist.collect_schema().names()
+            h_url = next((c for c in ["URL", "ValueData"] if c in cols), "URL")
+            h_title = next((c for c in ["Title", "ValueName"] if c in cols), "Title")
+            h_time = next((c for c in ["VisitTime", "LastWriteTimestamp"] if c in cols), "VisitTime")
+
+            mail_domains = r"mail\.google|outlook\.live|yahoo|proton"
+            action_keywords = "|".join(self.mail_action_keywords)
+            
+            q_webmail = (
+                lf_hist
+                .filter(pl.col(h_url).str.contains(mail_domains))
+                .filter(
+                    pl.col(h_url).str.contains(f"(?i)({action_keywords})") | 
+                    pl.col(h_title).str.contains(f"(?i)({action_keywords})")
+                )
+                .select([
+                    pl.col(h_time).alias("Timestamp"),
+                    pl.col(h_title).alias("Artifact"),
+                    pl.col(h_url).alias("Path"),
+                    pl.lit("WEBMAIL_SEND_ACTIVITY").alias("Verdict")
+                ])
+            )
+            try:
+                res_web = q_webmail.collect()
+                if res_web.height > 0:
+                    hits.append(res_web)
+            except: pass
+
+        if hits:
+            return pl.concat(hits)
+        return None
 
 def main(argv=None):
     print_logo()
@@ -300,26 +401,32 @@ def main(argv=None):
 
     gate = PlutosGate(args.dir, args.pandora, args.start, args.end)
 
-    # 1. Lateral Movement (Pandora based)
+    # 1. Lateral Movement
     df_lat = gate.analyze_lateral_movement()
     if df_lat is not None and df_lat.height > 0:
         print(f"[!] LATERAL MOVEMENT / EXFIL DETECTED: {df_lat.height} artifacts.")
         df_lat.write_csv(args.out)
-    else:
-        print("[-] No file-based lateral movement traces found.")
 
-    # 2. Network Traffic (SRUM & EVTX)
-    df_srum, df_evtx = gate.analyze_network_traffic()
-    
+    # 2. Network Traffic (Fast SRUM & EVTX)
+    df_srum, df_evtx = gate.analyze_network_traffic_fast()
     if df_srum is not None and df_srum.height > 0:
         print(f"[!] SRUM HIGH HEAT EVENTS: {df_srum.height} records.")
         df_srum.write_csv(args.out.replace(".csv", "_srum.csv"))
-
     if df_evtx is not None and df_evtx.height > 0:
         print(f"[!] NETWORK CONNECTIONS TRACED: {df_evtx.height} events.")
         df_evtx.write_csv(args.net_out)
-    else:
-        print("[-] No significant network anomalies found.")
+
+    # 3. Exfiltration Correlation
+    df_exfil = gate.analyze_exfiltration_correlation()
+    if df_exfil is not None and df_exfil.height > 0:
+        print(f"[!] EXFILTRATION CORRELATION FOUND: {df_exfil.height} events")
+        df_exfil.write_csv(args.out.replace(".csv", "_exfil_correlation.csv"))
+
+    # 4. Email Hunter
+    df_mail = gate.analyze_email_artifacts()
+    if df_mail is not None and df_mail.height > 0:
+        print(f"[!] SUSPICIOUS EMAIL ACTIVITY DETECTED: {df_mail.height} events")
+        df_mail.write_csv(args.out.replace(".csv", "_email_hunt.csv"))
 
 if __name__ == "__main__":
     main()

@@ -48,10 +48,13 @@ class LachesisRenderer:
             # 4. Technical Findings (Pass origin_stories for LNK enrichment)
             self._write_technical_findings(f, analyzer, dfs_for_ioc, origin_stories) 
             
-            # 5. Detection Statistics
+            # 5. Network & Lateral Movement (Plutos)
+            self._write_plutos_section(f, dfs_for_ioc)
+            
+            # 6. Detection Statistics
             self._write_detection_statistics(f, analysis_data["medium_events"], analyzer, dfs_for_ioc)
 
-            # 6. Conclusions & Recommendations
+            # 7. Conclusions & Recommendations
             self._write_recommendations(f, analyzer)
             
             # 7. Appendix (IOCs)
@@ -633,8 +636,232 @@ class LachesisRenderer:
              f.write("| 🔥 **P0** | **Analyze Suspicious Chrome Extension (.crx)** | 24 Hours | 永続化バックドアとして機能している可能性が高いため、リバースエンジニアリングが必要です。 |\n")
         
         f.write("| 🔥 **P0** | **Network Log Analysis (C2 Identification)** | 24 Hours | 外部通信先IPを特定し、ファイアウォールでブロックしてください。 |\n")
-        f.write("| 🟡 P1 | **Lateral Movement Check** | 1 Week | 同一ネットワーク内の他端末への横展開を調査してください。 |\n")
-        f.write("| 🟡 P1 | **Credential Reset** | Immediate | 侵害された端末で使用された全ユーザーのパスワードリセットを推奨します。 |\n\n")
+        f.write("| 🟡 P1 | **Lateral Movement Check** | 1 Week | 同一ネットワーク内の他端末への横展開を調査してください。 |\\n")
+        f.write("| 🟡 P1 | **Credential Reset** | Immediate | 侵害された端末で使用された全ユーザーのパスワードリセットを推奨します。 |\\n\\n")
+
+    # ==========================================
+    # [NEW] Plutos Section Methods (v3.0 Critical Integration)
+    # ==========================================
+    def _write_plutos_section(self, f, dfs):
+        """PlutosGateの結果をレポートに描画 - 全ソース統合版"""
+        f.write("\n## 🌐 5. 重要ネットワークおよび持ち出し痕跡 (Critical Network & Exfiltration)\n")
+        f.write("PlutosGateエンジンにより検出された、**データの持ち出し**、**メールデータの不正コピー**、および**高リスクな外部通信**の痕跡。\n\n")
+
+        # 1. Critical Table (SRUM + Exfil + Email統合)
+        f.write("### 🚨 5.1 検出された重大な脅威 (Critical Threats Detected)\n")
+        critical_table = self._generate_critical_threats_table(dfs)
+        f.write(critical_table + "\n\n")
+
+        # 2. ネットワーク図 (Mermaid)
+        net_map = self._generate_critical_network_map(dfs)
+        if net_map:
+            f.write("### 🗺️ 5.2 ネットワーク相関図 (Critical Activity Map)\n")
+            f.write(net_map + "\n\n")
+            f.write("> **Note:** 赤色は外部への持ち出しやC2通信、オレンジ色は内部への横展開を示唆します。\n\n")
+        else:
+            f.write("※ 視覚化可能なネットワークトポロジーは検出されませんでした。\n\n")
+        
+        f.write("---\n")
+
+    def _generate_critical_network_map(self, dfs):
+        """PlutosのSRUM/EVTXデータから、脅威度の高い通信のみを抽出してMermaid化"""
+        srum_df = dfs.get("Plutos_Srum")
+        net_df = dfs.get("Plutos_Network")
+        
+        mermaid = ["graph LR", "    H[TARGET HOST]"]
+        
+        # [FIX] Mermaid正しい構文: classDef でスタイル定義、class で適用
+        mermaid.append("    classDef exfil fill:darkred,stroke:red,color:white,stroke-width:2px;")
+        mermaid.append("    classDef lateral fill:darkorange,stroke:orange,color:white,stroke-width:2px;")
+        mermaid.append("    classDef host fill:darkgreen,stroke:lime,color:white,stroke-width:4px;")
+        mermaid.append("    class H host;")
+        
+        nodes = set()
+        edges = []
+
+        # A. SRUMからの持ち出しノード (Unknown IP -> Cloud Upload)
+        if srum_df is not None and srum_df.height > 0:
+            try:
+                if "Heat_Score" in srum_df.columns:
+                    high_heat = srum_df.filter(pl.col("Heat_Score").cast(pl.Int64, strict=False) >= 60)
+                    for row in high_heat.iter_rows(named=True):
+                        proc = str(row.get("Process", "Unknown")).split("\\")[-1]
+                        node_id = "External_Cloud"
+                        if node_id not in nodes:
+                            mermaid.append(f"    {node_id}([ExternalCloud])")
+                            nodes.add(node_id)
+                        
+                        edge_key = f"{proc}_to_{node_id}"
+                        if edge_key not in edges:
+                            mermaid.append(f"    H --|{proc}|--> {node_id}")
+                            mermaid.append(f"    class {node_id} exfil;")
+                            edges.append(edge_key)
+            except: pass
+
+        # B. ネットワーク詳細ログからのC2/Lateralノード
+        if net_df is not None and net_df.height > 0:
+            try:
+                if "Plutos_Verdict" in net_df.columns:
+                    critical_net = net_df.filter(
+                        pl.col("Plutos_Verdict").str.contains(r"(?i)LATERAL|C2|RDP")
+                    ).head(10)
+                    
+                    for row in critical_net.iter_rows(named=True):
+                        remote = row.get("Remote_IP", "Unknown")
+                        if remote in ["-", "", "127.0.0.1", "::1", "Unknown"]: continue
+                        
+                        node_id = remote.replace(".", "_").replace(":", "_")
+                        proc = str(row.get("Process", "")).split("\\")[-1]
+                        verdict = str(row.get("Plutos_Verdict", ""))
+                        
+                        if node_id not in nodes:
+                            mermaid.append(f"    {node_id}([{remote}])")
+                            nodes.add(node_id)
+                        
+                        if "LATERAL" in verdict:
+                            mermaid.append(f"    H ==|{proc}|==> {node_id}")
+                            mermaid.append(f"    class {node_id} lateral;")
+                        else:
+                            mermaid.append(f"    H --|{proc}|--> {node_id}")
+                            mermaid.append(f"    class {node_id} exfil;")
+            except: pass
+
+        if len(mermaid) <= 5: return ""
+        return "```mermaid\n" + "\n".join(mermaid) + "\n```"
+
+    def _generate_critical_threats_table(self, dfs):
+        """SRUM, Exfil, Emailの全データから「致命的」なものだけを統合したテーブルを生成"""
+        rows = []
+        
+        # 1. SRUM High Heat (通信バースト)
+        srum_df = dfs.get("Plutos_Srum")
+        if srum_df is not None and srum_df.height > 0:
+            try:
+                if "Heat_Score" in srum_df.columns:
+                    df = srum_df.filter(pl.col("Heat_Score").cast(pl.Int64, strict=False) >= 60)
+                    for r in df.iter_rows(named=True):
+                        ts = str(r.get("Timestamp", "")).split(".")[0]
+                        proc = str(r.get("Process", "")).split("\\")[-1]
+                        sent_bytes = r.get("BytesSent", 0)
+                        sent_mb = int(sent_bytes) // 1024 // 1024 if sent_bytes else 0
+                        
+                        rows.append({
+                            "Time": ts,
+                            "Icon": "📤",
+                            "Verdict": f"**{r.get('Plutos_Verdict', 'HIGH_HEAT')}**",
+                            "Details": f"Proc: {proc}<br>Sent: {sent_mb} MB",
+                            "Ref": "See: Plutos_Report_srum.csv"
+                        })
+            except: pass
+
+        # 2. Exfil Correlation (持ち出し確定)
+        exfil_df = dfs.get("Plutos_Exfil")
+        if exfil_df is not None and exfil_df.height > 0:
+            try:
+                for r in exfil_df.iter_rows(named=True):
+                    ts = str(r.get("Timestamp", "")).split(".")[0]
+                    fname = r.get("FileName", "Unknown")
+                    url = str(r.get("URL", ""))[:30] + "..." if r.get("URL") else ""
+                    
+                    rows.append({
+                        "Time": ts,
+                        "Icon": "🚨",
+                        "Verdict": "**EXFIL_CORRELATION**",
+                        "Details": f"File: **{fname}**<br>URL: {url}",
+                        "Ref": "See: Plutos_Report_exfil_correlation.csv"
+                    })
+            except: pass
+
+        # 3. Email Hunter (パス単位集約)
+        email_df = dfs.get("Plutos_Email")
+        if email_df is not None and email_df.height > 0:
+            try:
+                # パス（場所）ごとに集約
+                if "Path" in email_df.columns:
+                    grouped = email_df.group_by("Path").agg([
+                        pl.count("Artifact").alias("Count"),
+                        pl.min("Timestamp").alias("Start"),
+                        pl.max("Timestamp").alias("End"),
+                        pl.first("Verdict").alias("Verdict_Sample")
+                    ])
+
+                    for r in grouped.iter_rows(named=True):
+                        start = str(r["Start"]).split(".")[0]
+                        end = str(r["End"]).split(".")[0]
+                        count = r["Count"]
+                        path = r["Path"]
+                        verdict = str(r["Verdict_Sample"] or "")
+                        
+                        # 時間表記の調整 (単発ならStartのみ)
+                        time_str = start if start == end else f"{start} - {end}"
+                        
+                        icon = "📦"
+                        if "Dropbox" in str(path) or "Removable" in str(path):
+                            icon = "💀"
+                            verdict += " (CLOUD/USB)"
+
+                        rows.append({
+                            "Time": time_str,
+                            "Icon": icon,
+                            "Verdict": f"**{verdict}** (Aggregated)",
+                            "Details": f"Found **{count}** emails/artifacts<br>Location: {path}",
+                            "Ref": "Details in: Plutos_Report_email_hunt.csv"
+                        })
+                else:
+                    # Pathカラムがない場合は従来通り個別表示
+                    for r in email_df.iter_rows(named=True):
+                        ts = str(r.get("Timestamp", "")).split(".")[0]
+                        artifact = r.get("Artifact", "")
+                        path = str(r.get("Path", ""))
+                        
+                        icon = "📦"
+                        verdict = str(r.get("Verdict", ""))
+                        if "Dropbox" in path or "Removable" in path:
+                            icon = "💀"
+                            verdict += " (CLOUD/USB)"
+                        
+                        rows.append({
+                            "Time": ts,
+                            "Icon": icon,
+                            "Verdict": f"**{verdict}**",
+                            "Details": f"Artifact: {artifact}<br>Path: {path}",
+                            "Ref": "DATA_THEFT"
+                        })
+            except: pass
+
+        # 4. Legacy Plutos_Main fallback
+        main_df = dfs.get("Plutos_Main")
+        if main_df is not None and main_df.height > 0 and not rows:
+            try:
+                for r in main_df.iter_rows(named=True):
+                    ts = str(r.get("Timestamp", "")).split(".")[0]
+                    verdict = r.get("Plutos_Verdict", "")
+                    proc = str(r.get("Process", "")).split("\\")[-1] if r.get("Process") else ""
+                    
+                    icon = "⚠️"
+                    if "EXFIL" in str(verdict): icon = "📤"
+                    elif "LATERAL" in str(verdict): icon = "🦀"
+                    
+                    rows.append({
+                        "Time": ts,
+                        "Icon": icon,
+                        "Verdict": f"**{verdict}**",
+                        "Details": f"Proc: {proc}",
+                        "Ref": r.get("Tags", "")
+                    })
+            except: pass
+
+        if not rows: return "不審なネットワーク活動や横展開の痕跡は検出されませんでした。\n"
+
+        # 時間順にソートしてMarkdown化
+        rows.sort(key=lambda x: x["Time"])
+        
+        md = "| Time / Period | Verdict | Summary | Reference |\n|---|---|---|---|\n"
+        for row in rows:
+            ref = row.get('Ref', row.get('Tags', ''))
+            md += f"| {row['Time']} | {row['Icon']} {row['Verdict']} | {row['Details']} | {ref} |\n"
+            
+        return md
 
     def _write_ioc_appendix_unified(self, f, analyzer):
         t = self.txt

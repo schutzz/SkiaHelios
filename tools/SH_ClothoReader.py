@@ -33,6 +33,34 @@ class ClothoReader:
 
         self.dfs['AION'] = self._safe_load(getattr(self.args, 'aion', None))
         
+        # ==========================================
+        # [NEW] PlutosGate v3.4 Artifacts Loader
+        # ==========================================
+        out_dir = Path(getattr(self.args, 'outdir', '.'))
+        
+        # 定義: 読み込むべきPlutosファイルのマッピング
+        plutos_files = {
+            'Plutos_Main': "Plutos_Report.csv",
+            'Plutos_Srum': "Plutos_Report_srum.csv",
+            'Plutos_Exfil': "Plutos_Report_exfil_correlation.csv",
+            'Plutos_Email': "Plutos_Report_email_hunt.csv",
+            'Plutos_Network': "Plutos_Network_Details.csv"
+        }
+
+        for key, filename in plutos_files.items():
+            file_path = out_dir / filename
+            # ファイルがなければパターン検索も試す
+            if not file_path.exists():
+                candidates = list(out_dir.glob(f"*{filename.replace('.csv', '')}*.csv"))
+                if candidates:
+                    file_path = candidates[0]
+            
+            if file_path.exists():
+                print(f"    [+] Loading {key}: {file_path.name}")
+                self.dfs[key] = self._safe_load(str(file_path))
+            else:
+                self.dfs[key] = None
+        
         # [CRITICAL FIX] Load ALL supporting artifacts
         self._load_supporting_artifacts()
 
