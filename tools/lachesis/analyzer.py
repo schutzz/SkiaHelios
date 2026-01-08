@@ -298,22 +298,77 @@ class LachesisAnalyzer:
                         except: score = 0
                         if score >= 50:
                             name = row.get("Target_FileName")
-                            # [v5.6.3] Prefer Entry_Location for Chain Scavenger Context Hex (Robust Match)
-                            entry_loc = ""
-                            for k, v in row.items():
-                                if "entry" in k.lower() and "location" in k.lower():
-                                    entry_loc = v
-                                    break
-                            path_str = entry_loc or row.get("Full_Path", "")
+                            tags = str(row.get("AION_Tags", ""))
                             
+                            # [v5.6.3] SAM_SCAVENGE Special Handling
+                            # User Request: Only show "elevated score" items (RID Recovered).
+                            # Guide others to CSV.
+                            is_scavenge = "SAM_SCAVENGE" in tags
+                            low_confidence_filtered = False
+                            
+                            if is_scavenge:
+                                if score < 900:
+                                    # Skip low confidence items
+                                    continue
+                                
+                                # Format High Confidence Scavenge
+                                rid = row.get("RID", "")
+                                sid = row.get("SID", "")
+                                hash_st = row.get("Hash_State", "")
+                                hash_can = row.get("Hash_Detail", "") # [v5.6.3] Full Hash Candidate for Offline Cracking
+                                
+                                # Prefer Entry_Location for Chain Scavenger Context Hex (Robust Match)
+                                entry_loc = ""
+                                for k, v in row.items():
+                                    if "entry" in k.lower() and "location" in k.lower():
+                                        entry_loc = v
+                                        break
+                                
+                                # Construct rich path info
+                                # e.g. "SID: ... | RID: ... | Hash: Candidate (HEX)"
+                                path_parts = []
+                                if sid: path_parts.append(f"SID: {sid}")
+                                if rid: path_parts.append(f"RID: {rid}")
+                                
+                                if hash_can and hash_st == "Hash Candidate":
+                                     path_parts.append(f"Hash: {hash_can} (NTLM Candidate)")
+                                elif hash_st: 
+                                     path_parts.append(f"Hash: {hash_st}")
+                                     
+                                if entry_loc and "HEX" in entry_loc:
+                                    # Extract HEX part from Entry_Location if present
+                                    import re
+                                    hex_match = re.search(r'\[HEX: ([a-fA-F0-9\.]+)\]', entry_loc)
+                                    if hex_match:
+                                        path_parts.append(f"[HEX: {hex_match.group(1)}]")
+                                
+                                # Check for Group Link note in Entry_Location
+                                if entry_loc and "Linked to Group" in entry_loc:
+                                     start = entry_loc.find("[Linked to Group")
+                                     end = entry_loc.find("]", start)
+                                     if start != -1 and end != -1:
+                                         link_note = entry_loc[start:end+1]
+                                         path_parts.append(link_note)
+                                
+                                path_str = " | ".join(path_parts) if path_parts else (entry_loc or row.get("Full_Path", ""))
+
+                            else:
+                                # Standard Logic
+                                path_str = row.get("Entry_Location") or row.get("Full_Path", "")
+
                             if not self.intel.is_noise(name, path_str):
                                 self._add_unique_visual_ioc({
                                     "Type": "PERSISTENCE", "Value": name, "Path": path_str, "Note": "Persist", 
                                     "Time": str(row.get("Last_Executed_Time", "")), "Reason": "Persistence",
-                                    "Tag": str(row.get("AION_Tags", "")),
+                                    "Tag": tags,
                                     "Score": score
                                 })
                 except: pass
+                
+                # Check if we should add a "Refer to CSV" note?
+                # This is hard to do per-row. We rely on the fact that if Scavenge ran,
+                # there's likely output. The high-score ones are shown.
+                # The user request implies filtering is the main action.
 
     def _extract_visual_iocs_from_events(self, events):
         re_ip = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b')

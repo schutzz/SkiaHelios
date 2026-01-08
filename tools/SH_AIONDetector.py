@@ -338,7 +338,11 @@ class AIONEngine:
                         "File_Hash_SHA256": "N/A",
                         "File_Hash_SHA1": "N/A",
                         "Threat_Score": r.get("Threat_Score", 400),
-                        "Threat_Tag": r.get("Threat_Tag", "NEW_USER_CREATED")
+                        "Threat_Tag": r.get("Threat_Tag", "NEW_USER_CREATED"),
+                        "RID": r.get("RID", ""),
+                        "SID": r.get("SID", ""),
+                        "Hash_State": r.get("Hash_State", ""),
+                        "Hash_Detail": r.get("Hash_Detail", "")
                     })
             except Exception as e:
                 print(f"    [-] ChainScavenger error: {e}")
@@ -362,6 +366,11 @@ class AIONEngine:
         print("    -> Applying Themis Laws (Noise Filter & Threat Scoring)...")
         lf = pl.DataFrame(raw_list).lazy()
         cols = lf.collect_schema().names()
+        
+        # [v5.6.3] Ensure optional columns exist (RID/SID/Hash_State)
+        for opt_col in ["RID", "SID", "Hash_State"]:
+            if opt_col not in cols:
+                lf = lf.with_columns(pl.lit("").alias(opt_col))
         
         # 1. Apply Threat Scoring (Overrides AION_Score logic)
         lf = self.loader.apply_threat_scoring(lf)
@@ -387,8 +396,11 @@ class AIONEngine:
             pl.col("Full_Path"),
             pl.col("File_Hash_SHA256"),
             pl.col("File_Hash_SHA1"),
-            pl.col("Threat_Score"), # <--- 必須っス！
-            pl.col("Threat_Tag")    # <--- 念のため残すっス
+            pl.col("Threat_Score"), 
+            pl.col("Threat_Tag"),
+            pl.col("RID"),
+            pl.col("SID"),
+            pl.col("Hash_State")
         ])
 
         df_result = lf.sort("AION_Score", descending=True).unique(subset=["Full_Path", "Entry_Location"]).collect()

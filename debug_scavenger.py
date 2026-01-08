@@ -1,33 +1,36 @@
 
-import sys
-import traceback
+import polars as pl
 from pathlib import Path
+from tools.SH_ChainScavenger import ChainScavenger
 
-# Add tools to path
-sys.path.append(str(Path(".").resolve()))
+RAW_DIR = r"C:\Temp\dfir-case1\kape"
+SCAVENGER_OUT = "debug_scavenger_rid.csv"
 
-try:
-    from tools.SH_ChainScavenger import ChainScavenger
-except ImportError:
-    print("[-] ImportError: Could not import ChainScavenger")
-    sys.exit(1)
+def debug_scavenge():
+    if not Path(RAW_DIR).exists():
+        print(f"[-] Raw dir not found: {RAW_DIR}")
+        return
 
-def test_scavenge():
-    raw_dir = r"C:\Temp\dfir-case1\kape"
-    print(f"[*] Testing ChainScavenger on {raw_dir}")
+    print(f"[*] Starting Debug Scavenge on: {RAW_DIR}")
+    scavenger = ChainScavenger(RAW_DIR)
     
-    try:
-        scavenger = ChainScavenger(raw_dir)
-        is_dirty, reason = scavenger.is_dirty_hive()
-        print(f"[*] Dirty? {is_dirty} ({reason})")
-        
-        results = scavenger.scavenge()
-        print(f"[*] Scavenge completed. Found {len(results)} items.")
+    # Force run
+    results = scavenger.scavenge()
+    
+    if results:
+        print(f"\n[+] Found {len(results)} entries.")
         for r in results:
-            print(f"    - {r['Username']} (Hex: {r.get('Context_Hex', 'N/A')})")
+            print(f"    User: {r['Username']}")
+            print(f"    RID: {r.get('RID')} | SID: {r.get('SID')}")
+            print(f"    Hash State: {r.get('Hash_State')}")
+            print(f"    Context: {r.get('Context_Hex')}")
+            print("-" * 40)
             
-    except Exception:
-        traceback.print_exc()
+        df = pl.DataFrame(results)
+        df.write_csv(SCAVENGER_OUT)
+        print(f"[+] Output saved to {SCAVENGER_OUT}")
+    else:
+        print("[-] No results found.")
 
 if __name__ == "__main__":
-    test_scavenge()
+    debug_scavenge()

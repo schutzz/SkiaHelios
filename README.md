@@ -173,11 +173,13 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
 
 ## 📜 Complete Changelog
 
-### v5.6.3 - The Deep Carver (Context & Binary Reporting) 🦁
+### v5.6.3 - The Deep Carver (Context Carving & Binary Reporting) 🦁
 * **[Chain Scavenger]** **Context Carving:** Now extracts and reports the **Binary Context (Hex Dump)** surrounding carved user accounts. Helps analysts distinguish valid accounts from random data patterns.
-* **[Chain Scavenger]** **Relaxed Scavenging:** Regex engine now supports short usernames (3+ chars) to capture elusive accounts like `Gues`, `Adm`, etc.
-* **[Lachesis]** **Binary Context Display:** The Analyst Note in the report now natively renders the **Binary Hex Dump** of the carved artifact (`[HEX: 720065...]`).
-* **[Hercules]** **Automated Impact Analysis:** Automatically tags `SAM_SCAVENGE` events with `[LOG_WIPE_INDUCED_MISSING_EVENT]` to guide analysts to check for evidence wiping correlations.
+* **[Chain Scavenger]** **NTLM Hash Extraction:** Heuristically extracts 16-byte **Hash Candidates (Hex Strings)** from F-Key/V-Key structures near the user account, enabling offline password cracking.
+* **[Chain Scavenger]** **Automatic Group Linking:** Identifies account privileges by mapping discovered RID (e.g., 544) to known groups (`[Linked to Group: Administrators]`).
+* **[Chain Scavenger]** **Precision Boost:** Context window expanded to **±16KB (32KB total)** to successfully recover fragmented usernames like `pCrat` -> `pCrat...`.
+* **[Hercules]** **Automated Impact Analysis:** Automatically tags `SAM_SCAVENGE` events with `[LOG_WIPE_INDUCED_MISSING_USER_EVENT]` to explicitly confirm that 4720/4732 logs are missing due to wiping.
+* **[Lachesis]** **Binary Context Display:** The Analyst Note in the report now natively renders the **Binary Hex Dump** and **Detailed SID/RID/Hash** info.
 
 ### v5.6 - The Dirty Hive Hunter & Justice Refined
 * **[Chain Scavenger]** **Dirty Hive Hunter (v1.0):** Binary-level SAM hive analyzer that triggers when RECmd fails. Extracts hidden user accounts from corrupted/dirty hives using "Anchor Search" and "Context Carving".
