@@ -49,6 +49,7 @@ def main():
     group.add_argument("--deep", type=str, help="[Mode] Deep Dive: Path to Pivot_Config.json")
     
     parser.add_argument("--docx", action="store_true", help="Generate Docx Report")
+    parser.add_argument("--lang", default=None, choices=["jp", "en"], help="Report Language (jp/en)")
     args = parser.parse_args()
 
     # --- Interactive Mode ---
@@ -59,6 +60,13 @@ def main():
     if not args.case:
         print("\n[?] Input Case Name (e.g. Case1_WebSrv):")
         args.case = input("    > ").strip()
+    
+    # --- Language Selection (Default: Japanese) ---
+    if not hasattr(args, 'lang') or not args.lang:
+        print("\n[?] Report Language? (jp=日本語 / en=English) [Default: jp]:")
+        lang_input = input("    > ").strip().lower()
+        args.lang = "en" if lang_input == "en" else "jp"
+        print(f"    [+] Language set to: {args.lang.upper()}")
 
     kape_csv_dir = Path(args.dir)
     if not kape_csv_dir.exists():
@@ -155,10 +163,38 @@ def main():
     # [2] Chaos (Timeline) -> CSV Dir
     run_stage(["python", "-m", "tools.SH_ChaosGrasp", "--dir", str(kape_csv_dir), "--out", str(master_timeline)], "CHAOS")
 
-    # [3] Chronos
-    chronos_cmd = ["python", "-m", "tools.SH_ChronosSift", "-f", str(master_timeline), "-o", str(time_anomalies)]
-    if args.legacy: chronos_cmd.append("--legacy")
-    run_stage(chronos_cmd, "CHRONOS")
+    # [3] Chronos (Icarus Paradox 統合版)
+    # Master_Timeline.csv をメインの比較対象(MFT相当)として使用
+    chronos_cmd = [
+        "python", "-m", "tools.SH_ChronosSift", 
+        "-f", str(master_timeline), 
+        "-o", str(time_anomalies)
+    ]
+
+    # Icarus用のアーティファクトをKAPE CSVディレクトリから自動探索
+    # ShimCache (AppCompatCache) - ExclusionListを除外
+    shim_files = list(kape_csv_dir.glob("**/*AppCompatCache.csv"))
+    shim_files = [f for f in shim_files if "Exclusion" not in f.name]  # ExclusionListを除外
+    if shim_files:
+        chronos_cmd.extend(["--shimcache", str(shim_files[0])])
+        print(f"    [+] Icarus: ShimCache detected -> {shim_files[0].name}")
+
+    # Prefetch
+    pf_files = list(kape_csv_dir.glob("**/*Prefetch.csv"))
+    if pf_files:
+        chronos_cmd.extend(["--prefetch", str(pf_files[0])])
+        print(f"    [+] Icarus: Prefetch detected -> {pf_files[0].name}")
+
+    # USN Journal (通常 $J として出力されるもの)
+    usn_files = list(kape_csv_dir.glob("**/*$J*.csv"))
+    if usn_files:
+        chronos_cmd.extend(["--usnj", str(usn_files[0])])
+        print(f"    [+] Icarus: USN Journal detected -> {usn_files[0].name}")
+
+    if args.legacy: 
+        chronos_cmd.append("--legacy")
+
+    run_stage(chronos_cmd, "CHRONOS (with ICARUS Paradox)")
 
     # [4] Pandora Pass 1
     pandora_cmd_1 = [
@@ -225,7 +261,8 @@ def main():
         "--chronos", str(time_anomalies),
         "--aion", str(aion_out),
         "--kape", str(kape_raw_dir), # Raw (History用)
-        "--csv", str(kape_csv_dir)   # CSV (Registry/EventLog用)
+        "--csv", str(kape_csv_dir),   # CSV (Registry/EventLog用)
+        "--lang", args.lang           # Language
     ]
     if args.docx: hekate_cmd.append("--docx")
     

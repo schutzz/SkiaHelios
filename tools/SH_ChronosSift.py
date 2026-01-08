@@ -3,20 +3,25 @@ import argparse
 import sys
 import os
 import re
+from typing import Optional, List
+
+# 既存モジュール
 from tools.SH_ThemisLoader import ThemisLoader
 from tools.SH_HestiaCensorship import Hestia
+# 新規統合: イカロス・パラドックス
+from tools.SH_IcarusParadox import IcarusParadox, IcarusConfig, IcarusDirection
 
 # ============================================================
-#  SH_ChronosSift v3.2 [Time Lord Edition]
-#  Mission: Detect Time Anomalies & Contextualize Time Changes
-#  Update: Fix ColumnNotFoundError & Logic Order for VBoxService.
+#  SH_ChronosSift v3.3 [Paradox Edition]
+#  Mission: Timeline Anomaly Detection & Artifact Cross-Check
+#  Update: Integrated Icarus Engine for Time Paradox Detection.
 # ============================================================
 
 def print_logo():
     print(r"""
        (   )
       (  :  )   < CHRONOS SIFT >
-       (   )     v3.2 - Time Lord
+       (   )     v3.3 - Paradox
         " "      "Time bows to the Law."
     """)
 
@@ -24,6 +29,16 @@ class ChronosEngine:
     def __init__(self, tolerance=10.0):
         self.tolerance = tolerance
         self.hestia = Hestia()
+        
+        # Icarus設定 (Chronosの許容誤差と同期)
+        # PrefetchやUSNの矛盾検知感度をここで定義します
+        icarus_config = IcarusConfig(
+            tolerance_sec=tolerance,
+            melting_point_sec=60.0, # 60秒以上の乖離で「溶解(矛盾)」と判定
+            prefetch_direction=IcarusDirection.BIDIRECTIONAL,
+            usn_direction=IcarusDirection.BIDIRECTIONAL
+        )
+        self.icarus = IcarusParadox(icarus_config)
         
         # 正規の時刻同期プロセス定義 (プロセス名: [許可されるパスの正規表現リスト])
         self.ALLOWED_TIME_AGENTS = {
@@ -220,7 +235,7 @@ class ChronosEngine:
 
     def analyze(self, args):
         mode_str = "LEGACY" if args.legacy else "STANDARD"
-        print(f"[*] Chronos v3.2 awakening... Mode: {mode_str}")
+        print(f"[*] Chronos v3.3 awakening... Mode: {mode_str}")
         try:
             loader = ThemisLoader(["rules/triage_rules.yaml", "rules/sigma_file_event.yaml"])
             lf = pl.scan_csv(args.file, ignore_errors=True, infer_schema_length=0)
@@ -228,7 +243,7 @@ class ChronosEngine:
             # 1. カラム保証 (Threat_Tag作成)
             lf = self._ensure_columns(lf)
 
-            # 2. USN ロールバック検知
+            # 2. USN ロールバック検知 (単体)
             lf = self._detect_usn_rollback(lf)
             
             # 3. Themis脅威スコアリング (ルールベース)
@@ -239,7 +254,6 @@ class ChronosEngine:
                 lf = lf.with_columns(pl.col("Threat_Score").cast(pl.Int64, strict=False).fill_null(0))
 
             # 4. [CRITICAL] コンテキスト判定 (Themisの結果を上書き修正)
-            # これで VBoxService=0点 に訂正される
             lf = self._detect_system_time_context(lf)
 
             # 5. 安全フィルタ (ノイズ削除)
@@ -295,28 +309,130 @@ class ChronosEngine:
                     pl.col("Threat_Score").alias("Chronos_Score")
                 ])
 
+            # --- Icarus Integration Start ---
+            icarus_results = []
+            if args.prefetch or args.shimcache or args.usnj:
+                print("\n[*] Invoking Icarus Paradox Engine...")
+                
+                # 1. Prefetch Analysis
+                if args.prefetch:
+                    try:
+                        pf_lf = pl.scan_csv(args.prefetch, ignore_errors=True, infer_schema_length=0)
+                        # lf (MFT) vs pf_lf (Prefetch)
+                        res = self.icarus.inspect_prefetch(lf, pf_lf)
+                        icarus_results.append(res)
+                    except Exception as e:
+                        print(f"    [!] Prefetch Analysis Failed: {e}")
+
+                # 2. ShimCache Analysis
+                if args.shimcache:
+                    try:
+                        sc_lf = pl.scan_csv(args.shimcache, ignore_errors=True, infer_schema_length=0)
+                        res = self.icarus.inspect_shimcache(lf, sc_lf)
+                        icarus_results.append(res)
+                    except Exception as e:
+                        print(f"    [!] ShimCache Analysis Failed: {e}")
+
+            # --- Results Consolidation ---
             df = lf.filter(pl.col("Chronos_Score") > 0).collect()
 
+            # Icarusの結果があれば結合
+            if icarus_results:
+                print("    -> Merging Icarus Anomalies into Timeline...")
+                
+                # dfにKey_Fullがない場合は作成 (結合キー)
+                if "Key_Full" not in df.columns:
+                    df = df.with_columns(
+                        (pl.col("ParentPath").fill_null("").str.to_lowercase().str.replace_all("/", "\\").str.strip_chars("\\") + "\\" + 
+                         pl.col("FileName").fill_null("").str.to_lowercase()).alias("Key_Full")
+                    )
+
+                for res_lazy in icarus_results:
+                    res_df = res_lazy.collect()
+                    if res_df.height > 0:
+                        print(f"       [!] Icarus detected {res_df.height} paradoxes!")
+                        
+                        # Icarusの結果を結合 (Left Joinで既存のタイムラインに情報を付与)
+                        df = df.join(
+                            res_df.select(["Key_Full", "Anomaly_Type", "Icarus_Score"]),
+                            on="Key_Full",
+                            how="left"
+                        )
+                        
+                        # スコアとタグを更新
+                        df = df.with_columns([
+                            (pl.col("Chronos_Score").fill_null(0) + pl.col("Icarus_Score").fill_null(0)).alias("New_Score"),
+                            pl.concat_str([
+                                pl.col("Threat_Tag"), 
+                                pl.lit(" "), 
+                                pl.col("Anomaly_Type").fill_null("")
+                            ]).str.strip_chars().alias("New_Tag")
+                        ])
+                        
+                        # カラム整理
+                        df = df.drop(["Chronos_Score", "Threat_Tag", "Icarus_Score", "Anomaly_Type"])
+                        df = df.rename({"New_Score": "Chronos_Score", "New_Tag": "Threat_Tag"})
+
+            # USNJ Targeted Scan (Late Binding)
+            # MFT解析で「怪しい」と判断されたファイルのみを対象にUSNを掘る
+            if args.usnj:
+                # スコアが高いファイルを抽出
+                suspects = []
+                if df.height > 0:
+                     suspects = df.filter(pl.col("Chronos_Score") > 50)["Key_Full"].to_list()
+                
+                if suspects:
+                    try:
+                        usn_lf = pl.scan_csv(args.usnj, ignore_errors=True, infer_schema_length=0)
+                        # 再度 MFTのLazyFrameを作成して渡す
+                        mft_reuse = df.lazy()
+                        usn_res = self.icarus.inspect_usnj_safe(mft_reuse, usn_lf, suspects).collect()
+                        
+                        if usn_res.height > 0:
+                            print(f"       [!] Icarus (USN) confirmed {usn_res.height} paradoxes!")
+                            df = df.join(
+                                usn_res.select(["Key_Full", "Anomaly_Type", "Icarus_Score"]),
+                                on="Key_Full", how="left"
+                            )
+                            df = df.with_columns([
+                                (pl.col("Chronos_Score") + pl.col("Icarus_Score").fill_null(0)).alias("Chronos_Score"),
+                                pl.concat_str([pl.col("Threat_Tag"), pl.lit(" "), pl.col("Anomaly_Type").fill_null("")]).alias("Threat_Tag")
+                            ]).drop(["Icarus_Score", "Anomaly_Type"])
+                    except Exception as e:
+                        print(f"    [!] USN Analysis Failed: {e}")
+
+            # --- Output Finalization ---
             if "ParentPath" in df.columns:
                 df = self.hestia.apply_censorship(df, "ParentPath", "FileName")
             
             if df.height > 0:
                 df = df.sort("Chronos_Score", descending=True)
                 df.write_csv(args.out)
-                print(f"[+] Anomalies detected: {df.height}")
+                print(f"[+] Analysis Complete. Anomalies: {df.height} -> Saved to {args.out}")
             else:
                 print("\n[*] Clean: No significant anomalies found.")
-                pl.DataFrame({"Chronos_Score": [], "Anomaly_Time": [], "FileName": [], "ParentPath": []}).write_csv(args.out)
+                # 空の結果を出力
+                pl.DataFrame({
+                    "Chronos_Score": [], "Anomaly_Time": [], "FileName": [], "ParentPath": [], "Threat_Tag": []
+                }).write_csv(args.out)
 
         except Exception as e:
-            print(f"[!] Chronos Error: {e}")
+            print(f"[!] Chronos Critical Failure: {e}")
             import traceback
             traceback.print_exc()
 
 def main(argv=None):
     print_logo()
     parser = argparse.ArgumentParser()
-    parser.add_argument("-f", "--file", required=True)
+    # Main Input
+    parser.add_argument("-f", "--file", required=True, help="Main MFT CSV file")
+    
+    # Icarus Inputs
+    parser.add_argument("--prefetch", help="Prefetch CSV for Icarus Paradox check")
+    parser.add_argument("--shimcache", help="ShimCache CSV for Icarus Paradox check")
+    parser.add_argument("--usnj", help="USN Journal CSV for Icarus Paradox check")
+    
+    # Options
     parser.add_argument("-o", "--out", default="Chronos_Results.csv")
     parser.add_argument("-t", "--tolerance", type=float, default=10.0)
     parser.add_argument("--legacy", action="store_true")
