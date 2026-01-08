@@ -1,11 +1,11 @@
-# SkiaHelios v5.3 - The Causality & Justice Engine (Operation Dragnet)
+# SkiaHelios v5.4 - The Causality & Justice Engine (Icarus Flight / Paradox Breaker)
 
 ![SkiaHelios CI](https://github.com/schutzz/SkiaHelios/actions/workflows/test.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
 ![Polars](https://img.shields.io/badge/Engine-Polars_0.20%2B-orange?logo=polars)
 ![Mermaid](https://img.shields.io/badge/Report-Mermaid_Visuals-ff69b4?logo=mermaid)
 ![Tests](https://img.shields.io/badge/Tests-55%2F55_PASS-brightgreen)
-![Status](https://img.shields.io/badge/Status-Perfection_Achieved-gold)
+![Status](https://img.shields.io/badge/Status-Paradox_Breaker-gold)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey)
 
 > *"From Shadows to Sun. From Data to Gold."*
@@ -13,9 +13,9 @@
 
 **SkiaHelios** is a high-resolution, modular DFIR (Digital Forensics & Incident Response) framework built for **speed**, **causality**, **origin tracing**, and **visual narrative**.
 
-Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** orchestrated by **"Hekate"**, supported by **"Chronos" (The Time Lord)**, **"Hercules" (The Referee)**, and the newly integrated **"PlutosGate" (Network Hunter)** to detect advanced network threats like **Lateral Movement**, **Data Exfiltration**, and **Time Paradoxes**.
+Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** orchestrated by **"Hekate"**, supported by **"Chronos" (The Time Lord feat. Icarus Paradox)**, **"Hercules" (The Referee)**, and the newly integrated **"PlutosGate" (Network Hunter)** to detect advanced network threats like **Lateral Movement**, **Data Exfiltration**, **Time Paradoxes**, and **Cross-Artifact Tampering**.
 
-**Current Version:** v5.3 (Operation Dragnet / Network Thermodynamics / Exfil Hunter / Email Forensics)
+**Current Version:** v5.4 (Icarus Flight / Paradox Breaker / Cross-Artifact Paradox Detection)
 
 ---
 
@@ -40,7 +40,7 @@ graph TD
     Rules[("📜 Themis Rules\n(YAML)")] -.-> Atropos
     
     %% Specialized Modules
-    Atropos --> Chronos["⏳ Chronos\n(Time Lord)\nDetects Time Paradox"]:::judge
+    Atropos --> Chronos["⏳ Chronos\n(Time Lord)\nfeat. Icarus Paradox"]:::judge
     Atropos --> Pandora["📦 Pandora\n(File & Masquerade)"]:::engine
     Atropos --> Hercules["⚖️ Hercules\n(Justice V3 Engine)\nLNK & CRX Hunter"]:::judge
     Atropos --> Aion["👁️ AION\n(Persistence)"]:::engine
@@ -95,15 +95,20 @@ graph TD
     * **Renderer:** Generates the "Grimoire" (Markdown) with **Mermaid Visuals** and **Aggregated Critical Tables**.
 
 ### 2. The Judges (Chronos, Hercules & Plutos) - **[UPDATED]**
-* **Chronos (The Time Lord):**
+* **Chronos (The Time Lord) feat. Icarus Paradox v1.4:**
     * **Time Paradox Detection:** Detects system clock rollbacks (Timestomping) by analyzing USN Journal physical offsets versus timestamps.
     * **Rollback Calculation:** Precise calculation of the time delta (e.g., `-35997 seconds`).
+* **[NEW] Icarus Paradox Engine Integration:**
+    * **Cross-Artifact Correlation:** 単一の MFT 分析を超え、Prefetch、ShimCache ($AppCompatCache$)、および USN Journal との整合性をクロスチェック。
+    * **Sun & Wax Logic:** MFT を「不変の太陽 (Sun)」、他アーティファクトを「蝋の翼 (Wax)」と定義し、MFT 作成日時より前に存在する実行記録（パラドックス）を特定。
+    * **Robust Column Mapping:** パースツールによるカラム名の揺らぎ（`FileName` vs `Name`、`Created0x10` vs `Timestamp_UTC`）を自動検知して正規化するエイリアシング機能を実装。
+    * **Match Quality Scoring:** パス情報が欠落した照合において、信頼度に応じた減点スコアリングを実装。
 * **Hercules (The Referee - Justice V3):**
     * **The Linker (Phase 4):** Correlates file artifacts (LNK, Prefetch) with **Browser History** to confirm "Execution Success" vs "Attempt".
     * **Deep LNK Analysis:** Extracts Target Paths and Arguments to detect **PowerShell encoding**, **Hidden Windows**, and **Script Chaining**.
     * **Anti-Forensics Detection:** Detects usage of wiping tools (e.g., `BCWipe`, `CCleaner`) and flags missing artifacts as "Deleted Evidence".
     * **Masquerade Killer:** Instantly identifies `.crx` backdoors hiding in non-browser directories.
-* **PlutosGate (The Network Hunter - v3.4):** **[NEW]**
+* **PlutosGate (The Network Hunter - v3.4):**
     * **Network Thermodynamics:** Uses **SRUM** to calculate "Heat Scores" based on data burst volume (BytesSent/Received).
     * **Exfil Correlation (The Trinity):** Correlates **SRUM (Heat)**, **Browser History (URL)**, and **MFT (File Creation)** to prove data theft intent.
     * **Email Hunter:** Detects `.pst/.ost` theft (Local MFT scan) and "Sent" actions in Webmail (History scan).
@@ -168,7 +173,16 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
 
 ## 📜 Complete Changelog
 
-### v5.3 - Operation Dragnet (Current) ⚡
+### v5.4 - Icarus Flight (Current) ☀️
+* **[Chronos]** **Icarus Paradox Engine:** 実装完了。アーティファクト間（MFT vs Prefetch/ShimCache/USNJ）の時系列矛盾を検知し、Timestomp を物理的に立証。
+* **[Chronos]** **Targeted USNJ Scan:** 疑わしいファイル（Suspects）に絞った効率的な USN レコード追跡ロジックを導入。
+* **[HeliosConsole]** **Auto-Detection:** ShimCache/Prefetch/USN ファイルを KAPE CSV ディレクトリから自動検出し、Chronos に渡す機能を追加。
+* **[Lachesis]** **Bilingual Report (EN/JP):** Grimoire レポートの日英両対応を実装。対話プロンプトまたは `--lang en/jp` で言語選択可能。
+* **[Fix]** **Dynamic Column Aliasing:** USN パース結果に `FileName` カラムが存在しない場合に `Name` カラムを自動使用するフォールバック処理を追加。
+* **[Fix]** **Flexible Timestamp Detection:** MFT (`Created0x10`) と Master_Timeline (`Timestamp_UTC`) の両方に対応する柔軟なタイムスタンプカラム検出を実装。
+* **[Fix]** **Match Quality Scoring:** パス情報が欠落した USN レコードの照合において、信頼度に応じた減点スコアリング（Match Quality）を実装。
+
+### v5.3 - Operation Dragnet ⚡
 * **[PlutosGate]** **Exfil Hunter:** Implemented "Trinity Correlation" (SRUM x Browser x MFT) to detect confirmed data exfiltration events (e.g., zipping and uploading source code).
 * **[PlutosGate]** **Email Forensics:** Added detection logic for `.pst/.ost` file theft and webmail "Sent" activities.
 * **[Lachesis]** **Safe-Mode Visuals:** Fixed Mermaid Lexical Errors by switching to Named Colors (#ffffff -> white).
@@ -251,6 +265,7 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
 * [x] **v5.0:** **"Nemesis" (Automated Remediation Suggestion)**
 * [x] **v5.2:** **Operation Perfection (Smart Reporting & Statistical Accuracy)**
 * [x] **v5.3:** **Operation Dragnet (PlutosGate v3.4 - Network Thermodynamics & Exfil Hunter)**
+* [x] **v5.4:** **Icarus Flight (Cross-Artifact Paradox Detection / Paradox Breaker)**
 * [ ] **v5.x:** **LLM Integration** (Auto-summarization of Technical Findings) - *Planned*
 
 ---
