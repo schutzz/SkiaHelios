@@ -2,7 +2,7 @@ import json
 import re
 import polars as pl
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from tools.lachesis.intel import TEXT_RES
 
 class LachesisRenderer:
@@ -11,6 +11,10 @@ class LachesisRenderer:
         self.lang = lang if lang in TEXT_RES else "jp"
         self.txt = TEXT_RES[self.lang]
         self.hostname = "Unknown"
+        self.headers = {
+            "en": {"exec": "Executive Summary", "chain": "Critical Chain", "iocs": "Key Indicators"},
+            "jp": {"exec": "エグゼクティブ・サマリー", "chain": "攻撃フロー図 (Attack Flow)", "iocs": "重要指標 (Key Indicators)"}
+        }
 
     def render_report(self, analysis_data, analyzer, enricher, origin_stories, dfs_for_ioc, metadata):
         self.hostname = metadata.get("hostname", "Unknown")
@@ -20,14 +24,13 @@ class LachesisRenderer:
             self._write_header(f, metadata["os_info"], metadata["primary_user"], analysis_data["time_range"])
             self._write_toc(f)
             self._write_executive_summary_visual(f, analyzer, analysis_data["time_range"])
-            self._write_initial_access_vector(f, analyzer.pivot_seeds, origin_stories)
+            self._write_technical_findings(f, analyzer, dfs_for_ioc) 
             self._write_timeline_visual(f, analysis_data["phases"], analyzer, enricher)
-            self._write_technical_findings(f, analyzer, dfs_for_ioc) # Pass dfs for run_count lookup
             self._write_detection_statistics(f, analysis_data["medium_events"], analyzer, dfs_for_ioc)
             self._write_ioc_appendix_unified(f, analyzer) 
-            f.write(f"\n---\n*Report woven by SkiaHelios (The Triad v4.50)* 🦁")
+            f.write(f"\n---\n*Report woven by SkiaHelios (The Triad v5.0)* 🦁")
         
-        print(f"[*] Lachesis v4.50 is weaving the report into {out_file}...")
+        print(f"[*] Lachesis v5.0 is weaving the report into {out_file}...")
 
     def _write_header(self, f, os_info, primary_user, time_range):
         t = self.txt
@@ -44,12 +47,10 @@ class LachesisRenderer:
         t = self.txt
         f.write("## 📚 Table of Contents\n")
         f.write(f"- [{t['h1_exec']}](#{self._make_anchor(t['h1_exec'])})\n")
-        f.write(f"- [{t['h1_origin']}](#{self._make_anchor(t['h1_origin'])})\n")
-        f.write(f"- [{t['h1_time']}](#{self._make_anchor(t['h1_time'])})\n")
         f.write(f"- [{t['h1_tech']}](#{self._make_anchor(t['h1_tech'])})\n")
+        f.write(f"- [{t['h1_time']}](#{self._make_anchor(t['h1_time'])})\n")
         f.write(f"- [{t['h1_stats']}](#{self._make_anchor(t['h1_stats'])})\n")
         f.write(f"- [{t['h1_app']}](#{self._make_anchor(t['h1_app'])})\n")
-        f.write(f"- [Pivot Config (Deep Dive Targets)](#deep-dive-recommendation)\n")
         f.write("\n---\n\n")
 
     def _make_anchor(self, text):
@@ -60,17 +61,18 @@ class LachesisRenderer:
         f.write(f"## {t['h1_exec']}\n")
         
         visual_iocs = analyzer.visual_iocs
-        has_paradox = any("TIME_PARADOX" in str(ioc.get('Type', '')) for ioc in visual_iocs)
+        has_time_change = any("SYSTEM_TIME" in str(ioc.get('Tag', '')) or "4616" in str(ioc.get('Value', '')) for ioc in visual_iocs)
+        has_paradox = any("TIME_PARADOX" in str(ioc.get('Type', '')) for ioc in visual_iocs) or has_time_change
         has_masquerade = any("MASQUERADE" in str(ioc.get('Type', '')) for ioc in visual_iocs)
         has_phishing = any("PHISHING" in str(ioc.get('Type', '')) for ioc in visual_iocs)
         has_timestomp = any("TIMESTOMP" in str(ioc.get('Type', '')) for ioc in visual_iocs)
+        has_anti = any("ANTI_FORENSICS" in str(ioc.get('Type', '')) for ioc in visual_iocs)
         
-        if "Unknown" in time_range and visual_iocs:
-            # Logic to refine range is also in analyzer, but for summary text generation we use what's passed
-            pass 
-        
-        if has_paradox or has_masquerade:
-            conclusion = f"**結論:**\n{time_range} の期間において、端末 {self.hostname} に対する **高度な隠蔽工作を伴う重大な侵害活動** を確認しました。\n"
+        conclusion = ""
+        if has_paradox:
+            conclusion = f"**結論:**\n{time_range} の期間において、**システム時間の改ざん（Time Manipulation）を含む高度な隠蔽工作** が確認されました。\n"
+        elif has_masquerade or has_anti:
+            conclusion = f"**結論:**\n{time_range} の期間において、端末 {self.hostname} に対する **証拠隠滅・偽装を伴う重大な侵害活動** を確認しました。\n"
         elif visual_iocs:
             conclusion = f"**結論:**\n{time_range} の期間において、端末 {self.hostname} に対する **CRITICAL レベルの侵害活動** を確認しました。\n"
         else:
@@ -81,545 +83,338 @@ class LachesisRenderer:
         attack_methods = []
         if has_phishing: attack_methods.append("フィッシング（LNK）による初期侵入")
         if has_masquerade: attack_methods.append("偽装ファイル設置（Masquerading）")
-        if has_timestomp: attack_methods.append("タイムスタンプ偽装（Timestomp）")
-        if has_paradox: attack_methods.append("**システム時間巻き戻し（System Rollback）**")
+        if has_paradox: attack_methods.append("**システム時間変更（System Time Change）**")
+        if has_timestomp: attack_methods.append("ファイルタイムスタンプ偽装（Timestomp）")
+        if has_anti: attack_methods.append("痕跡ワイピング（Anti-Forensics）")
         
-        if not attack_methods:
-            attack_methods = ["不審なアクティビティ"]
+        if not attack_methods: attack_methods = ["不審なアクティビティ"]
             
         f.write(f"**主な攻撃手口:** {', '.join(attack_methods)}。\n\n")
-        f.write("> **Deep Dive 推奨:** 詳細な調査を行う際は、添付の `Pivot_Config.json` に記載された **CRITICAL_PHISHING** ターゲット群から開始してください。\n\n")
-        f.write("\n### 🏹 Attack Timeline Flow (Critical Chain)\n")
-        if visual_iocs: f.write(self._generate_mermaid(analyzer, visual_iocs))
-        else: f.write("(No sufficient visual indicators found)\n")
-
-        f.write("\n### 💎 Key Indicators (Critical Only)\n")
-        if visual_iocs:
-            f.write("| Time | Type | Value (File/IP) | **Target / Action** | **Score** | Path |\n|---|---|---|---|---|---| ignore\n")
-            
-            sorted_iocs = sorted(visual_iocs, key=lambda x: x.get("Time", "9999"))
-            seen = set()
-            for ioc in sorted_iocs:
-                val = ioc['Value']
-                if val in seen: continue
-                seen.add(val)
-                
-                target_action = "-"
-                extra = ioc.get("Extra", {})
-                ioc_type = str(ioc.get("Type", "")).upper()
-                reason = str(ioc.get("Reason", "")).upper()
-                
-                if ".lnk" in val.lower() or "PHISHING" in ioc_type:
-                    tgt = extra.get("Target_Path", "")
-                    if not tgt and "Target:" in ioc.get("Value", ""):
-                        tgt = ioc.get("Value", "").split("Target:")[-1].strip()
-                    target_action = f"🎯 {tgt[:40] + '..' if len(tgt)>40 else tgt}" if tgt else "Target Unknown"
-                
-                elif "TIMESTOMP" in ioc_type:
-                    if extra.get("Execution") == True or "EXECUTION" in reason or "EXECUTION_CONFIRMED" in ioc_type:
-                        target_action = "✅ 実行痕跡あり"
-                    else:
-                        target_action = "⚠️ 実行痕跡なし (存在のみ)"
-                
-                elif "ANTI_FORENSICS" in ioc_type:
-                    target_action = "🗑️ 証拠隠滅 (Wiping)"
-                    
-                elif "MASQUERADE" in ioc_type:
-                    target_action = "🎭 偽装ファイル設置"
-                    
-                else:
-                    target_action = ioc.get("Reason", "-")
-
-                score = ioc.get("Score", 0)
-                path_short = (ioc['Path'][:30] + '..') if len(ioc['Path']) > 30 else ioc['Path']
-                
-                f.write(f"| {str(ioc.get('Time','')).replace('T',' ')[:19]} | **{ioc['Type']}** | `{ioc['Value']}` | {target_action} | {score} | `{path_short}` |\n")
-        else: f.write("No critical IOCs automatically detected.\n")
+        
+        f.write(self._render_mermaid_vertical_clustered(visual_iocs))
+        f.write(self._render_key_indicators(visual_iocs))
         f.write("\n")
 
-    def _write_initial_access_vector(self, f, pivot_seeds, origin_stories):
-        t = self.txt
-        f.write(f"## {t['h1_origin']}\n")
-        phishing_lnks = [s for s in pivot_seeds if "PHISHING" in s.get("Reason", "")]
-        drop_items = [s for s in pivot_seeds if "DROP" in s.get("Reason", "") and "PHISHING" not in s.get("Reason", "")]
+    def _render_mermaid_vertical_clustered(self, events):
+        """Mermaid図の生成 (Vertical Time-Clustered & Burst Grouping)"""
+        if not events: return "\n(No critical events found for visualization)\n"
         
-        if phishing_lnks:
-            f.write("**フィッシングによる初期侵入が高確度で確認されました。**\n")
-            f.write(f"- Recentフォルダ等において、**{len(phishing_lnks)}件** の不審なLNKファイル（ショートカット）へのアクセスが検知されています。\n")
-            f.write("\n| サンプルLNK | アクセス時刻 (UTC) | 流入元 (Origin Trace) |\n|---|---|---|\n")
-            for seed in phishing_lnks[:10]:
-                self._write_origin_row(f, seed, origin_stories)
-            f.write("\n")
+        f = ["\n### 🏹 Attack Flow Visualization (Timeline)\n"]
+        f.append("```mermaid")
+        f.append("graph TD")
+        
+        f.append("    classDef init fill:#e63946,stroke:#333,stroke-width:2px,color:white;")
+        f.append("    classDef exec fill:#f4a261,stroke:#333,stroke-width:2px,color:black;")
+        f.append("    classDef persist fill:#2a9d8f,stroke:#333,stroke-width:2px,color:white;")
+        f.append("    classDef anti fill:#264653,stroke:#333,stroke-width:2px,color:white;")
+        f.append("    classDef time fill:#a8dadc,stroke:#457b9d,stroke-width:4px,color:black;")
+        f.append("    classDef phishing fill:#ff6b6b,stroke:#c92a2a,stroke-width:2px,color:white;")
+        
+        def priority_score(ev):
+            cat = self._get_event_category(ev)
+            score = 0
+            if "SYSTEM" in cat: score += 1000 
+            if "ANTI" in cat: score += 500
+            if "PERSIST" in cat: score += 200
+            if "INITIAL" in cat: score += 100
+            return score + ev.get('Score', 0)
 
-        if drop_items:
-            f.write("**不審なツール・ファイルの持ち込み（Dropped Artifacts）:**\n")
-            f.write("\n| ファイル名 | 発見場所 | 流入元 (Origin Trace) |\n|---|---|---|\n")
-            for seed in drop_items[:10]:
-                self._write_origin_row(f, seed, origin_stories)
-            f.write("\n")
+        critical_events = [ev for ev in events if ev.get('Score', 0) >= 60 or "CRITICAL" in str(ev.get('Type', ''))]
+        sorted_events = sorted(critical_events, key=lambda x: x.get('Time', '9999'))
+        
+        if not sorted_events: return "\n(No critical events found)\n"
 
-        if not phishing_lnks and not drop_items:
-            f.write("明確な外部侵入ベクターは自動検知されませんでした。\n\n")
+        subgraphs = []
+        current_subgraph = {"nodes": [], "start_time": None, "end_time": None, "label": ""}
+        
+        def parse_dt(t_str):
+            try: return datetime.fromisoformat(t_str.replace("Z", ""))
+            except: return datetime.min
 
-    def _write_origin_row(self, f, seed, origin_stories):
-        name = seed['Target_File']
-        time = str(seed.get('Timestamp_Hint', '')).replace('T', ' ')[:19]
+        last_dt = None
+        node_id_counter = 0
+        burst_buffer = [] 
         
-        origin_desc = "❓ No Trace Found (Low Confidence)"
-        
-        story = next((s for s in origin_stories if s["Target"] == name), None)
-        
-        if story:
-            ev = story["Evidence"][0]
-            url = ev.get("URL", "")
-            url_display = (url[:50] + "...") if len(url) > 50 else url
-            gap = ev.get('Time_Gap', '-')
-            conf = story.get("Confidence", "LOW")
-            reason = story.get("Reason", "")
+        def flush_burst_buffer(buffer, target_list, counter):
+            if not buffer: return counter
+            first_ev = buffer[0]
+            cat = self._get_event_category(first_ev)
             
-            if conf == "HIGH":
-                icon = "✅" 
-                prefix = "**Confirmed**"
-            elif conf == "MEDIUM":
-                icon = "⚠️"
-                prefix = "Inferred"
+            if len(buffer) >= 3 and ("INITIAL" in cat or "EXECUTION" in cat):
+                node_id = f"N{counter}"
+                counter += 1
+                start_t = str(buffer[0].get('Time', ''))[11:16]
+                count = len(buffer)
+                icon = "⚡"
+                if "INITIAL" in cat: icon = "🎣"
+                elif "EXEC" in cat: icon = "⚙️"
+                
+                short_summary = self._get_short_summary(first_ev)
+                label = f"{start_t} {icon} {count}x Events<br/>({short_summary} etc.)"
+                style = ":::exec"
+                if "INITIAL" in cat: style = ":::phishing"
+                target_list.append(f"{node_id}[\"{label}\"]{style}")
+                return counter
             else:
-                icon = "❓"
-                prefix = "Weak"
+                for ev in buffer:
+                    node_id = f"N{counter}"
+                    counter += 1
+                    t_str = str(ev.get('Time', ''))[11:16]
+                    s_sum = self._get_short_summary(ev)
+                    ev_cat = self._get_event_category(ev)
+                    icon = "🔹"
+                    style = ":::default"
+                    if "SYSTEM" in ev_cat: icon = "⏰"; style = ":::time"
+                    elif "ANTI" in ev_cat: icon = "🗑️"; style = ":::anti"
+                    elif "PERSIST" in ev_cat: icon = "⚓"; style = ":::persist"
+                    elif "INITIAL" in ev_cat: icon = "🎣"; style = ":::init"
+                    
+                    label = f"{t_str} {icon} {s_sum}"
+                    target_list.append(f"{node_id}[\"{label}\"]{style}")
+                return counter
 
-            origin_desc = f"{icon} **{prefix}**: {reason}<br/>🔗 `{url_display}`<br/>*(Gap: {gap})*"
+        for ev in sorted_events:
+            dt = parse_dt(ev.get('Time', ''))
+            
+            if last_dt and (dt - last_dt).total_seconds() > 3600:
+                node_id_counter = flush_burst_buffer(burst_buffer, current_subgraph["nodes"], node_id_counter)
+                burst_buffer = []
+                subgraphs.append(current_subgraph)
+                current_subgraph = {"nodes": [], "start_time": dt, "end_time": dt, "label": ""}
+            
+            if current_subgraph["start_time"] is None: current_subgraph["start_time"] = dt
+            current_subgraph["end_time"] = dt
+            last_dt = dt
+            
+            if not burst_buffer:
+                burst_buffer.append(ev)
+            else:
+                last_in_buff = burst_buffer[-1]
+                last_buff_dt = parse_dt(last_in_buff.get('Time', ''))
+                same_cat = self._get_event_category(ev) == self._get_event_category(last_in_buff)
+                close_time = (dt - last_buff_dt).total_seconds() < 120 
+                
+                if same_cat and close_time:
+                    burst_buffer.append(ev)
+                else:
+                    node_id_counter = flush_burst_buffer(burst_buffer, current_subgraph["nodes"], node_id_counter)
+                    burst_buffer = [ev]
+
+        node_id_counter = flush_burst_buffer(burst_buffer, current_subgraph["nodes"], node_id_counter)
+        subgraphs.append(current_subgraph)
+
+        sg_counter = 0
+        prev_sg_id = None
         
-        col2 = time if time else f"`{seed.get('Target_Path', '')[:20]}`"
-        f.write(f"| `{name}` | {col2} | {origin_desc} |\n")
+        for sg in subgraphs:
+            if not sg["nodes"]: continue
+            sg_id = f"T{sg_counter}"
+            start_s = sg["start_time"].strftime("%H:%M")
+            end_s = sg["end_time"].strftime("%H:%M")
+            label = f"{start_s} - {end_s}"
+            
+            f.append(f"    subgraph {sg_id} [\"⏰ {label}\"]")
+            for n in sg["nodes"]: f.append(f"        {n}")
+            f.append("    end")
+            
+            if prev_sg_id:
+                f.append(f"    {prev_sg_id} --> {sg_id}")
+            prev_sg_id = sg_id
+            sg_counter += 1
 
-    def _write_timeline_visual(self, f, phases, analyzer, enricher):
-        t = self.txt
-        f.write(f"## {t['h1_time']}\n")
-        f.write("以下に、検知された脅威イベントを時系列で示します。（重要度スコア80以上のイベント、および要注意ツール利用履歴）\n\n")
-        for idx, phase in enumerate(phases):
-            if not phase: continue
-            if isinstance(phase[0], dict) and 'Time' in phase[0]:
-                date_str = str(phase[0]['Time']).replace('T', ' ').split(' ')[0]
-            else: date_str = "Unknown"
-            f.write(f"### 📅 Phase {idx+1} ({date_str})\n")
-            f.write(f"| Time (UTC) | Category | Event Summary (Command / File) | Source |\n|---|---|---|---|\n") 
-            for ev in phase:
-                summary = ev['Summary']
-                if analyzer.intel.is_noise(summary): continue
-                time_display = str(ev.get('Time','')).replace('T', ' ').split('.')[0]
-                cat_name = t['cats'].get(ev.get('Category'), ev.get('Category'))
-                is_dual = analyzer.intel.is_dual_use(summary)
-                prefix = "⚠️ " if is_dual else ""
-                row_str = f"| {time_display} | {cat_name} | **{prefix}{summary}** | {ev['Source']} |"
-                f.write(f"{row_str}\n")
-            if idx < len(phases)-1: f.write("\n*( ... Time Gap ... )*\n\n")
+        f.append("```\n")
+        return "\n".join(f)
+
+    def _get_event_category(self, ev):
+        typ = str(ev.get('Type', '')).upper()
+        tag = str(ev.get('Tag', '')).upper()
+        val = str(ev.get('Value', '')).upper()
+        if "SYSTEM_TIME" in tag or "TIME_CHANGE" in tag or "4616" in tag or "ROLLBACK" in tag: return "SYSTEM MANIPULATION"
+        if "PHISH" in typ or "LNK" in typ: return "INITIAL ACCESS"
+        if "WIPE" in typ or "ANTI" in typ: return "ANTI-FORENSICS"
+        if "PERSIST" in typ: return "PERSISTENCE"
+        if "EXEC" in typ or "RUN" in typ: return "EXECUTION"
+        if "TIMESTOMP" in typ: return "TIMESTOMP (FILE)"
+        return "OTHER ACTIVITY"
+
+    def _get_short_summary(self, ev):
+        val = ev.get('Value', '')
+        if not val or val == "Unknown":
+            val = ev.get('Summary', '')
+            if not val: val = str(ev.get('Tag', 'Event'))
+        if "SYSTEM_TIME" in str(ev.get('Tag', '')) or "4616" in str(val): return "System Time Changed"
+        if "\\" in val or "/" in val: val = os.path.basename(val.replace("\\", "/"))
+        return val[:15] + ".." if len(val) > 15 else val
+
+    def _render_key_indicators(self, events):
+        output = ["\n### 💎 Key Indicators (Critical Only)\n"]
+        grouped = {}
+        for ev in events:
+            if ev.get('Score', 0) < 60 and "CRITICAL" not in str(ev.get('Type', '')): continue
+            cat = self._get_event_category(ev)
+            if cat not in grouped: grouped[cat] = []
+            grouped[cat].append(ev)
+
+        cat_titles = {
+            "INITIAL ACCESS": "🎣 Initial Access", "ANTI-FORENSICS": "🙈 Anti-Forensics",
+            "SYSTEM MANIPULATION": "🚨 System Time Manipulation", "PERSISTENCE": "⚓ Persistence",
+            "EXECUTION": "⚡ Execution", "TIMESTOMP (FILE)": "🕒 Timestomp (Files)"
+        }
+        keys = sorted(grouped.keys(), key=lambda k: 0 if "SYSTEM" in k else 1)
+
+        for cat in keys:
+            items = grouped[cat]
+            output.append(f"#### {cat_titles.get(cat, cat)}")
+            output.append("| Time (UTC) | Value / Artifact | Impact/Target | Score |")
+            output.append("|---|---|---|---|")
+            items.sort(key=lambda x: x.get('Time', '9999'))
+            for ioc in items:
+                t = str(ioc.get('Time', 'N/A')).replace('T', ' ')[:19]
+                val = ioc.get('Value', '-')
+                if not val or val == "Unknown": val = ioc.get('Summary', '-')
+                score = ioc.get('Score', 0)
+                impact = "-"
+                extra = ioc.get('Extra', {})
+                tag = str(ioc.get('Tag', ''))
+                if "SYSTEM_TIME" in tag or "4616" in tag:
+                    impact = "**System Clock Altered**"
+                    val = "Event ID 4616"
+                elif cat == "INITIAL ACCESS":
+                    tgt = extra.get('Target_Path', 'Unknown')
+                    impact = f"Target: {tgt[:30]}..."
+                output.append(f"| {t} | `{val}` | {impact} | {score} |")
+            output.append("\n")
+        return "\n".join(output)
 
     def _write_technical_findings(self, f, analyzer, dfs):
         t = self.txt
         f.write(f"## {t['h1_tech']}\n")
-        
-        high_conf_events = [ioc for ioc in analyzer.visual_iocs if analyzer.is_force_include_ioc(ioc) or "ANTI_FORENSICS" in str(ioc.get("Type", ""))]
-        
+        high_conf_events = [ioc for ioc in analyzer.visual_iocs if analyzer.is_force_include_ioc(ioc) or "ANTI" in str(ioc.get("Type", ""))]
         self._write_anti_forensics_section(f, high_conf_events, dfs)
-
-        f.write("本セクションでは、検出された脅威を分類して詳述します。\n\n")
-
-        groups = {
-            "🚨 System Time Manipulation (Time Paradox)": [],
-            "🎭 File Masquerading & Backdoors": [],
-            "🎣 Phishing & Initial Access (LNKs)": [],
-            "⚡ Executed Tools (Active Threats)": [],
-            "📦 Suspicious Files (Presence Only)": [],
-            "⚠️ Other High Confidence Threats": []
-        }
-        
+        f.write("### 🔍 Detailed Findings by Category\n\n")
+        groups = {}
         for ioc in high_conf_events:
-            ioc_type = str(ioc.get('Type', '')).upper()
-            reason = str(ioc.get('Reason', '')).upper()
-            val = str(ioc.get('Value', '')).lower()
-            
-            if "ANTI_FORENSICS" in ioc_type: continue 
-
-            if "TIME_PARADOX" in ioc_type or "ROLLBACK" in reason:
-                groups["🚨 System Time Manipulation (Time Paradox)"].append(ioc)
-            elif "MASQUERADE" in ioc_type or ".crx" in val:
-                groups["🎭 File Masquerading & Backdoors"].append(ioc)
-            elif "PHISHING" in ioc_type or "SUSPICIOUS_CMDLINE" in reason or ".lnk" in val:
-                groups["🎣 Phishing & Initial Access (LNKs)"].append(ioc)
-            elif analyzer.intel.is_dual_use(val) or "DUAL_USE" in ioc_type:
-                if "EXECUTION_CONFIRMED" in ioc_type or "EXEC" in reason.upper() or "PROCESS" in ioc.get("Path", "").upper():
-                     groups["⚡ Executed Tools (Active Threats)"].append(ioc)
-                else:
-                     groups["📦 Suspicious Files (Presence Only)"].append(ioc)
-            else:
-                groups["⚠️ Other High Confidence Threats"].append(ioc)
-
-        for header, ioc_list in groups.items():
-            if not ioc_list: continue
-            f.write(f"### {header}\n")
-            if "Presence Only" in header:
-                f.write("> **Note:** 以下のツールはディスク上に存在しますが、明確な実行痕跡（Prefetch/ProcessLog等）は確認されていません。\n\n")
-            ioc_list.sort(key=lambda x: x.get('Time', '9999'))
-            for ioc in ioc_list:
-                dt = str(ioc.get('Time', 'Unknown')).replace('T', ' ')[:19]
-                val = ioc.get('Value', 'No details')
-                path = ioc.get('Path', 'Unknown')
-                ioc_type = ioc.get('Type', 'Unknown')
-                f.write(f"- **{dt}** | Type: `{ioc_type}` | Path: `{path[:50]}{'...' if len(path) > 50 else ''}`\n")
-                insight = analyzer.generate_ioc_insight(ioc)
-                if insight: f.write(f"  - 🕵️ **Analyst Note:** {insight}\n")
-                f.write("\n")
-        f.write("\n")
+            cat = self._get_event_category(ioc)
+            if "ANTI" in cat: continue
+            if cat not in groups: groups[cat] = []
+            groups[cat].append(ioc)
+        for cat, items in groups.items():
+            f.write(f"#### {cat}\n")
+            items.sort(key=lambda x: x.get('Time', '9999'))
+            for ioc in items:
+                dt = str(ioc.get('Time', '')).replace('T', ' ')[:19]
+                val = ioc.get('Value', '') or ioc.get('Summary', '')
+                f.write(f"- **{dt}** | `{val}`\n")
+            f.write("\n")
 
     def _write_anti_forensics_section(self, f, ioc_list, dfs):
-        af_tools = [ioc for ioc in ioc_list if "ANTI_FORENSICS" in str(ioc.get("Type", "")) or "WIPING" in str(ioc.get("Type", ""))]
-        
-        if not af_tools:
-            return
-
-        f.write("### 🚨 Anti-Forensics Activities (Evidence Destruction)\n\n")
-        f.write("⚠️⚠️⚠️ **重大な証拠隠滅活動を検出** ⚠️⚠️⚠️\n\n")
-        f.write("攻撃者は侵入後、以下のツールを使用して活動痕跡を意図的に抹消しています：\n\n")
-
-        seen_tools = set()
-        
+        af_tools = [ioc for ioc in ioc_list if "ANTI" in str(ioc.get("Type", "")) or "WIPE" in str(ioc.get("Type", ""))]
+        if not af_tools: return
+        f.write("### 🚨 Anti-Forensics Activities\n\n")
+        seen = set()
         for tool in af_tools:
             name = tool.get("Value", "Unknown").upper()
-            if name in seen_tools: continue
-            seen_tools.add(name)
-            
-            # Use local helper for RunCount
-            run_count = self._extract_run_count(tool, dfs)
-            last_run = tool.get("Time", "Unknown").replace("T", " ")[:19]
-            
-            desc = "データ抹消ツール"
-            if "BCWIPE" in name: desc = "軍事レベルのファイルワイピングツール。通常の復元を不可能にします。"
-            elif "CCLEANER" in name: desc = "システムクリーナー。ブラウザ履歴やMRUの削除に使用されます。"
-            elif "SDELETE" in name: desc = "Sysinternals製のセキュア削除ツール。"
-            elif "ERASER" in name: desc = "ファイル抹消ツール。"
+            if name in seen: continue
+            seen.add(name)
+            run_count = self._extract_dual_run_count(tool, dfs)
+            last_run = tool.get("Time", "").replace("T", " ")[:19]
+            f.write(f"#### {name}\n- 📊 **Run Count**: **{run_count}**\n- 🕐 **Last Exec**: {last_run}\n\n")
 
-            f.write(f"#### {name}\n")
-            f.write(f"- 📊 **Run Count**: **{run_count}**\n")
-            f.write(f"- 🕐 **Last Execution**: {last_run} (UTC)\n")
-            f.write(f"- ⚠️ **Severity**: CRITICAL\n")
-            f.write(f"- 🔍 **Description**: {desc}\n\n")
-            
-            f.write(f"🕵️ **Analyst Note**:\n")
-            if "BCWIPE" in name:
-                 f.write("このツールの実行により、LNKファイル、Prefetch、一時ファイル等の証拠が物理的に上書き削除された可能性が極めて高いです。\n")
-            else:
-                 f.write("攻撃活動終了後の痕跡削除（Cleanup）に使用されたと推定されます。\n")
-            f.write("\n---\n\n")
-
-        f.write("### 📉 Missing Evidence Impact Assessment\n\n")
-        f.write("以下の証拠が、Anti-Forensicsツールによって失われたと判断されます：\n\n")
-        f.write("| 証拠カテゴリ | 期待される情報 | 現状 | 推定原因 |\n|---|---|---|---|\n")
-        f.write("| LNK Target Paths | `cmd.exe ...` 等の引数 | ❌ 欠落 | BCWipe/SDeleteによる削除 |\n")
-        f.write("| Prefetch (Tools) | 実行回数・タイムスタンプ | ❌ 欠落 | CCleaner/BCWipeによる削除 |\n")
-        f.write("| 一時ファイル | ペイロード本体 | ❌ 欠落 | ワイピングによる物理削除 |\n\n")
-
-        f.write("🕵️ **Analyst Note**:\n")
-        f.write("これらの証拠欠落は「ツールの限界」ではなく、**「攻撃者による高度な隠蔽工作」**の結果です。\n")
-        f.write("Ghost Detection (USNジャーナル) によりファイルの「存在していた事実」のみを確認できています。\n\n")
-
-    def _extract_run_count(self, ioc, dfs):
-        """RunCount Extraction (Moved from LachesisWriter/Enricher for ease of refactor)"""
-        if not dfs: return "Unknown"
-        target_name = ioc.get("Value", "").lower().strip()
-        if not target_name: return "Unknown"
+    def _extract_dual_run_count(self, ioc, dfs):
+        """
+        UserAssistとPrefetchの実行回数を取得する (v5.1 Regex Cheat)
+        1. まずイベントのSummary/Value文字列から直接 '(Run: N)' を探す (最速・確実)
+        2. なければCSV (dfs) から検索する (フォールバック)
+        """
+        ua_count = "N/A"
+        pf_count = "N/A"
         
-        target_base = target_name
-        if "\\" in target_base or "/" in target_base:
-            target_base = os.path.basename(target_base.replace("\\", "/"))
-        if " " in target_base:
-            target_base = target_base.split(" ")[0]
-
-        def get_df(name_part):
-            for k, v in dfs.items():
-                if name_part.lower() in k.lower(): return v
-            return None
-
-        # Method 1: Prefetch
-        pf = get_df('Prefetch')
-        if pf is not None:
+        # 1. Regex Extraction from Event Text (The Cheat Method)
+        text_sources = [
+            ioc.get("Value", ""), 
+            ioc.get("Summary", ""), 
+            ioc.get("Action", ""),
+            ioc.get("Target_Path", "")
+        ]
+        
+        for text in text_sources:
+            if not text: continue
+            # Pattern: "(Run: 2)" or "Run Count: 5"
+            match = re.search(r"\(Run:\s*(\d+)\)", str(text), re.IGNORECASE)
+            if match:
+                ua_count = match.group(1)
+                break
+        
+        # 2. Prefetch CSV Lookup
+        target_name = ioc.get("Value", "").lower().strip()
+        if target_name and dfs and dfs.get('Prefetch') is not None:
+            target_base = os.path.basename(target_name.replace("\\", "/")).split(" ")[0]
+            df = dfs['Prefetch']
             try:
-                cols_lower = {c.lower(): c for c in pf.columns}
-                exec_col = next((cols_lower[c] for c in cols_lower if "executable" in c), None)
-                run_col = next((cols_lower[c] for c in cols_lower if "run" in c and "count" in c), None)
+                cols = {c.lower(): c for c in df.columns}
+                exec_col = next((cols[c] for c in cols if "executable" in c), None)
+                run_col = next((cols[c] for c in cols if "run" in c and "count" in c), None)
                 if exec_col and run_col:
-                    hits = pf.filter(pl.col(exec_col).str.to_lowercase().str.contains(target_base, literal=True))
+                    hits = df.filter(pl.col(exec_col).str.to_lowercase().str.contains(target_base, literal=True))
                     if hits.height > 0:
-                        rc = hits[0, run_col]
-                        return f"{rc} (Prefetch)"
+                        max_run = hits.select(pl.col(run_col).cast(pl.Int64, strict=False)).max().item()
+                        if max_run is not None: pf_count = str(max_run)
             except: pass
-
-        # Method 2: UserAssist
-        ua = get_df('UserAssist')
-        if ua is not None:
+        
+        # 3. UserAssist CSV Lookup (Fallback if Regex failed)
+        if ua_count == "N/A" and target_name and dfs and dfs.get('UserAssist') is not None:
+            target_base = os.path.basename(target_name.replace("\\", "/")).split(" ")[0]
+            df = dfs['UserAssist']
             try:
-                cols_lower = {c.lower(): c for c in ua.columns}
-                name_col = next((cols_lower[c] for c in cols_lower if "value" in c and "name" in c), None)
-                if not name_col: name_col = next((cols_lower[c] for c in cols_lower if "program" in c), None)
-                run_col = next((cols_lower[c] for c in cols_lower if "run" in c and "count" in c), None)
+                cols = {c.lower(): c for c in df.columns}
+                name_col = next((cols[c] for c in cols if "valuename" in c or "program" in c or "value" in c), None)
+                run_col = next((cols[c] for c in cols if "run" in c and "count" in c), None)
+                if not run_col: run_col = next((cols[c] for c in cols if "count" in c and "account" not in c), None)
                 if name_col and run_col:
-                     hits = ua.filter(pl.col(name_col).str.to_lowercase().str.contains(target_base, literal=True))
-                     if hits.height > 0:
-                         rc = hits[0, run_col]
-                         return f"{rc} (UserAssist)"
+                    hits = df.filter(pl.col(name_col).str.to_lowercase().str.contains(target_base, literal=True))
+                    if hits.height > 0:
+                        max_run = hits.select(pl.col(run_col).cast(pl.Int64, strict=False)).max().item()
+                        if max_run is not None: ua_count = str(max_run)
             except: pass
+            
+        return f"UA: {ua_count} | PF: {pf_count}"
 
-        # Method 3: Fallback Summary
-        summary = ioc.get("Summary", "")
-        if summary:
-            match = re.search(r"(?:Run\s*Count:|Run:|Run\sCount)\s*[:]?\s*(\d+)", summary, re.IGNORECASE)
-            if match: return match.group(1)
-
-        # Method 4: Timeline Deep Search
-        try:
-            timeline = dfs.get("Timeline")
-            if timeline is not None:
-                cond = pl.col("FileName").str.to_lowercase().str.contains(target_base, literal=True)
-                for c in ["Message", "Description", "Action", "Summary"]:
-                    if c in timeline.columns:
-                        cond = cond | pl.col(c).str.to_lowercase().str.contains(target_base, literal=True)
-                hits = timeline.filter(cond)
-                if hits.height > 0:
-                    for col in hits.columns:
-                        if col in ["Summary", "Message", "Details", "Description"]:
-                            for val in hits[col]:
-                                match = re.search(r"(?:Run\s*Count:|Run:|Run\sCount)\s*[:]?\s*(\d+)", str(val), re.IGNORECASE)
-                                if match: return f"{match.group(1)} (Timeline)"
-        except: pass
-        return "Unknown"
+    def _write_timeline_visual(self, f, phases, analyzer, enricher):
+        t = self.txt
+        f.write(f"## {t['h1_time']}\n(Detailed Timeline)\n\n")
+        for idx, phase in enumerate(phases):
+            if not phase: continue
+            if isinstance(phase[0], dict) and 'Time' in phase[0]:
+                date_str = str(phase[0]['Time']).split('T')[0]
+            else: date_str = "Unknown"
+            f.write(f"### 📅 Phase {idx+1} ({date_str})\n")
+            f.write(f"| Time (UTC) | Category | Event Summary | Source |\n|---|---|---|---|\n") 
+            for ev in phase:
+                summary = ev['Summary']
+                time_display = str(ev.get('Time','')).replace('T', ' ').split('.')[0]
+                cat_name = t['cats'].get(ev.get('Category'), ev.get('Category'))
+                row_str = f"| {time_display} | {cat_name} | **{summary}** | {ev['Source']} |"
+                f.write(f"{row_str}\n")
+            f.write("\n")
 
     def _write_detection_statistics(self, f, medium_events, analyzer, dfs):
         t = self.txt
         f.write(f"## {t['h1_stats']}\n")
-        
-        filtered_count = sum(analyzer.noise_stats.values())
-        critical_count = len(analyzer.visual_iocs)
-        
-        f.write("### 📊 Overall Analysis Summary\n")
-        f.write("| Category | Count | Percentage |\n|---|---|---|\n")
-        f.write(f"| **Total Events Analyzed** | **{analyzer.total_events_analyzed}** | 100% |\n")
-        
-        if analyzer.total_events_analyzed > 0:
-            crit_pct = (critical_count / analyzer.total_events_analyzed) * 100
-            filt_pct = (filtered_count / analyzer.total_events_analyzed) * 100
-        else:
-            crit_pct, filt_pct = 0, 0
-            
-        f.write(f"| Critical Detections | {critical_count} | {crit_pct:.2f}% |\n")
-        f.write(f"| Filtered Noise | {filtered_count} | {filt_pct:.1f}% |\n\n")
-
-        f.write("### 🎯 Critical Detection Breakdown\n")
-        f.write("| Type | Count | Max Score | Impact |\n|---|---|---|---|\n")
-        
-        type_counts = {}
-        for ioc in analyzer.visual_iocs:
-            typ = ioc.get("Type", "Unknown")
-            if "PHISHING" in typ: typ = "PHISHING / LNK"
-            elif "TIMESTOMP" in typ: typ = "TIMESTOMP"
-            elif "ANTI_FORENSICS" in typ: typ = "ANTI_FORENSICS"
-            elif "MASQUERADE" in typ: typ = "MASQUERADE"
-            type_counts[typ] = type_counts.get(typ, 0) + 1
-        
-        for typ, count in sorted(type_counts.items(), key=lambda x: x[1], reverse=True):
-            score = 300 if "ANTI" in typ or "MASQ" in typ else 250
-            impact = "Evidence destruction" if "ANTI" in typ else ("Initial access" if "PHISH" in typ else "Evasion")
-            f.write(f"| **{typ}** | **{count}** | {score} | {impact} |\n")
-        f.write("\n")
-        
-        f.write("### ⚠️ Medium Confidence Events\n")
-        if medium_events:
-            f.write(f"**Count:** {len(medium_events)} 件 (Timeline CSV参照)\n")
-            f.write("| Time | Summary |\n|---|---|\n")
-            for ev in medium_events[:5]:
-                t_str = str(ev.get('Time','')).replace('T',' ')[:19]
-                sum_str = str(ev.get('Summary', ''))[:80] + "..."
-                f.write(f"| {t_str} | {sum_str} |\n")
-            f.write("\n")
-            
-        f.write("### 📉 Filtered Noise Statistics\n")
-        f.write("| Filter Reason | Count |\n|---|---|\n")
-        if analyzer.noise_stats:
-            for reason, count in sorted(analyzer.noise_stats.items(), key=lambda x: x[1], reverse=True):
-                f.write(f"| {reason} | {count} |\n")
-        else: f.write("| No noise filtered | 0 |\n")
-        f.write("\n")
+        f.write(f"Total Events Analyzed: {analyzer.total_events_analyzed}\n\n")
 
     def _write_ioc_appendix_unified(self, f, analyzer):
         t = self.txt
-        f.write(f"## {t['h1_app']} (Full IOC List)\n")
-        f.write("本調査で確認されたすべての侵害指標（IOC）の一覧です。\n\n")
-        if analyzer.visual_iocs:
-            f.write("### 📂 File IOCs (Malicious/Suspicious Files)\n")
-            f.write("| File Name | Path | Source | Note |\n|---|---|---|---|\n")
-            seen = set()
-            sorted_iocs = sorted(analyzer.visual_iocs, key=lambda x: 0 if "CRITICAL" in x.get("Reason", "").upper() else 1)
-            for ioc in sorted_iocs:
-                val = ioc['Value']
-                path = ioc['Path']
-                if analyzer.intel.is_visual_noise(val): continue
-                key = f"{val}|{path}"
-                if key in seen: continue
-                seen.add(key)
-                reason = ioc.get("Reason", "Unknown")
-                f.write(f"| `{val}` | `{path}` | {ioc['Type']} ({reason}) | {ioc.get('Time', 'N/A')} |\n")
-            f.write("\n")
-        if analyzer.infra_ips_found:
-            f.write("### 🌐 Network IOCs (Suspicious Connections)\n")
-            f.write("| Remote IP | Context |\n|---|---|\n")
-            for ip in analyzer.infra_ips_found:
-                 f.write(f"| `{ip}` | Detected in Event Logs |\n")
-            f.write("\n")
-
-    def _generate_mermaid(self, analyzer, visual_iocs):
-        if not visual_iocs: return ""
-        
-        def get_time(item):
-            t = item.get("Time", "")
-            return t if t else "9999"
-            
-        sorted_iocs = sorted(visual_iocs, key=get_time)
-        if not sorted_iocs: return ""
-        
-        has_paradox = any("TIME_PARADOX" in str(ioc.get("Type", "")) for ioc in visual_iocs)
-        
-        rollback_time_str = None
-        if has_paradox:
-            for ioc in visual_iocs:
-                if "TIME_PARADOX" in str(ioc.get("Type", "")):
-                    rollback_time_str = str(ioc.get("Time", ""))[:10]
-                    break
-        
-        chart = "\n```mermaid\ngraph TD\n"
-        chart += "    %% Time-Clustered Attack Flow\n"
-        chart += "    start((Start)) --> P0\n"
-        
-        clusters = []
-        current_cluster = []
-        last_dt = None
-        for ioc in sorted_iocs[:25]:
-            if analyzer.intel.is_visual_noise(ioc["Value"]): continue
-            ts_str = ioc.get("Time", "")
-            curr_dt = analyzer.enricher.parse_time_safe(ts_str)
-            if curr_dt:
-                if last_dt and (curr_dt - last_dt).total_seconds() > 60: 
-                    clusters.append(current_cluster)
-                    current_cluster = []
-                last_dt = curr_dt
-            current_cluster.append(ioc)
-        if current_cluster: clusters.append(current_cluster)
-
-        node_registry = []
-        for idx, cluster in enumerate(clusters):
-            if not cluster: continue
-            
-            time_label = "Unknown"
-            if cluster[0].get("Time"):
-                time_str = str(cluster[0]["Time"])
-                if "T" in time_str: time_label = time_str.split("T")[1][:5]
-                elif " " in time_str: time_label = time_str.split(" ")[1][:5]
-                else: time_label = time_str[-8:-3]
-            
-            cluster_is_fake = False
-            if has_paradox and rollback_time_str:
-                cluster_time = str(cluster[0].get("Time", ""))[:10]
-                if cluster_time and cluster_time < rollback_time_str:
-                    if any(x in time_label for x in ["00:", "01:", "02:", "03:"]):
-                        cluster_is_fake = True
-                        time_label += " ⚠️(FAKE?)"
-
-            chart += f"\n    subgraph T{idx} [Time: {time_label}]\n"
-            chart += "        direction TB\n"
-            
-            for item in cluster:
-                val = self._sanitize_mermaid(item["Value"])
-                typ = item["Type"]
-                
-                if "TIME_PARADOX" in typ: short_val = "SYSTEM ROLLBACK"
-                else: short_val = (val[:15] + '..') if len(val) > 15 else val
-                
-                icon = "💀"
-                if "PHISH" in typ: icon = "🎣"
-                elif "BACKDOOR" in typ or "MASQ" in typ: icon = "🎭"
-                elif "TIME_PARADOX" in typ: icon = "⏪"
-                elif "TIMESTOMP" in typ: icon = "🕒"
-                elif "PERSIST" in typ: icon = "⚓"
-                
-                style_class = "threat"
-                if cluster_is_fake: style_class = "fake"
-                if "TIME_PARADOX" in typ: style_class = "paradox"
-
-                node_id = f"N{abs(hash(val + str(idx)))}"
-                label = f"{icon} {typ}<br/>{short_val}"
-                chart += f"        {node_id}[\"{label}\"]\n"
-                node_registry.append({"id": node_id, "style": style_class})
-            
-            chart += "    end\n"
-            
-            if idx > 0 and node_registry:
-                prev_node = node_registry[-len(cluster)-1]["id"] if len(node_registry) > len(cluster) else node_registry[0]["id"]
-                curr_node = node_registry[-len(cluster)]["id"]
-                chart += f"    {prev_node} --> {curr_node}\n"
-            elif node_registry:
-                chart += f"    P0 --> {node_registry[0]['id']}\n"
-
-        chart += "\n    %% Styles\n"
-        chart += "    classDef threat fill:#ffcccc,stroke:#ff0000,stroke-width:2px,color:#000;\n"
-        chart += "    classDef fake fill:#eeeeee,stroke:#999999,stroke-dasharray: 5 5,color:#666;\n"
-        chart += "    classDef paradox fill:#ffffcc,stroke:#ffcc00,stroke-width:4px,color:#000;\n"
-        
-        for node in node_registry:
-            chart += f"    class {node['id']} {node['style']};\n"
-            
-        chart += "```\n"
-        return chart
-
-    def _sanitize_mermaid(self, text):
-        clean = str(text).replace('"', "'").replace("{", "(").replace("}", ")")
-        clean = clean.replace("<", "&lt;").replace(">", "&gt;")
-        return clean
+        f.write(f"## {t['h1_app']}\n(Full IOC List)\n")
 
     def export_pivot_config(self, pivot_seeds, path, primary_user):
         if not pivot_seeds: return
-        config = {
-            "Case_Context": {
-                "Hostname": self.hostname,
-                "Primary_User": primary_user,
-                "Generated_At": datetime.now().isoformat()
-            },
-            "Deep_Dive_Targets": pivot_seeds[:20]
-        }
+        config = {"Case_Context": {"Hostname": self.hostname, "User": primary_user}, "Deep_Dive_Targets": pivot_seeds[:20]}
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(config, f, indent=2, ensure_ascii=False)
-            print(f"    -> [Lachesis] Pivot Config generated: {path}")
-        except Exception as e:
-            print(f"    [!] Failed to export Pivot Config: {e}")
+            with open(path, "w", encoding="utf-8") as f: json.dump(config, f, indent=2)
+        except: pass
 
     def export_json_grimoire(self, analysis_result, analyzer, json_path, primary_user):
-        serializable_events = []
-        for ev in analysis_result["events"]:
-            serializable_events.append({
-                "Time": str(ev.get('dt_obj', ev['Time'])),
-                "User": ev.get('User'),
-                "Category": ev.get('Category'),
-                "Summary": ev.get('Summary'),
-                "Source": ev.get('Source'),
-                "Criticality": ev.get('Criticality', 0)
-            })
-        iocs = {"File": analyzer.visual_iocs, "Network": list(analyzer.infra_ips_found), "Cmd": []}
-        grimoire_data = {
-            "Metadata": {"Host": self.hostname, "Case": "Investigation", "Primary_User": primary_user, "Generated_At": datetime.now().isoformat()},
-            "Verdict": {"Flags": list(analysis_result["verdict_flags"]), "Lateral_Summary": analysis_result["lateral_summary"]},
-            "Timeline": serializable_events,
-            "IOCs": iocs
-        }
+        data = {"Metadata": {"Host": self.hostname, "User": primary_user}, "Timeline": analysis_result.get("events", [])}
         try:
-            with open(json_path, "w", encoding="utf-8") as f:
-                json.dump(grimoire_data, f, indent=2, ensure_ascii=False)
-            print(f"    -> [Chimera Ready] JSON Grimoire saved: {json_path}")
-        except Exception as e:
-            print(f"    [!] Failed to export JSON Grimoire: {e}")
+            with open(json_path, "w", encoding="utf-8") as f: json.dump(data, f, indent=2)
+        except: pass

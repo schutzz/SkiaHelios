@@ -2,20 +2,21 @@ import polars as pl
 import argparse
 import sys
 import os
+import re
 from tools.SH_ThemisLoader import ThemisLoader
 from tools.SH_HestiaCensorship import Hestia
 
 # ============================================================
-#  SH_ChronosSift v23.18 [Time Paradox]
-#  Mission: Detect Time Anomalies & System Rollbacks.
-#  Update: Added USN Journal Rollback Detection logic.
+#  SH_ChronosSift v3.2 [Time Lord Edition]
+#  Mission: Detect Time Anomalies & Contextualize Time Changes
+#  Update: Fix ColumnNotFoundError & Logic Order for VBoxService.
 # ============================================================
 
 def print_logo():
     print(r"""
        (   )
       (  :  )   < CHRONOS SIFT >
-       (   )     v23.18 - Time Paradox
+       (   )     v3.2 - Time Lord
         " "      "Time bows to the Law."
     """)
 
@@ -23,9 +24,17 @@ class ChronosEngine:
     def __init__(self, tolerance=10.0):
         self.tolerance = tolerance
         self.hestia = Hestia()
+        
+        # 正規の時刻同期プロセス定義 (プロセス名: [許可されるパスの正規表現リスト])
+        self.ALLOWED_TIME_AGENTS = {
+            "vboxservice.exe": [r"program files.*oracle.*virtualbox", r"system32"],
+            "vmtoolsd.exe": [r"program files.*vmware", r"system32"],
+            "w32tm.exe": [r"system32"],
+            "svchost.exe": [r"system32"] 
+        }
 
     def _ensure_columns(self, lf):
-        """Target_PathからParentPathとFileNameを生成する"""
+        """カラムの存在を保証する（Threat_Tagの初期化を含む）"""
         cols = lf.collect_schema().names()
         
         if "ParentPath" not in cols and "Target_Path" in cols:
@@ -38,63 +47,52 @@ class ChronosEngine:
                 pl.col("Target_Path").str.split("\\").list.slice(0, -1).list.join("\\").alias("ParentPath")
             ])
         
+        # [CRITICAL FIX] Threat_Tag を事前に作成してクラッシュを防ぐ
+        expected = ["ParentPath", "FileName", "Action", "Tag", "Threat_Score", "Threat_Tag", "Anomaly_Time"]
+        
         cols = lf.collect_schema().names()
-        if "ParentPath" not in cols: lf = lf.with_columns(pl.lit("UNKNOWN").alias("ParentPath"))
-        if "FileName" not in cols: lf = lf.with_columns(pl.lit("UNKNOWN").alias("FileName"))
+        for c in expected:
+            if c not in cols: 
+                if c == "Threat_Score":
+                    lf = lf.with_columns(pl.lit(0).alias(c))
+                else:
+                    lf = lf.with_columns(pl.lit("").alias(c))
             
         return lf
 
-    # [NEW] USNジャーナルの「時間の逆行」を検知するメソッド
     def _detect_usn_rollback(self, lf):
+        """USNジャーナルの「時間の逆行」を検知する"""
         cols = lf.collect_schema().names()
-        
-        # USNジャーナルの必須カラムがあるか確認 ($J CSVなど)
         if "UpdateSequenceNumber" not in cols or "UpdateTimestamp" not in cols:
             return lf
 
         print("    -> [Chronos] USN Journal detected. Scanning for Time Paradoxes (System Rollback)...")
         
-        # [FIX] USNをInt64にキャスト！これがないと文字列ソートになって時系列が壊れる！
         lf = lf.with_columns(
             pl.col("UpdateSequenceNumber").cast(pl.Int64, strict=False).alias("UpdateSequenceNumber_Int")
         )
-
-        # 時刻変換
         lf = lf.with_columns(
             pl.col("UpdateTimestamp").str.replace("T", " ").str.to_datetime(format="%Y-%m-%d %H:%M:%S%.f", strict=False).alias("_dt")
         )
 
-        # [FIX] Int化したUSNでソート
         lf = lf.sort("UpdateSequenceNumber_Int")
         lf = lf.with_columns([
             pl.col("_dt").shift(1).alias("_prev_dt"),
-            # pl.col("UpdateSequenceNumber").shift(1).alias("_prev_usn")
         ])
 
-        # 判定ロジック: 
-        # tolerance (default 10.0s) よりも大きく「マイナス」になった場合を検知
-        # 誤検知回避のため、-60秒以上の巻き戻しを異常とみなす
         rollback_threshold = -1.0 * 60 
 
         lf = lf.with_columns(
             (pl.col("_dt") - pl.col("_prev_dt")).dt.total_seconds().alias("_time_diff")
         )
 
-        # Anomaly_Time カラムがなければ作成
-        if "Anomaly_Time" not in cols:
-            lf = lf.with_columns(pl.lit("").alias("Anomaly_Time"))
-        
-        if "Threat_Score" not in cols:
-            lf = lf.with_columns(pl.lit(0).alias("Threat_Score"))
-
         lf = lf.with_columns(
             pl.when(pl.col("_time_diff") < rollback_threshold)
-              .then(pl.lit("CRITICAL_SYSTEM_ROLLBACK")) # 時間遡行検知タグ
+              .then(pl.lit("CRITICAL_SYSTEM_ROLLBACK")) 
               .otherwise(pl.col("Anomaly_Time"))
               .alias("Anomaly_Time")
         )
 
-        # スコアリングの更新（ROLLBACKは最重要 = 300点）
         lf = lf.with_columns(
             pl.when(pl.col("Anomaly_Time") == "CRITICAL_SYSTEM_ROLLBACK")
               .then(300) 
@@ -102,7 +100,6 @@ class ChronosEngine:
               .alias("Threat_Score")
         )
         
-        # 証跡として「どれくらい戻ったか」をFileName列などに追記
         lf = lf.with_columns(
             pl.when(pl.col("Anomaly_Time") == "CRITICAL_SYSTEM_ROLLBACK")
               .then(pl.format("{} (Rollback: {} sec)", pl.col("FileName"), pl.col("_time_diff")))
@@ -111,6 +108,55 @@ class ChronosEngine:
         )
 
         return lf.drop(["_dt", "_prev_dt", "_time_diff", "UpdateSequenceNumber_Int"])
+
+    def _detect_system_time_context(self, lf):
+        """
+        Themisスコアリングの「後」に実行。
+        正規のVBoxServiceなどを救済（Score 0化）し、未知のツールを断罪（Score 300維持/付与）する。
+        """
+        print("    -> [Chronos] Contextualizing System Time Changes (VM Sync vs Attack)...")
+        
+        is_time_event = (
+            pl.col("Action").str.to_lowercase().str.contains("system time|change") |
+            pl.col("Tag").str.contains("4616|TIME")
+        )
+
+        # デフォルトは「黒（攻撃）」
+        base_score = pl.lit(300)
+        base_tag = pl.lit("CRITICAL_TIMESTOMP_ATTEMPT")
+
+        # ホワイトリスト判定
+        is_legit = pl.lit(False)
+        for agent, paths in self.ALLOWED_TIME_AGENTS.items():
+            name_match = pl.col("FileName").str.to_lowercase().str.contains(agent)
+            path_match = pl.lit(False)
+            for p in paths:
+                path_match = path_match | pl.col("ParentPath").str.to_lowercase().str.contains(p)
+            
+            is_legit = is_legit | (name_match & path_match)
+
+        # スコア書き換え（正規なら0点、それ以外は300点または維持）
+        lf = lf.with_columns([
+            pl.when(is_time_event)
+              .then(
+                  pl.when(is_legit)
+                    .then(0) # 正規なら0点
+                    .otherwise(300) # 偽装or不明なら300点
+              )
+              .otherwise(pl.col("Threat_Score"))
+              .alias("Threat_Score"),
+            
+            pl.when(is_time_event)
+              .then(
+                  pl.when(is_legit)
+                    .then(pl.lit("INFO_VM_TIME_SYNC"))
+                    .otherwise(pl.lit("CRITICAL_TIMESTOMP_ATTEMPT"))
+              )
+              .otherwise(pl.col("Threat_Tag"))
+              .alias("Threat_Tag")
+        ])
+
+        return lf
 
     def _apply_safety_filters(self, df):
         print("    -> [Chronos] Applying Safety Filters (Brutal Mode)...")
@@ -123,7 +169,8 @@ class ChronosEngine:
         kill_keywords = [
             "ccleaner", "jetico", "bcwipe", "dropbox", 
             "skype", "onedrive", "google", "adobe", 
-            "mozilla", "firefox", "vbox", "virtualbox",
+            "mozilla", "firefox", 
+            # "vbox", "virtualbox", <--- 削除！Context判定に任せるためここでは消さない
             "notepad++", "intel", "mcafee", "true key",
             "microsoft analysis services", "as oledb",
             "windows defender", "windows media player",
@@ -137,28 +184,9 @@ class ChronosEngine:
             "windows/system32/config", "windows\\system32\\config"
         ]
         
-        dual_use_folders = [
-            "nmap", "wireshark", "python", "tcl", "ruby", "perl", "java", "jdk", "jre",
-            "tor browser"
-        ]
-        
-        protected_binaries = [
-            "nmap.exe", "zenmap.exe", "ncat.exe", 
-            "wireshark.exe", "tshark.exe", "capinfos.exe", "dumpcap.exe",
-            "python.exe", "pythonw.exe", "pip.exe",
-            "java.exe", "javaw.exe", "javac.exe",
-            "ruby.exe", "perl.exe",
-            "tor.exe", "firefox.exe"
-        ]
-
-        file_kill_list = [
-            "fm20.dll", "ven2232.olb", "mofygdvh.mcp", 
-            "shatbbms.dif", "vkorppvhkxuvqcvj",
-            "desktop.ini", "thumbs.db", "iconcache.db",
-            "ntuser.dat", "usrclass.dat", 
-            "edb.log", "edb.chk", "edb0",
-            "gdipfontcache"
-        ]
+        file_kill_list = ["desktop.ini", "thumbs.db", "ntuser.dat", "usrclass.dat", "iconcache.db"]
+        dual_use_folders = ["nmap", "wireshark", "python", "perl", "ruby", "tor browser"]
+        protected_binaries = ["nmap.exe", "zenmap.exe", "ncat.exe", "python.exe", "pythonw.exe", "tor.exe"]
 
         is_noise = pl.lit(False)
         for kw in kill_keywords:
@@ -173,42 +201,53 @@ class ChronosEngine:
         is_protected = pl.col("_fn").is_in(protected_binaries)
         is_noise = is_noise | (is_tool_folder & (~is_protected))
 
+        # CRITICALタグがついているものはノイズ判定を強制キャンセル
+        is_critical_context = pl.col("Threat_Tag").str.contains("CRITICAL")
+
         df = df.with_columns([
-            pl.when(is_noise).then(pl.lit("NOISE_ARTIFACT")).otherwise(pl.col("Threat_Tag")).alias("Threat_Tag"),
-            pl.when(is_noise).then(0).otherwise(pl.col("Threat_Score")).alias("Threat_Score")
+            pl.when(is_noise & (~is_critical_context)) 
+              .then(pl.lit("NOISE_ARTIFACT"))
+              .otherwise(pl.col("Threat_Tag"))
+              .alias("Threat_Tag"),
+            
+            pl.when(is_noise & (~is_critical_context))
+              .then(0)
+              .otherwise(pl.col("Threat_Score"))
+              .alias("Threat_Score")
         ])
 
         return df.drop(["_pp", "_fn"])
 
     def analyze(self, args):
         mode_str = "LEGACY" if args.legacy else "STANDARD"
-        print(f"[*] Chronos v23.18 awakening... Mode: {mode_str}")
+        print(f"[*] Chronos v3.2 awakening... Mode: {mode_str}")
         try:
             loader = ThemisLoader(["rules/triage_rules.yaml", "rules/sigma_file_event.yaml"])
             lf = pl.scan_csv(args.file, ignore_errors=True, infer_schema_length=0)
             
-            # [FIX] Ensure columns exist before processing
+            # 1. カラム保証 (Threat_Tag作成)
             lf = self._ensure_columns(lf)
 
-            # [NEW] USN Rollback Check (Detect Time Paradox BEFORE filtering)
+            # 2. USN ロールバック検知
             lf = self._detect_usn_rollback(lf)
             
-            # [FIX] Ensure Anomaly_Time exists even if USN logic skipped it
-            if "Anomaly_Time" not in lf.collect_schema().names():
-                lf = lf.with_columns(pl.lit("").alias("Anomaly_Time"))
-            
+            # 3. Themis脅威スコアリング (ルールベース)
             print("    -> Applying Themis Threat Scoring...")
             lf = loader.apply_threat_scoring(lf)
             
             if "Threat_Score" in lf.collect_schema().names():
                 lf = lf.with_columns(pl.col("Threat_Score").cast(pl.Int64, strict=False).fill_null(0))
 
+            # 4. [CRITICAL] コンテキスト判定 (Themisの結果を上書き修正)
+            # これで VBoxService=0点 に訂正される
+            lf = self._detect_system_time_context(lf)
+
+            # 5. 安全フィルタ (ノイズ削除)
             lf = self._apply_safety_filters(lf)
             
+            # 6. MFT Timestomp 検知
             cols = lf.collect_schema().names()
-            
-            si_cr = "Created0x10"
-            fn_cr = "Created0x30"
+            si_cr, fn_cr = "Created0x10", "Created0x30"
             
             if si_cr in cols and fn_cr in cols:
                 for col_name in [si_cr, fn_cr]:
@@ -224,6 +263,8 @@ class ChronosEngine:
                 lf = lf.with_columns([
                     pl.when(pl.col("Anomaly_Time") == "CRITICAL_SYSTEM_ROLLBACK")
                       .then(pl.lit("CRITICAL_SYSTEM_ROLLBACK"))
+                    .when(pl.col("Threat_Tag").str.contains("CRITICAL_TIMESTOMP")) # Context判定の結果を優先
+                      .then(pl.lit("CRITICAL_TIMESTOMP_ATTEMPT"))
                     .when((pl.col("Threat_Score") >= 80) & (pl.col("Threat_Tag") != "NOISE_ARTIFACT"))
                       .then(pl.lit("CRITICAL_ARTIFACT"))
                     .when(pl.col("diff_sec") < -60)
@@ -237,31 +278,18 @@ class ChronosEngine:
                       .otherwise(pl.lit("")).alias("Anomaly_Zero")
                 ])
                 
-                is_legacy_date = (
-                    (pl.col("fn_dt").dt.year() < 2012) |
-                    (pl.col("fn_dt").dt.year().is_in([1601, 1980, 2000, 1986])) |
-                    (pl.col("fn_dt").dt.strftime("%m-%d") == "04-30")
-                )
-                lf = lf.with_columns(
-                    pl.when(is_legacy_date & (pl.col("Anomaly_Time") == "FALSIFIED_FUTURE"))
-                    .then(pl.lit("LEGACY_BUILD"))
-                    .otherwise(pl.col("Anomaly_Time"))
-                    .alias("Anomaly_Time")
-                )
-                
                 score_expr = (
                     pl.when(pl.col("Anomaly_Time") == "CRITICAL_SYSTEM_ROLLBACK").then(300)
                     .when(pl.col("Threat_Tag") == "NOISE_ARTIFACT").then(0)
-                    .when(pl.col("Anomaly_Time") == "LEGACY_BUILD").then(10)
+                    .when(pl.col("Threat_Tag") == "INFO_VM_TIME_SYNC").then(0) # 正規同期は0点
+                    .when(pl.col("Threat_Tag").str.contains("CRITICAL")).then(300) 
                     .when(pl.col("Anomaly_Time") == "CRITICAL_ARTIFACT").then(200)
                     .when(pl.col("Anomaly_Time") == "TIMESTOMP_BACKDATE").then(100)
-                    .when(pl.col("Anomaly_Time") == "FALSIFIED_FUTURE").then(80)
-                    .when(pl.col("Anomaly_Zero") == "ZERO_PRECISION").then(50)
                     .otherwise(0)
                 )
                 lf = lf.with_columns(score_expr.alias("Chronos_Score"))
             else:
-                print("    [!] MFT Timestamps (Created0x10/30) not found. Skipping Standard Timestomp detection.")
+                print("    [!] MFT Timestamps not found. Skipping Standard Timestomp detection.")
                 lf = lf.with_columns([
                     pl.col("Anomaly_Time").fill_null("").alias("Anomaly_Time"),
                     pl.col("Threat_Score").alias("Chronos_Score")

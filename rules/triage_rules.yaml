@@ -1,6 +1,5 @@
-# rules/triage_rules.yaml [Themis Law v2.3]
-# Update: Fixed Noise Filter placement & Enhanced folder suppression
-# Update: Added Detection for LNK Masquerade, CRX Hidden, and Notification Anomalies.
+# rules/triage_rules.yaml [Themis Law v2.4]
+# Update: Added Critical Anti-Forensics Signatures (Timestomp/Wiping)
 
 # --- [Persistence Targets (AION Scope)] ---
 persistence_targets:
@@ -21,10 +20,8 @@ persistence_targets:
     pattern: "ScheduledTasks"
 
 # ==========================================
-# 🛠️ Dual-Use / Admin Tools Configuration (Expanded)
+# 🛠️ Dual-Use / Admin Tools Configuration
 # ==========================================
-# 攻撃者にも管理者にも使われるツール群。
-# これらは「ノイズとして消去せず」、必ず報告書（Lachesis）のリストに加えます。
 dual_use_tools:
   # [1] ネットワークスキャン & 偵察
   - name: "Network Scanner"
@@ -49,21 +46,21 @@ dual_use_tools:
       - "npcap"
     noise_paths: ["wireshark/snmp", "wireshark/radius", "wireshark/help", "wireshark/dtds", "wireshark/profiles"]
 
-  # [3] リモートアクセス & 横展開 (Lateral Movement)
+  # [3] リモートアクセス & 横展開
   - name: "Remote Admin / Lateral"
     keywords: 
       - "psexec"
       - "paexec"
       - "winscp"
       - "putty"
-      - "plink"      # PuttyのCUI版（トンネリングによく使われる）
-      - "teamviewer" # 正規RATとして悪用多し
+      - "plink"
+      - "teamviewer"
       - "anydesk"
       - "logmein"
       - "screenconnect"
       - "radmin"
-      - "vnc"        # RealVNC, TightVNC, UltraVNC
-      - "mstsc"      # RDP (ログに残ることは稀だが念のため)
+      - "vnc"
+      - "mstsc"
     noise_paths: ["teamviewer/version", "anydesk/ad_printer"]
 
   # [4] ネットワークツール & トンネリング
@@ -73,8 +70,8 @@ dual_use_tools:
       - "nc.exe"
       - "ncat"
       - "socat"
-      - "ngrok"      # 外部公開ツール
-      - "frp"        # Fast Reverse Proxy (攻撃者御用達)
+      - "ngrok"
+      - "frp"
       - "chisel"
       - "termite"
       - "proxifier"
@@ -83,24 +80,24 @@ dual_use_tools:
   # [5] Active Directory 偵察 & 認証情報窃取
   - name: "Recon / Credential"
     keywords: 
-      - "adfind"     # AD情報収集の定番
+      - "adfind"
       - "bloodhound"
       - "sharphound"
       - "powerview"
       - "mimikatz"
-      - "lazagne"    # パスワード復元ツール
-      - "procdump"   # LSASSダンプに悪用される正規ツール
+      - "lazagne"
+      - "procdump"
       - "hashcat"
-      - "john"       # John the Ripper
+      - "john"
     noise_paths: []
 
   # [6] データ持ち出し (Exfiltration) & 圧縮
   - name: "Exfiltration / Archiver"
     keywords: 
-      - "rclone"     # クラウドストレージへの転送によく使われる
+      - "rclone"
       - "megasync"
-      - "7za.exe"    # 7-ZipのCUI版
-      - "rar.exe"    # WinRARのCUI版
+      - "7za.exe"
+      - "rar.exe"
       - "winrar"
     noise_paths: []
 
@@ -112,7 +109,7 @@ dual_use_tools:
       - "onion"
     noise_paths: ["tor/pluggabletransports", "browser/torbrowser/data"]
 
-  # [8] 開発言語 & スクリプトエンジン (環境寄生型攻撃)
+  # [8] 開発言語 & スクリプトエンジン
   - name: "Dev / Scripting"
     keywords: 
       - "python"
@@ -120,7 +117,7 @@ dual_use_tools:
       - "perl"
       - "ruby"
       - "lua"
-      - "autoit"     # マルウェアのパッカーとしてよく使われる
+      - "autoit"
       - "powershell_ise"
     noise_paths: 
       - "python/lib"
@@ -135,8 +132,7 @@ dual_use_tools:
 # 🛡️ NOISE FILTERS (Ignored Artifacts)
 # ==========================================
 noise_filters:
-  # --- [User Artifacts Noise (Strong)] ---
-  # フォルダそのもの(FileName)と中身(ParentPath)を両方消す「二段構え」
+  # --- [User Artifacts Noise] ---
   - name: "Windows Sample Media (Folder)"
     target: "FileName"
     condition: "regex"
@@ -172,64 +168,48 @@ noise_filters:
     condition: "regex"
     pattern: "(?i)^(Microsoft|Windows|Internet Explorer|Quick Launch)$"
 
-# ==========================================
-# 🛡️ TUNING: Additional Noise Filters (Case2_56 Fixed)
-# ==========================================
-
-  # [1] CryptnetUrlCache (証明書キャッシュ)
-  # 区切り文字を「.」にすることで \ も / も無視してヒットさせる
+  # --- [Additional System Noise] ---
   - name: 'Cryptnet Cache'
     target: 'ParentPath'
     condition: 'regex'
     pattern: '(?i)Microsoft.CryptnetUrlCache'
 
-  # [2] Google Drive & Chrome Cache
-  # 途中の階層も .* で柔軟にスキップ
   - name: 'Google App Caches'
     target: 'ParentPath'
     condition: 'regex'
     pattern: '(?i)Google.(Drive|Chrome).*(Cache|HttpCache|TempData)'
 
-  # [3] Skype Media Cache (サムネイル等)
   - name: 'Skype Cache'
     target: 'ParentPath'
     condition: 'regex'
     pattern: '(?i)Skype.*(media_messaging|thmanager|emo_cache)'
 
-  # [4] CLR Usage Logs (.NET実行ログ)
-  # バックスラッシュを [\\/] で明示的に指定して回避
   - name: 'CLR Usage Logs'
     target: 'ParentPath'
     condition: 'regex'
     pattern: '(?i)Microsoft.CLR_v4\.0.[\\/]UsageLogs'
 
-  # [5] Python Standard Lib (ライブラリファイル)
   - name: 'Python Standard Lib'
     target: 'ParentPath'
     condition: 'regex'
     pattern: '(?i)AppData.Local.Programs.Python.Python[0-9]+'
 
-  # [6] Windows Error Reporting (WER)
   - name: 'Windows Error Reporting'
     target: 'ParentPath'
     condition: 'regex'
     pattern: '(?i)Microsoft.Windows.WER.(ReportQueue|ReportArchive|ERC)'
 
-  # [7] Windows Explorer Thumbnails (サムネイルDB)
-  # ファイル名そのものをターゲットにするため変更なし（正規表現は安全）
   - name: 'Explorer Thumbs'
     target: 'FileName'
     condition: 'regex'
     pattern: '(?i)^thumbcache_.*\.db$'
 
-# --- [User Artifacts Noise (Expanded)] ---
   - name: "Windows User Folders"
     target: "FileName"
     condition: "regex"
     pattern: "(?i)^(My Music|My Pictures|My Videos|My Documents|Downloads|Desktop|Favorites|Links|Contacts|Searches)$"
 
   # --- [System Noise (Stronger)] ---
-  # RACDなどが親パスに含まれていたら問答無用で消す
   - name: "Reliability Analysis Component (RAC)"
     target: "ParentPath"
     condition: "regex"
@@ -240,37 +220,15 @@ noise_filters:
     condition: "regex"
     pattern: "(?i)(WmiApRpl|wbem\\\\Performance)"
     
-  # --- [System Internals Noise] ---
-  - name: "Reliability Analysis Component (RAC)"
-    target: "ParentPath"
-    condition: "regex"
-    pattern: "(?i)ServiceProfiles\\\\LocalService\\\\AppData\\\\Local\\\\Temp\\\\RACD"
-
   - name: "Registry Backups (RegBack)"
     target: "ParentPath"
     condition: "contains"
     pattern: "config\\RegBack"
 
-  - name: "WMI Performance Adapter"
-    target: "ParentPath"
-    condition: "contains"
-    pattern: "Windows\\inf\\WmiApRpl"
-
-  - name: "WMI Repository & Logs"
-    target: "ParentPath"
-    condition: "regex"
-    pattern: "(?i)Windows\\\\System32\\\\wbem\\\\(Repository|Performance|Logs)"
-
   - name: "System Debug & Temp Logs"
     target: "FileName"
     condition: "regex"
     pattern: "(?i)^(ChkAcc\\.bak|WRITABLE\\.TST|SCM\\.EVM.*|.*\\.OLD|.*\\.toc|.*\\.cmf|ResCache\\.dir|rc[0-9]+|ielock.*|HardAdmin.*)$"
-
-  # --- [Existing Filters] ---
-  - name: "Browser Cache (IE/Edge)"
-    target: "ParentPath"
-    condition: "contains"
-    pattern: "Content.IE5"
 
   - name: "Browser Cache (General)"
     target: "ParentPath"
@@ -303,7 +261,6 @@ noise_filters:
     condition: "regex"
     pattern: "(?i)^(?:[a-z]:)?\\\\(Windows\\\\System32|Program Files|Program Files \\(x86\\))"
 
-  # --- [AION Specific Noise] ---
   - name: "Windows Safe Paths"
     target: "Full_Path"
     condition: "regex"
@@ -319,13 +276,11 @@ noise_filters:
     condition: "regex"
     pattern: "(?i)\\.(manifest|mum|cat)$"
 
-  # --- [Extension Noise] ---
   - name: "Garbage Extensions"
     target: "FileName"
     condition: "regex"
     pattern: "(?i)\\.(admx|adml|mum|cat|png|svg|js|json|xml|etl|evtx|log|tmp|db|dat|mui|inf|ico|css|html|htm|pf|ini|lnk|manifest|resx|nlp|pnf|cdf-ms|nls|tlb|xrm-ms|chk|trans-ms|blf|regtrans-ms|frm|ibd|opt|eot|txt)$"
 
-  # --- [Process/File Noise] ---
   - name: "Standard Windows Processes"
     target: "FileName"
     condition: "regex"
@@ -419,14 +374,12 @@ threat_signatures:
     condition: "regex"
     pattern: "(?i)^(winword\\.exe|excel\\.exe|powerpnt\\.exe|outlook\\.exe)$"
 
-
-# [NEW] Case Specific Threat Signatures
+  # [NEW] Case Specific Threat Signatures
   - name: "Masquerading LNK (Phishing)"
     tag: "CRITICAL_PHISHING"
     score: 300
     target: "FileName"
     condition: "regex"
-    # Detects .jpg.lnk, .pdf.lnk, .doc.lnk OR LNKs with bait words (kitties, cute, invoice)
     pattern: "(?i)(\\.(jpg|pdf|doc|docx|png|xlsx)\\.lnk|.*(adorable|cute|kitten|cats|invoice|payment|receipt).*\\.lnk)$"
 
   - name: "Suspicious CRX (Adobe Masquerade)"
@@ -434,7 +387,6 @@ threat_signatures:
     score: 300
     target: "ParentPath"
     condition: "regex"
-    # Detects .crx files outside of typical Chrome/Edge extension paths, specifically Adobe
     pattern: "(?i)(Adobe|Acrobat|Program Files.*Adobe).*(extensions|plugins|js).*\\.crx$"
 
   - name: "Suspicious Notification Asset (Timestomp)"
@@ -442,5 +394,58 @@ threat_signatures:
     score: 200
     target: "ParentPath"
     condition: "regex"
-    # Targets weird files in Notifications folder
     pattern: "(?i)AppData\\\\Local\\\\Microsoft\\\\Windows\\\\Notifications"
+
+  # [NEW] Anti-Forensics & Evasion (ここが今回の追加分です！)
+  - name: "System Time Change (Timestomp)"
+    tag: "CRITICAL_TIMESTOMP"
+    score: 300
+    target: "Action"
+    condition: "regex"
+    # Actionカラムに "System time changed" が含まれていたら即検知
+    pattern: "(?i)(system time changed|previous time|new time)"
+
+  - name: "File Wiping Tool"
+    tag: "CRITICAL_WIPING"
+    score: 300
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)(bcwipe|sdelete|eraser|cipher\\.exe)"
+
+  - name: "Evidence Cleaner"
+    tag: "CRITICAL_CLEANER"
+    score: 250
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)(ccleaner|glary|bleachbit)"
+
+    # --- [Exfiltration & Lateral Movement Rules] ---
+  
+  - name: "Potential Data Exfiltration (High Traffic)"
+    tag: "CRITICAL_EXFILTRATION"
+    score: 200
+    target: "Action" # SRUMのBytesSentが含まれる場合
+    condition: "regex"
+    # ※SRUMのパース結果に依存しますが、一般的なキーワードとして
+    pattern: "(?i)(bytes sent.*[0-9]{7,})" # 10MB以上目安
+
+  - name: "Network Share Access (Lateral Movement)"
+    tag: "CRITICAL_LATERAL"
+    score: 150
+    target: "Target_Path" # ShellBagsのパス
+    condition: "regex"
+    pattern: "^\\\\[a-zA-Z0-9]" # UNCパス (\\Server...)
+
+  - name: "Suspicious USB Connection"
+    tag: "DEVICE_INSERTION"
+    score: 100
+    target: "Target_Path"
+    condition: "regex"
+    pattern: "(?i)usbstor"
+
+  - name: "ShimCache Execution Trace"
+    tag: "EXECUTION_TRACE"
+    score: 80
+    target: "Artifact_Type"
+    condition: "contains"
+    pattern: "AppCompatCache"

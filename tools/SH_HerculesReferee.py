@@ -145,6 +145,52 @@ class HerculesReferee:
         
         # [Phase 4] Initialize The Linker
         self.linker = NetworkCorrelator(kape_dir)
+        
+        # [v4.40] 正規の時刻同期エージェント定義
+        self.ALLOWED_TIME_AGENTS = [
+            "vboxservice", "vmtoolsd", "w32tm", "svchost"
+        ]
+
+    def _apply_context_filtering(self, df):
+        """
+        [v4.40] ルールベース判定の後に、文脈（Context）による最終調整を行う
+        VBoxServiceなどの正規時刻同期を無罪化
+        """
+        print("    -> [Hercules v4.40] Applying Context Filters (VBox / Time Sync)...")
+        
+        cols = df.columns
+        
+        # カラム存在チェック
+        if "Tag" not in cols or "Threat_Score" not in cols:
+            return df
+        
+        action_col = "Action" if "Action" in cols else None
+        target_col = "Target_Path" if "Target_Path" in cols else None
+        
+        # 1. System Time Change の無罪化
+        is_time_event = pl.col("Tag").str.contains("TIME") | pl.col("Tag").str.contains("4616")
+        
+        is_legit_agent = pl.lit(False)
+        for agent in self.ALLOWED_TIME_AGENTS:
+            if action_col:
+                is_legit_agent = is_legit_agent | pl.col(action_col).str.to_lowercase().str.contains(agent)
+            if target_col:
+                is_legit_agent = is_legit_agent | pl.col(target_col).str.to_lowercase().str.contains(agent)
+
+        # 無罪化ロジック: Timeイベント かつ 正規エージェント -> Score 0, Tag INFO
+        df = df.with_columns([
+            pl.when(is_time_event & is_legit_agent)
+              .then(0)
+              .otherwise(pl.col("Threat_Score"))
+              .alias("Threat_Score"),
+              
+            pl.when(is_time_event & is_legit_agent)
+              .then(pl.lit("INFO_VM_TIME_SYNC"))
+              .otherwise(pl.col("Tag"))
+              .alias("Tag")
+        ])
+        
+        return df
 
     def _load_evtx_csv(self):
         csvs = list(self.kape_dir.rglob("*EvtxECmd*.csv"))
@@ -769,6 +815,43 @@ class HerculesReferee:
                 parent_expr.alias("ParentPath")
             ])
 
+            # ==========================================
+            # [CRITICAL UPDATE] System Time Change Rescue (EID 4616)
+            # ==========================================
+            # フィルタリングされる前に、時間変更イベントを強制確保する
+            if "EventId" in df_evtx.columns:
+                time_hits = df_evtx.filter(pl.col("EventId").cast(pl.Int64, strict=False) == 4616)
+                
+                if time_hits.height > 0:
+                    print(f"    [!] DETECTED: System Time Change (EID 4616) - {time_hits.height} events")
+                    
+                    # カラムマッピングの安全策
+                    cols = df_evtx.columns
+                    user_col = "UserName" if "UserName" in cols else ("User" if "User" in cols else None)
+                    uid_col = "UserId" if "UserId" in cols else ("Security ID" if "Security ID" in cols else None)
+                    payload_col = "Payload" if "Payload" in cols else ("Message" if "Message" in cols else None)
+                    
+                    # 必須カラムがない場合は空文字で埋める
+                    time_change_df = time_hits.select([
+                        pl.col("TimeCreated").alias("Timestamp_UTC"),
+                        pl.lit("System Time Changed").alias("Action"),
+                        (pl.col(user_col) if user_col else pl.lit("Unknown")).alias("User"),
+                        (pl.col(uid_col) if uid_col else pl.lit("")).alias("Subject_SID"),
+                        (pl.col(payload_col) if payload_col else pl.lit("Check Event Log")).alias("Target_Path"),
+                        pl.lit("Security.evtx").alias("Source_File"),
+                        pl.lit("CRITICAL_TIMESTOMP,SYSTEM_TIME_CHANGE").alias("Tag"),
+                        pl.lit("CRITICAL").alias("Judge_Verdict"),
+                        pl.lit("Active").alias("Account_Status"),
+                        pl.lit("EventLog").alias("Artifact_Type"),
+                        pl.lit(300).alias("Threat_Score"),
+                        pl.lit("System Time Modified").alias("Dynamic_Action"),
+                        (pl.col(user_col) if user_col else pl.lit("")).alias("Resolved_User")
+                    ])
+                    
+                    # 型を合わせてメインストリームに合流
+                    time_change_df = time_change_df.with_columns([pl.col(c).cast(pl.Utf8) for c in time_change_df.columns if c != "Threat_Score"])
+                    df_combined = pl.concat([df_combined, time_change_df], how="diagonal")
+
             df_scored = self.loader.apply_threat_scoring(df_for_themis)
             sigma_hits = df_scored.filter(pl.col("Threat_Score") > 0)
             
@@ -821,6 +904,9 @@ class HerculesReferee:
         
         # [v4.21] Apply Justice Logic (Noise Killing & Enrichment)
         df_final = self.judge(df_final)
+        
+        # [v4.40] Context Filtering (VBox / Time Sync Exclusion)
+        df_final = self._apply_context_filtering(df_final)
 
         # [Plan L] The Verdict Gate (Triage Threshold)
         if df_final.height > 0:

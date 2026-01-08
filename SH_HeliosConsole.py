@@ -8,9 +8,9 @@ import json
 from datetime import datetime, timedelta
 
 # ============================================================
-#  SH_HeliosConsole v2.1 [Tri-Mode Commander]
+#  SH_HeliosConsole v2.4 [Dual-Core Edition]
 #  Mission: Orchestrate Standard, Triage, and Deep Dive modes.
-#  Update: Implemented 3-way strategy with Deep Dive Scoping.
+#  Update: Pass BOTH Raw and CSV dirs to Hekate/Clotho.
 # ============================================================
 
 BANNER = r"""
@@ -19,7 +19,7 @@ BANNER = r"""
  | (___ | | _  _  __ _| |__| | ___| |_  ___  ___
   \___ \| |/ /| |/ _` |  __  |/ _ \ | |/ _ \/ __|
   ____) |   < | | (_| | |  | |  __/ | | (_) \__ \
- |_____/|_|\_\|_|\__,_|_|  |_|\___|_|_|\___/|___/ v4.43
+ |_____/|_|\_\|_|\__,_|_|  |_|\___|_|_|\___/|___/ v2.4
 """
 
 def run_stage(cmd, stage_name):
@@ -36,10 +36,12 @@ def run_stage(cmd, stage_name):
 def main():
     print(BANNER)
     parser = argparse.ArgumentParser(description="SkiaHelios Orchestrator")
-    parser.add_argument("--dir", required=False, help="Path to KAPE output folder")
+    parser.add_argument("--dir", required=False, help="Path to KAPE Module Output (CSV)")
+    parser.add_argument("--raw", required=False, help="Path to KAPE Target Output (Raw Files)")
+    
     parser.add_argument("--case", required=False, help="Case Name")
     parser.add_argument("--legacy", action="store_true", help="Enable Legacy OS adjustments")
-    parser.add_argument("--os", default=None, help="Target OS Version Name (e.g. 'Windows 10 Pro')")
+    parser.add_argument("--os", default=None, help="Target OS Version Name")
     
     # Modes
     group = parser.add_mutually_exclusive_group()
@@ -51,23 +53,38 @@ def main():
 
     # --- Interactive Mode ---
     if not args.dir:
-        print("\n[?] Input KAPE Output Directory:")
+        print("\n[?] Input KAPE Output Directory (CSV/Module Output):")
         args.dir = input("    > ").strip().strip('"')
     
     if not args.case:
         print("\n[?] Input Case Name (e.g. Case1_WebSrv):")
         args.case = input("    > ").strip()
 
-    kape_dir = Path(args.dir)
-    if not kape_dir.exists():
-        print(f"[!] Error: Directory not found: {kape_dir}")
+    kape_csv_dir = Path(args.dir)
+    if not kape_csv_dir.exists():
+        print(f"[!] Error: CSV Directory not found: {kape_csv_dir}")
         sys.exit(1)
 
-    # Mode Selection (Interactive)
+    # Rawデータディレクトリの自動検出
+    kape_raw_dir = Path(args.raw) if args.raw else None
+    
+    if not kape_raw_dir:
+        print("[*] Raw Artifacts path not specified. Attempting auto-detection...")
+        sibling_kape = kape_csv_dir.parent / "kape"
+        sibling_source = kape_csv_dir.parent / "source"
+        
+        if sibling_kape.exists():
+            kape_raw_dir = sibling_kape
+            print(f"    [+] Auto-detected Raw Dir: {kape_raw_dir}")
+        elif sibling_source.exists():
+            kape_raw_dir = sibling_source
+            print(f"    [+] Auto-detected Raw Dir: {kape_raw_dir}")
+        else:
+            print("    [!] Could not auto-detect Raw dir. Falling back to CSV dir (History/Registry detection may fail).")
+            kape_raw_dir = kape_csv_dir
+
+    # Mode Selection
     if not args.triage and not args.deep:
-        # Check if user wants to select mode interactively if not passed via CLI
-        # But if CLI was used partially (e.g. just --dir), we assume Standard unless prompted?
-        # Let's prompt if no mode flags were given
         print("\n[?] Select Operation Mode:")
         print("    1. Standard (Full Scan)")
         print("    2. Triage (Fast, High Confidence Only)")
@@ -81,12 +98,10 @@ def main():
     out_dir = Path("Helios_Output") / f"{args.case}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     out_dir.mkdir(parents=True, exist_ok=True)
     
-    # --- Strategy Decision ---
+    # Strategy Config
     mode_name = "STANDARD"
-    use_silencer = False  # for Hercules (System Ignore)
-    use_junk_killer = False # for Pandora (Log/DB Ignore)
-    
-    # Default Timeline (Wide Range)
+    use_silencer = False
+    use_junk_killer = False 
     scan_start = "2000-01-01"
     scan_end = "2030-01-01"
     
@@ -96,123 +111,107 @@ def main():
         use_junk_killer = True
     elif args.deep:
         mode_name = "DEEP DIVE"
-        use_silencer = False # System logs enabled for deep analysis
-        use_junk_killer = False # Show everything
-        
-        # [NEW] Deep Dive Scope Logic
-        # Interactive input might have set args.deep to string path
+        use_silencer = False
+        use_junk_killer = False
         if os.path.exists(args.deep):
             try:
                 with open(args.deep, 'r') as f:
                     pivot_data = json.load(f)
-                
-                # ターゲットの中で最も古い/新しい日時を見つけて範囲を設定
                 timestamps = []
                 for target in pivot_data.get("Deep_Dive_Targets", []):
                     ts_str = target.get("Timestamp_Hint", "")
-                    if ts_str and "T" in ts_str: # 簡易チェック
+                    if ts_str and "T" in ts_str:
                         try:
-                            # Parse ISO format (adjust as needed)
                             dt = datetime.fromisoformat(ts_str.replace("Z", ""))
                             timestamps.append(dt)
                         except: pass
-                
                 if timestamps:
                     min_ts = min(timestamps) - timedelta(minutes=30)
                     max_ts = max(timestamps) + timedelta(minutes=30)
                     scan_start = min_ts.strftime("%Y-%m-%d %H:%M:%S")
                     scan_end = max_ts.strftime("%Y-%m-%d %H:%M:%S")
-                    print(f"[*] DEEP DIVE SCOPE NARROWED: {scan_start} <-> {scan_end}")
-                    print(f"    (Focusing on {len(timestamps)} pivot points)")
-                else:
-                    print("[!] No valid timestamps in Pivot Config. Falling back to full scan.")
-            except Exception as e:
-                print(f"[!] Pivot Config Parse Error: {e}. Falling back to full scan.")
+                    print(f"[*] DEEP DIVE SCOPE: {scan_start} <-> {scan_end}")
+            except: pass
         else:
-            print(f"[!] Pivot Config not found: {args.deep}")
             sys.exit(1)
     
     print(f"[*] --- INITIATING CERBERUS PIPELINE: {args.case} ---")
-    print(f"[*] OPERATION MODE: {mode_name}")
-    if args.legacy: print("[*] LEGACY OS ADJUSTMENTS: ON")
-
+    
     # Paths
     master_timeline = out_dir / "Master_Timeline.csv"
     time_anomalies = out_dir / "Time_Anomalies.csv"
     ghost_report = out_dir / "Ghost_Report.csv"
     judged_timeline = out_dir / "Hercules_Judged_Timeline.csv"
-    
-    # 1. Chaos (Timeline)
-    run_stage(["python", "-m", "tools.SH_ChaosGrasp", "--dir", str(kape_dir), "--out", str(master_timeline)], "CHAOS")
+    aion_out = out_dir / "AION_Persistence.csv"
 
-    # 2. Chronos (Time Sift)
+    # [1] Clio (Browser History) -> Raw Dir を渡す！
+    clio_cmd = [
+        "python", "-m", "tools.SH_ClioGet",
+        "--dir", str(kape_raw_dir), 
+        "--out", str(out_dir)
+    ]
+    run_stage(clio_cmd, "CLIO (Browser History)")
+
+    # [2] Chaos (Timeline) -> CSV Dir
+    run_stage(["python", "-m", "tools.SH_ChaosGrasp", "--dir", str(kape_csv_dir), "--out", str(master_timeline)], "CHAOS")
+
+    # [3] Chronos
     chronos_cmd = ["python", "-m", "tools.SH_ChronosSift", "-f", str(master_timeline), "-o", str(time_anomalies)]
     if args.legacy: chronos_cmd.append("--legacy")
     run_stage(chronos_cmd, "CHRONOS")
 
-    # 3. Pandora (Pass 1)
+    # [4] Pandora Pass 1
     pandora_cmd_1 = [
         "python", "-m", "tools.SH_PandorasLink", 
-        "-d", str(kape_dir), 
+        "-d", str(kape_csv_dir), 
         "--out", str(ghost_report), 
-        "--start", scan_start, "--end", scan_end, # [UPDATED] Dynamic scope
+        "--start", scan_start, "--end", scan_end,
         "--chronos", str(time_anomalies)
     ]
     if use_junk_killer: pandora_cmd_1.append("--triage")
-    run_stage(pandora_cmd_1, f"PANDORA (Pass 1) [{mode_name}]")
+    run_stage(pandora_cmd_1, f"PANDORA (Pass 1)")
 
-    # 4. Hercules (Event Log)
+    # [5] Hercules
     hercules_cmd = [
         "python", "-m", "tools.SH_HerculesReferee",
         "--timeline", str(master_timeline),
         "--ghosts", str(ghost_report),
-        "--dir", str(kape_dir),
+        "--dir", str(kape_csv_dir),
         "--out", str(judged_timeline)
     ]
     if use_silencer: hercules_cmd.append("--triage")
-    run_stage(hercules_cmd, f"HERCULES [{mode_name}]")
+    run_stage(hercules_cmd, f"HERCULES")
 
-    # 5. Pandora (Pass 2 - Feedback)
+    # [6] Pandora Pass 2
     pandora_cmd_2 = pandora_cmd_1 + ["--hercules", str(judged_timeline)]
     run_stage(pandora_cmd_2, "PANDORA (Pass 2)")
 
-    # 6. AION (Persistence)
-    # [UPDATED] Pass explicit output path to avoid file-path dependency
-    aion_out = out_dir / "AION_Persistence.csv"
+    # [7] AION
     run_stage([
         "python", "-m", "tools.SH_AIONDetector", 
-        "--dir", str(kape_dir),  # Fixed: AION uses --dir, not --kape
-        "--out", str(aion_out)   # Fixed: Explicit output path
+        "--dir", str(kape_csv_dir),
+        "--out", str(aion_out)
     ], "AION")
     
-    # (File rename block removed as we now output directly)
-
-    # 7. Hekate (Final Report)
+    # [8] Hekate -> Raw と CSV の両方を渡す！
     hekate_cmd = [
         "python", "SH_HekateTriad.py",
         "--case", args.case,
-        "--host", "4ORENSICS", # Placeholder, ideally detected inside Hekate
-        "--user", "Hunter",    
         "--os", args.os if args.os else "Windows (Auto-Detected)",
         "--outdir", str(out_dir),
         "--timeline", str(master_timeline),
         "--pandora", str(ghost_report),
         "--hercules", str(judged_timeline),
         "--chronos", str(time_anomalies),
-        # Pass AION file if moved, or KAPE dir if AION needs re-parsing
-        "--aion", str(out_dir / "AION_Persistence.csv"),
-        # [NEW] Pass KAPE Source for USN & History Discovery
-        "--kape", str(kape_dir) 
+        "--aion", str(aion_out),
+        "--kape", str(kape_raw_dir), # Raw (History用)
+        "--csv", str(kape_csv_dir)   # CSV (Registry/EventLog用)
     ]
     if args.docx: hekate_cmd.append("--docx")
     
     run_stage(hekate_cmd, "HEKATE")
 
     print(f"\n[*] SUCCESS: Pipeline finished. Case dir: {out_dir}")
-    if mode_name == "TRIAGE":
-        pivot_conf = out_dir / "Pivot_Config.json"
-        print(f"[*] NEXT STEP: To investigate deeper, run:")
-        print(f"    python SH_HeliosConsole.py ... --deep \"{pivot_conf}\"")
 
 if __name__ == "__main__":
     main()
