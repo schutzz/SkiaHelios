@@ -99,10 +99,10 @@ graph TD
     * **Time Paradox Detection:** Detects system clock rollbacks (Timestomping) by analyzing USN Journal physical offsets versus timestamps.
     * **Rollback Calculation:** Precise calculation of the time delta (e.g., `-35997 seconds`).
 * **[NEW] Icarus Paradox Engine Integration:**
-    * **Cross-Artifact Correlation:** 単一の MFT 分析を超え、Prefetch、ShimCache ($AppCompatCache$)、および USN Journal との整合性をクロスチェック。
-    * **Sun & Wax Logic:** MFT を「不変の太陽 (Sun)」、他アーティファクトを「蝋の翼 (Wax)」と定義し、MFT 作成日時より前に存在する実行記録（パラドックス）を特定。
-    * **Robust Column Mapping:** パースツールによるカラム名の揺らぎ（`FileName` vs `Name`、`Created0x10` vs `Timestamp_UTC`）を自動検知して正規化するエイリアシング機能を実装。
-    * **Match Quality Scoring:** パス情報が欠落した照合において、信頼度に応じた減点スコアリングを実装。
+    * **Cross-Artifact Correlation:** Goes beyond single MFT analysis to cross-check consistency with Prefetch, ShimCache ($AppCompatCache$), and USN Journal.
+    * **Sun & Wax Logic:** Defines MFT as the "Immutable Sun" and other artifacts as the "Wax Wings", identifying execution records (paradoxes) that exist before the MFT creation timestamp.
+    * **Robust Column Mapping:** Implements aliasing to auto-detect and normalize column name variations (`FileName` vs `Name`, `Created0x10` vs `Timestamp_UTC`) across different parsing tools.
+    * **Match Quality Scoring:** Implements confidence-based deduction scoring for matches with missing path information.
 * **Hercules (The Referee - Justice V3):**
     * **The Linker (Phase 4):** Correlates file artifacts (LNK, Prefetch) with **Browser History** to confirm "Execution Success" vs "Attempt".
     * **Deep LNK Analysis:** Extracts Target Paths and Arguments to detect **PowerShell encoding**, **Hidden Windows**, and **Script Chaining**.
@@ -174,13 +174,13 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
 ## 📜 Complete Changelog
 
 ### v5.4 - Icarus Flight (Current) ☀️
-* **[Chronos]** **Icarus Paradox Engine:** 実装完了。アーティファクト間（MFT vs Prefetch/ShimCache/USNJ）の時系列矛盾を検知し、Timestomp を物理的に立証。
-* **[Chronos]** **Targeted USNJ Scan:** 疑わしいファイル（Suspects）に絞った効率的な USN レコード追跡ロジックを導入。
-* **[HeliosConsole]** **Auto-Detection:** ShimCache/Prefetch/USN ファイルを KAPE CSV ディレクトリから自動検出し、Chronos に渡す機能を追加。
-* **[Lachesis]** **Bilingual Report (EN/JP):** Grimoire レポートの日英両対応を実装。対話プロンプトまたは `--lang en/jp` で言語選択可能。
-* **[Fix]** **Dynamic Column Aliasing:** USN パース結果に `FileName` カラムが存在しない場合に `Name` カラムを自動使用するフォールバック処理を追加。
-* **[Fix]** **Flexible Timestamp Detection:** MFT (`Created0x10`) と Master_Timeline (`Timestamp_UTC`) の両方に対応する柔軟なタイムスタンプカラム検出を実装。
-* **[Fix]** **Match Quality Scoring:** パス情報が欠落した USN レコードの照合において、信頼度に応じた減点スコアリング（Match Quality）を実装。
+* **[Chronos]** **Icarus Paradox Engine:** Implemented. Detects timeline inconsistencies between artifacts (MFT vs Prefetch/ShimCache/USNJ) to physically prove Timestomping.
+* **[Chronos]** **Targeted USNJ Scan:** Introduced efficient USN record tracking logic focused on suspicious files (Suspects).
+* **[HeliosConsole]** **Auto-Detection:** Added auto-detection of ShimCache/Prefetch/USN files from KAPE CSV directory for Chronos integration.
+* **[Lachesis]** **Bilingual Report (EN/JP):** Implemented EN/JP bilingual Grimoire reports. Language selectable via interactive prompt or `--lang en/jp`.
+* **[Fix]** **Dynamic Column Aliasing:** Added fallback to use `Name` column when `FileName` column is missing in USN parse results.
+* **[Fix]** **Flexible Timestamp Detection:** Implemented flexible timestamp column detection supporting both MFT (`Created0x10`) and Master_Timeline (`Timestamp_UTC`).
+* **[Fix]** **Match Quality Scoring:** Implemented confidence-based deduction scoring (Match Quality) for USN record matches with missing path information.
 
 ### v5.3 - Operation Dragnet ⚡
 * **[PlutosGate]** **Exfil Hunter:** Implemented "Trinity Correlation" (SRUM x Browser x MFT) to detect confirmed data exfiltration events (e.g., zipping and uploading source code).
