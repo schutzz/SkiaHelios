@@ -64,6 +64,21 @@ class PlutosGate:
             r"sent", r"compose", r"draft", r"outbox", r"send", r"attachment", r"upload"
         ]
 
+        # [v5.5] IIS Log Analysis Patterns
+        self.iis_attack_signatures = [
+            # SQL Injection
+            r"(?i)union\s+select", r"(?i)xp_cmdshell", r"(?i)exec\s*\(", r"(?i)select\s+.*\s+from",
+            r"'\s*or\s*'1'\s*=\s*'1", r"(?i)drop\s+table", r"(?i)insert\s+into",
+            # WebShell / RCE
+            r"(?i)eval\s*\(", r"(?i)base64_decode", r"(?i)cmd\.exe", r"(?i)powershell",
+            r"(?i)/c\+", r"(?i)%2Fc%2B", r"(?i)wscript", r"(?i)cscript",
+            # Path Traversal
+            r"\.\./", r"\.\.%2f", r"%2e%2e%2f", r"(?i)\.\.\\",
+            # WebShell Indicators
+            r"(?i)china\s*chopper", r"(?i)c99\.php", r"(?i)r57\.php", r"(?i)b374k",
+            r"\.asp;\.", r"\.aspx;\.",  # IIS vulnerability patterns
+        ]
+
     def _load_csv(self, pattern, columns=None):
         """高速読み込み用ラッパー (LazyFrame)"""
         search_path = os.path.join(self.kape_dir, "**", pattern)
@@ -388,6 +403,109 @@ class PlutosGate:
             return pl.concat(hits)
         return None
 
+    # ============================================================
+    # [v5.5] IIS Log Analyzer
+    # ============================================================
+    def analyze_iis_logs(self):
+        """
+        Analyze IIS/W3SVC logs for web attack signatures.
+        Detects: SQLi, WebShell, Path Traversal, 500-burst, 404 reconnaissance
+        """
+        print("[*] Phase 5: Analyzing IIS/Web Server Logs...")
+        
+        # Try multiple IIS log patterns
+        lf_iis = None
+        for pattern in ["*IIS*.csv", "*W3SVC*.csv", "*u_ex*.csv", "*iis*.csv"]:
+            lf_iis = self._load_csv(pattern)
+            if lf_iis is not None:
+                break
+        
+        if lf_iis is None:
+            print("    [*] No IIS logs found. Skipping web analysis.")
+            return None
+        
+        try:
+            # Identify columns
+            schema = lf_iis.collect_schema().names()
+            
+            # Common IIS log column variations
+            uri_col = next((c for c in ["cs-uri-stem", "UriStem", "URI", "Request", "cs_uri_stem"] if c in schema), None)
+            query_col = next((c for c in ["cs-uri-query", "UriQuery", "Query", "QueryString", "cs_uri_query"] if c in schema), None)
+            status_col = next((c for c in ["sc-status", "Status", "StatusCode", "sc_status"] if c in schema), None)
+            time_col = next((c for c in ["date", "DateTime", "Timestamp", "time"] if c in schema), None)
+            client_col = next((c for c in ["c-ip", "ClientIP", "ClientIp", "c_ip", "SourceIp"] if c in schema), None)
+            
+            if not uri_col:
+                print("    [!] Cannot identify URI column in IIS logs.")
+                return None
+            
+            print(f"    [+] IIS columns detected: URI={uri_col}, Status={status_col}")
+            
+            hits = []
+            
+            # --- 1. Attack Signature Detection ---
+            combined_pattern = "|".join(self.iis_attack_signatures)
+            
+            # Build filter expression
+            filter_expr = pl.col(uri_col).str.contains(combined_pattern)
+            if query_col and query_col in schema:
+                filter_expr = filter_expr | pl.col(query_col).cast(pl.Utf8).fill_null("").str.contains(combined_pattern)
+            
+            attack_hits = lf_iis.filter(filter_expr)
+            attack_df = attack_hits.collect()
+            
+            if attack_df.height > 0:
+                print(f"    [!] WEB ATTACK SIGNATURES DETECTED: {attack_df.height} requests")
+                attack_df = attack_df.with_columns([
+                    pl.lit("WEB_ATTACK_SIGNATURE").alias("Plutos_Verdict"),
+                    pl.lit("CRITICAL").alias("Severity"),
+                    pl.lit(300).alias("Heat_Score")
+                ])
+                hits.append(attack_df)
+            
+            # --- 2. 500-Error Burst Detection ---
+            if status_col and status_col in schema:
+                error_500 = lf_iis.filter(
+                    pl.col(status_col).cast(pl.Utf8).str.starts_with("5")
+                ).collect()
+                
+                if error_500.height >= 5:
+                    print(f"    [!] SERVER ERROR BURST: {error_500.height} 5xx errors")
+                    error_500 = error_500.with_columns([
+                        pl.lit("IIS_SERVER_ERROR_BURST").alias("Plutos_Verdict"),
+                        pl.lit("HIGH").alias("Severity"),
+                        pl.lit(80).alias("Heat_Score")
+                    ])
+                    hits.append(error_500.head(50))  # Limit output
+            
+            # --- 3. 404 Reconnaissance Detection ---
+            if status_col and status_col in schema and uri_col:
+                recon_404 = (
+                    lf_iis
+                    .filter(pl.col(status_col).cast(pl.Utf8) == "404")
+                    .group_by(uri_col)
+                    .agg(pl.len().alias("hit_count"))
+                    .filter(pl.col("hit_count") >= 3)  # 3+ hits on same 404 = recon
+                    .collect()
+                )
+                
+                if recon_404.height > 0:
+                    print(f"    [!] RECONNAISSANCE SCAN: {recon_404.height} URIs with repeated 404s")
+                    recon_404 = recon_404.with_columns([
+                        pl.lit("RECONNAISSANCE_404_SCAN").alias("Plutos_Verdict"),
+                        pl.lit("MEDIUM").alias("Severity"),
+                        pl.lit(50).alias("Heat_Score")
+                    ])
+                    hits.append(recon_404)
+            
+            if hits:
+                return pl.concat(hits, how="diagonal")
+            
+        except Exception as e:
+            print(f"    [!] IIS Analysis Error: {e}")
+        
+        return None
+
 def main(argv=None):
     print_logo()
     parser = argparse.ArgumentParser()
@@ -427,6 +545,12 @@ def main(argv=None):
     if df_mail is not None and df_mail.height > 0:
         print(f"[!] SUSPICIOUS EMAIL ACTIVITY DETECTED: {df_mail.height} events")
         df_mail.write_csv(args.out.replace(".csv", "_email_hunt.csv"))
+
+    # 5. IIS/Web Server Log Analysis [v5.5]
+    df_iis = gate.analyze_iis_logs()
+    if df_iis is not None and df_iis.height > 0:
+        print(f"[!] WEB SERVER ANOMALIES DETECTED: {df_iis.height} events")
+        df_iis.write_csv(args.out.replace(".csv", "_iis_analysis.csv"))
 
 if __name__ == "__main__":
     main()

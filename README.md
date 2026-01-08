@@ -1,11 +1,11 @@
-# SkiaHelios v5.4 - The Causality & Justice Engine (Icarus Flight / Paradox Breaker)
+# SkiaHelios v5.6 - The Causality & Justice Engine (Account Takeover / Evidence Wiping)
 
 ![SkiaHelios CI](https://github.com/schutzz/SkiaHelios/actions/workflows/test.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
 ![Polars](https://img.shields.io/badge/Engine-Polars_0.20%2B-orange?logo=polars)
 ![Mermaid](https://img.shields.io/badge/Report-Mermaid_Visuals-ff69b4?logo=mermaid)
 ![Tests](https://img.shields.io/badge/Tests-55%2F55_PASS-brightgreen)
-![Status](https://img.shields.io/badge/Status-Paradox_Breaker-gold)
+![Status](https://img.shields.io/badge/Status-Account_Takeover-red)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey)
 
 > *"From Shadows to Sun. From Data to Gold."*
@@ -13,9 +13,9 @@
 
 **SkiaHelios** is a high-resolution, modular DFIR (Digital Forensics & Incident Response) framework built for **speed**, **causality**, **origin tracing**, and **visual narrative**.
 
-Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** orchestrated by **"Hekate"**, supported by **"Chronos" (The Time Lord feat. Icarus Paradox)**, **"Hercules" (The Referee)**, and the newly integrated **"PlutosGate" (Network Hunter)** to detect advanced network threats like **Lateral Movement**, **Data Exfiltration**, **Time Paradoxes**, and **Cross-Artifact Tampering**.
+Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** orchestrated by **"Hekate"**, supported by **"Chronos" (The Time Lord feat. Icarus Paradox)**, **"Hercules" (The Referee)**, the **"PlutosGate" (Network Hunter)**, and the **"YARA WebShell Scanner"** to detect advanced threats including **Account Takeover**, **Privilege Escalation**, **Evidence Wiping**, **Web Intrusion Chains**, and **Cross-Artifact Tampering**.
 
-**Current Version:** v5.4 (Icarus Flight / Paradox Breaker / Cross-Artifact Paradox Detection)
+**Current Version:** v5.6.2 (Dirty Hive Hunter / Anchor Extension)
 
 ---
 
@@ -173,7 +173,24 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
 
 ## 📜 Complete Changelog
 
-### v5.4 - Icarus Flight (Current) ☀️
+### v5.6 - The Dirty Hive Hunter & Justice Refined (Current) ☠️
+* **[Chain Scavenger]** **Dirty Hive Hunter (v1.0):** Binary-level SAM hive analyzer that triggers when RECmd fails. Extracts hidden user accounts from corrupted/dirty hives using "Anchor Search" and "Context Carving".
+* **[Chain Scavenger]** **Anchor Extension (v5.6.2):** Enhanced detection using **"Users" key** and **RID-like Hex Patterns** to capture fragmented account traces (e.g., `hacker`) that evade standard parsing.
+* **[Hercules]** **User Creation Detection:** Detects `net user /add`, EID 4720 (User Created), EID 4732/4728 (Group Membership), PowerShell `New-LocalUser`.
+* **[Hercules]** **Log Deletion Analysis:** Correlates Log Deletion (EID 1102) with missing User Creation events (`[LOG_WIPE_INDUCED_MISSING_EVENT]`).
+* **[Hercules]** **Evidence Wiping Detection:** Detects USN Journal deletion (`fsutil usn deletejournal`), MFT manipulation, `cipher /w`.
+* **[Hercules]** **Privilege Escalation:** Detects Admin/RDP group additions and SAM registry tampering.
+* **[Lachesis]** **Full Bilingual Support:** Grimoire reports now fully localized in English (`--lang en`) and Japanese.
+* **[Lachesis]** **Scope Auto-Correction:** Incident scope now intelligently includes Chain Scavenger and Anti-Forensics events (relaxed year filter).
+
+### v5.5 - Web Forensics 🕷️
+* **[PlutosGate]** **IIS Log Analyzer:** Implemented web server log analysis with SQLi/WebShell signature detection, 500-error burst detection, and 404 reconnaissance scanning.
+* **[NEW]** **SH_YaraScanner.py:** Created YARA-like WebShell scanner module with built-in signatures (China Chopper, b374k, c99, r57, WSO). Supports dual-mode scanning (live files + ghost entries).
+* **[Hercules]** **C2/Lateral Movement Detection:** Added new verdicts: `POTENTIAL_C2_CALLBACK`, `LATERAL_MOVEMENT_DETECTED`, `WEB_INTRUSION_CHAIN`.
+* **[Lachesis]** **Attack Chain Mermaid:** Implemented causality visualization showing Web Anomalies → File System Changes → Process Execution chains.
+* **[HeliosConsole]** **YARA Flag:** Added `--enable-yara-webshell` optional flag for WebShell scanning.
+
+### v5.4 - Icarus Flight ☀️
 * **[Chronos]** **Icarus Paradox Engine:** Implemented. Detects timeline inconsistencies between artifacts (MFT vs Prefetch/ShimCache/USNJ) to physically prove Timestomping.
 * **[Chronos]** **Targeted USNJ Scan:** Introduced efficient USN record tracking logic focused on suspicious files (Suspects).
 * **[HeliosConsole]** **Auto-Detection:** Added auto-detection of ShimCache/Prefetch/USN files from KAPE CSV directory for Chronos integration.

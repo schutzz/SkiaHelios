@@ -18,7 +18,7 @@ class LachesisCore:
         self.base_dir = Path(base_dir)
         self.intel = LachesisIntel(base_dir)
         self.enricher = LachesisEnricher(base_dir)
-        self.analyzer = LachesisAnalyzer(self.intel, self.enricher)
+        self.analyzer = LachesisAnalyzer(self.intel, self.enricher, lang=self.lang)
 
     def weave_report(self, analysis_result, output_path, dfs_for_ioc, hostname, os_info, primary_user, history_csv=None, history_search_path=None):
         print(f"[*] Lachesis v4.50 (Refactored) is weaving the report into {output_path}...")

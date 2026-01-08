@@ -108,34 +108,31 @@ class LachesisRenderer:
         has_timestomp = any("TIMESTOMP" in str(ioc.get('Type', '')) for ioc in visual_iocs)
         has_anti = any("ANTI_FORENSICS" in str(ioc.get('Type', '')) for ioc in visual_iocs)
         
-        conclusion = ""
+        # [i18n] Use TEXT_RES for conclusions
+        t = self.txt
         if has_paradox:
-            conclusion = (
-                f"**結論:**\n{time_range} の期間において、端末 {self.hostname} に対する **高度な隠蔽工作を伴う重大な侵害活動** を確認しました。\n\n"
-                f"⚠️🚨 **SYSTEM TIME MANIPULATION DETECTED** 🚨⚠️\n"
-                f"**システム時刻の巻き戻し（Time Paradox）** が検知されました。攻撃者は時刻を操作することでフォレンジック調査を妨害し、"
-                f"ログのタイムラインを意図的に破壊しようとした痕跡があります。タイムライン分析には極めて慎重な精査が必要です。\n"
-            )
+            conclusion = t['conclusion_paradox'].format(time_range=time_range, hostname=self.hostname)
         elif has_masquerade or has_anti:
-            conclusion = f"**結論:**\n{time_range} の期間において、端末 {self.hostname} に対する **証拠隠滅・偽装を伴う重大な侵害活動** を確認しました。\n"
+            conclusion = t['conclusion_anti'].format(time_range=time_range, hostname=self.hostname)
         elif visual_iocs:
-            conclusion = f"**結論:**\n{time_range} の期間において、端末 {self.hostname} に対する **CRITICAL レベルの侵害活動** を確認しました。\n"
+            conclusion = t['conclusion_critical'].format(time_range=time_range, hostname=self.hostname)
         else:
-            conclusion = f"**結論:**\n本調査範囲において、重大なインシデントの痕跡は検出されませんでした。\n"
+            conclusion = t['conclusion_clean']
         
         f.write(conclusion)
         
+        # [i18n] Use TEXT_RES for attack methods
         attack_methods = []
-        if has_phishing: attack_methods.append("フィッシング（LNK）による初期侵入")
-        if has_masquerade: attack_methods.append("偽装ファイル設置（Masquerading）")
-        if has_timestomp: attack_methods.append("タイムスタンプ偽装（Timestomp）")
-        if has_paradox: attack_methods.append("**システム時間巻き戻し（System Rollback）**")
-        if has_anti: attack_methods.append("痕跡ワイピング（Anti-Forensics）")
+        if has_phishing: attack_methods.append(t['attack_phishing'])
+        if has_masquerade: attack_methods.append(t['attack_masquerade'])
+        if has_timestomp: attack_methods.append(t['attack_timestomp'])
+        if has_paradox: attack_methods.append(t['attack_paradox'])
+        if has_anti: attack_methods.append(t['attack_anti'])
         
-        if not attack_methods: attack_methods = ["不審なアクティビティ"]
+        if not attack_methods: attack_methods = [t['attack_default']]
             
-        f.write(f"**主な攻撃手口:** {', '.join(attack_methods)}。\n\n")
-        f.write("> **Deep Dive 推奨:** 詳細な調査を行う際は、添付の `Pivot_Config.json` に記載された **CRITICAL_PHISHING** ターゲット群から開始してください。特にイベントログ（ID 4688）からのコマンドライン復元が最優先事項です。\n\n")
+        f.write(f"{t['attack_methods_label']} {', '.join(attack_methods)}.\n\n")
+        f.write(t['deep_dive_note'])
         
         f.write(self._render_mermaid_vertical_clustered(visual_iocs))
         f.write(self._render_key_indicators(visual_iocs))
@@ -148,22 +145,22 @@ class LachesisRenderer:
         drop_items = [s for s in pivot_seeds if "DROP" in s.get("Reason", "") and "PHISHING" not in s.get("Reason", "")]
         
         if phishing_lnks:
-            f.write("**フィッシングによる初期侵入が高確度で確認されました。**\n")
-            f.write(f"- Recentフォルダ等において、**{len(phishing_lnks)}件** の不審なLNKファイル（ショートカット）へのアクセスが検知されています。\n")
-            f.write("\n| サンプルLNK | アクセス時刻 (UTC) | 流入元 (Origin Trace) |\n|---|---|---|\n")
+            f.write(t.get('phishing_confirmed', "**Phishing-based initial access has been confirmed with high confidence.**\n"))
+            f.write(t.get('phishing_lnk_detected', "- **{count}** suspicious LNK files detected.\n").format(count=len(phishing_lnks)))
+            f.write(t.get('phishing_table_header', "\n| Sample LNK | Access Time (UTC) | Origin Trace |\n|---|---|---|\n"))
             for seed in phishing_lnks[:10]:
                 self._write_origin_row(f, seed, origin_stories)
             f.write("\n")
 
         if drop_items:
-            f.write("**不審なツール・ファイルの持ち込み（Dropped Artifacts）:**\n")
-            f.write("\n| ファイル名 | 発見場所 | 流入元 (Origin Trace) |\n|---|---|---|\n")
+            f.write(t.get('dropped_artifacts_header', "**Suspicious Tool/File Introduction (Dropped Artifacts):**\n"))
+            f.write(t.get('dropped_table_header', "| File Name | Discovery Time | Origin Trace |\n|---|---|---|\n"))
             for seed in drop_items[:10]:
                 self._write_origin_row(f, seed, origin_stories)
             f.write("\n")
 
         if not phishing_lnks and not drop_items:
-            f.write("明確な外部侵入ベクターは自動検知されませんでした。\n\n")
+            f.write(t.get('no_vector_found', "No clear external intrusion vector was automatically detected.\n\n"))
 
     def _write_origin_row(self, f, seed, origin_stories):
         name = seed['Target_File']
@@ -326,7 +323,7 @@ class LachesisRenderer:
         if "SYSTEM_TIME" in tag or "TIME_CHANGE" in tag or "4616" in tag or "ROLLBACK" in tag: return "SYSTEM MANIPULATION"
         if "PHISH" in typ or "LNK" in typ: return "INITIAL ACCESS"
         if "WIPE" in typ or "ANTI" in typ: return "ANTI-FORENSICS"
-        if "PERSIST" in typ: return "PERSISTENCE"
+        if "PERSIST" in typ or "SAM_SCAVENGE" in tag or "DIRTY_HIVE" in tag: return "PERSISTENCE"
         if "EXEC" in typ or "RUN" in typ: return "EXECUTION"
         if "TIMESTOMP" in typ: return "TIMESTOMP (FILE)"
         return "OTHER ACTIVITY"
@@ -339,6 +336,123 @@ class LachesisRenderer:
         if "SYSTEM_TIME" in str(ev.get('Tag', '')) or "4616" in str(val): return "System Time Changed"
         if "\\" in val or "/" in val: val = os.path.basename(val.replace("\\", "/"))
         return val[:15] + ".." if len(val) > 15 else val
+
+    # ============================================================
+    # [v5.5] Attack Chain Mermaid - Causality Visualization
+    # ============================================================
+    def _render_attack_chain_mermaid(self, visual_iocs):
+        """
+        Generate a causality Mermaid diagram showing:
+        Web Anomalies → File System Changes → Process Execution
+        """
+        web_events = []
+        file_events = []
+        exec_events = []
+        c2_events = []
+        lateral_events = []
+        
+        for ioc in visual_iocs:
+            tag = str(ioc.get('Tag', ''))
+            typ = str(ioc.get('Type', ''))
+            
+            if "WEB_INTRUSION" in tag or "WEB_ATTACK" in tag:
+                web_events.append(ioc)
+            elif "C2_CALLBACK" in tag:
+                c2_events.append(ioc)
+            elif "LATERAL_MOVEMENT" in tag:
+                lateral_events.append(ioc)
+            elif "EXEC" in typ or "Process" in typ:
+                exec_events.append(ioc)
+            elif "DROP" in typ or "FILE" in typ or "PHISHING" in typ:
+                file_events.append(ioc)
+        
+        # Skip if no attack chain found
+        if not (web_events or c2_events or lateral_events):
+            return ""
+        
+        f = []
+        f.append("\n### 🔗 Attack Chain Visualization (Causality)\n")
+        f.append("```mermaid")
+        f.append("graph TD")
+        f.append("    classDef web fill:dodgerblue,stroke:darkblue,color:white,stroke-width:2px;")
+        f.append("    classDef file fill:orange,stroke:darkorange,color:black,stroke-width:2px;")
+        f.append("    classDef exec fill:crimson,stroke:darkred,color:white,stroke-width:2px;")
+        f.append("    classDef c2 fill:purple,stroke:indigo,color:white,stroke-width:2px;")
+        f.append("    classDef lateral fill:gold,stroke:orange,color:black,stroke-width:2px;")
+        
+        node_id = 0
+        web_node_ids = []
+        file_node_ids = []
+        exec_node_ids = []
+        c2_node_ids = []
+        lateral_node_ids = []
+        
+        # Web Events
+        if web_events:
+            f.append("    subgraph WEB [\"🌐 Web Anomalies\"]")
+            for ev in web_events[:5]:
+                val = self._get_short_summary(ev)
+                f.append(f"        W{node_id}[\"{val}\"]:::web")
+                web_node_ids.append(f"W{node_id}")
+                node_id += 1
+            f.append("    end")
+        
+        # File Events  
+        if file_events:
+            f.append("    subgraph FILES [\"📁 File System Changes\"]")
+            for ev in file_events[:5]:
+                val = self._get_short_summary(ev)
+                f.append(f"        F{node_id}[\"{val}\"]:::file")
+                file_node_ids.append(f"F{node_id}")
+                node_id += 1
+            f.append("    end")
+        
+        # Execution Events
+        if exec_events:
+            f.append("    subgraph EXEC [\"⚡ Process Execution\"]")
+            for ev in exec_events[:5]:
+                val = self._get_short_summary(ev)
+                f.append(f"        E{node_id}[\"{val}\"]:::exec")
+                exec_node_ids.append(f"E{node_id}")
+                node_id += 1
+            f.append("    end")
+        
+        # C2 Events
+        if c2_events:
+            f.append("    subgraph C2 [\"📡 C2 Communication\"]")
+            for ev in c2_events[:3]:
+                val = self._get_short_summary(ev)
+                f.append(f"        C{node_id}[\"{val}\"]:::c2")
+                c2_node_ids.append(f"C{node_id}")
+                node_id += 1
+            f.append("    end")
+        
+        # Lateral Events
+        if lateral_events:
+            f.append("    subgraph LAT [\"🦀 Lateral Movement\"]")
+            for ev in lateral_events[:3]:
+                val = self._get_short_summary(ev)
+                f.append(f"        L{node_id}[\"{val}\"]:::lateral")
+                lateral_node_ids.append(f"L{node_id}")
+                node_id += 1
+            f.append("    end")
+        
+        # Draw connections (causality arrows)
+        if web_node_ids and file_node_ids:
+            f.append(f"    WEB --> FILES")
+        if file_node_ids and exec_node_ids:
+            f.append(f"    FILES --> EXEC")
+        if exec_node_ids and c2_node_ids:
+            f.append(f"    EXEC --> C2")
+        if exec_node_ids and lateral_node_ids:
+            f.append(f"    EXEC --> LAT")
+        if web_node_ids and exec_node_ids and not file_node_ids:
+            f.append(f"    WEB --> EXEC")
+        
+        f.append("```\n")
+        f.append("> **Reading Guide:** Blue = Web intrusion indicators, Orange = File drops, Red = Execution, Purple = C2, Gold = Lateral movement\n\n")
+        
+        return "\n".join(f)
 
     def _render_key_indicators(self, events):
         output = ["\n### 💎 Key Indicators (Critical Only)\n"]
@@ -409,9 +523,15 @@ class LachesisRenderer:
                     insight = analyzer.generate_ioc_insight(ioc)
                     if insight: f.write(f"  - 🕵️ **Analyst Note:** {insight}\n")
             f.write("\n")
+        
+        # [v5.5] Add Attack Chain Visualization if C2/Lateral/Web events exist
+        attack_chain = self._render_attack_chain_mermaid(analyzer.visual_iocs)
+        if attack_chain:
+            f.write(attack_chain)
 
     def _render_grouped_lnk_findings(self, f, items, origin_stories, analyzer):
         """Helper to render LNK findings with grouping to avoid repetition"""
+        t = self.txt
         high_interest = []
         generic_lnks = []
         
@@ -419,19 +539,9 @@ class LachesisRenderer:
             name = ioc.get("Value", "")
             is_special = False
             
-            # Check for Origin Story (Confirmed Download)
-            story = next((s for s in origin_stories if s["Target"] == name), None) if origin_stories else None
-            if story and story.get("Confidence") == "HIGH": is_special = True
-            
-            # Check for DEFCON/Masquerade
-            if "DEFCON" in name.upper() or "MASQUERADE" in str(ioc.get("Extra", {}).get("Risk", "")): is_special = True
-            
-            if is_special: high_interest.append(ioc)
-            else: generic_lnks.append(ioc)
-            
         # Render High Interest Items
         if high_interest:
-            f.write("**特記事項 (High Interest Artifacts):**\n")
+            f.write(t.get('high_interest_artifacts', "**High Interest Artifacts:**\n"))
             high_interest.sort(key=lambda x: x.get('Time', '9999'))
             for ioc in high_interest:
                 dt = str(ioc.get('Time', '')).replace('T', ' ')[:19]
@@ -443,14 +553,14 @@ class LachesisRenderer:
                 story = next((s for s in origin_stories if s["Target"] == val), None) if origin_stories else None
                 if story and story.get("Confidence") == "HIGH":
                      gap = story['Evidence'][0].get('Time_Gap', '-')
-                     insight = f"✅ **Web Download Confirmed** (Gap: {gap})<br/>" + (insight if insight else "")
+                     insight = t.get('web_download_confirmed', "✅ **Web Download Confirmed** (Gap: {gap})<br/>").format(gap=gap) + (insight if insight else "")
                 
                 if insight: f.write(f"  - 🕵️ **Analyst Note:** {insight}\n")
 
         # Render Generic Items Summary
         if generic_lnks:
-            f.write(f"\n**その他のLNK ({len(generic_lnks)}件):**\n")
-            f.write("画像ファイル名を装ったショートカット群です。Target_Path情報はワイピングにより欠落していますが、作成パターンからフィッシング由来と断定されます。\n")
+            f.write(t.get('other_lnks_header', "\n**Other LNKs ({count} files):**\n").format(count=len(generic_lnks)))
+            f.write(t.get('other_lnks_desc', "Shortcuts disguised as image filenames. Target_Path information is missing due to wiping, but creation patterns confirm phishing origin.\n"))
             generic_lnks.sort(key=lambda x: x.get('Time', '9999'))
             for ioc in generic_lnks:
                 dt = str(ioc.get('Time', '')).replace('T', ' ')[:19]
@@ -458,11 +568,11 @@ class LachesisRenderer:
                 f.write(f"- {dt} | `{val}`\n")
 
     def _write_anti_forensics_section(self, f, ioc_list, dfs):
+        t = self.txt
         af_tools = [ioc for ioc in ioc_list if "ANTI" in str(ioc.get("Type", "")) or "WIPE" in str(ioc.get("Type", ""))]
         if not af_tools: return
-        f.write("### 🚨 Anti-Forensics Activities (Evidence Destruction)\n\n")
-        f.write("⚠️⚠️⚠️ **重大な証拠隠滅活動を検出** ⚠️⚠️⚠️\n\n")
-        f.write("攻撃者は侵入後、以下のツールを使用して活動痕跡を意図的に抹消しています：\n\n")
+        f.write(t.get('anti_forensics_header', "### 🚨 Anti-Forensics Activities (Evidence Destruction)\n\n"))
+        
         seen_tools = set()
         for tool in af_tools:
             name = tool.get("Value", "Unknown").upper()
@@ -470,29 +580,24 @@ class LachesisRenderer:
             seen_tools.add(name)
             run_count = self._extract_dual_run_count(tool, dfs)
             last_run = tool.get("Time", "Unknown").replace("T", " ")[:19]
-            desc = "データ抹消ツール"
-            if "BCWIPE" in name: desc = "軍事レベルのファイルワイピングツール。通常の復元を不可能にします。"
-            elif "CCLEANER" in name: desc = "システムクリーナー。ブラウザ履歴やMRUの削除に使用されます。"
+            
+            desc = t.get('note_anti_cleanup', "Presumed to be used for post-attack evidence cleanup.")
+            if "BCWIPE" in name: desc = t.get('note_anti_bcwipe', "Military-grade file wiping tool.")
+            elif "CCLEANER" in name: desc = t.get('note_anti_ccleaner', "System cleaner.")
+            
             f.write(f"#### {name}\n")
             f.write(f"- 📊 **Run Count**: **{run_count}**\n")
             f.write(f"- 🕐 **Last Execution**: {last_run} (UTC)\n")
             f.write(f"- ⚠️ **Severity**: CRITICAL\n")
             f.write(f"- 🔍 **Description**: {desc}\n\n")
             f.write(f"🕵️ **Analyst Note**:\n")
-            if "BCWIPE" in name:
-                 f.write("このツールの実行により、LNKファイル、Prefetch、一時ファイル等の証拠が物理的に上書き削除された可能性が極めて高いです。\n")
-            else:
-                 f.write("攻撃活動終了後の痕跡削除（Cleanup）に使用されたと推定されます。\n")
-            f.write("\n---\n\n")
-        f.write("### 📉 Missing Evidence Impact Assessment\n\n")
-        f.write("以下の証拠が、Anti-Forensicsツールによって失われたと判断されます：\n\n")
-        f.write("| 証拠カテゴリ | 期待される情報 | 現状 | 推定原因 |\n|---|---|---|---|\n")
-        f.write("| LNK Target Paths | `cmd.exe ...` 等の引数 | ❌ 欠落 | BCWipe/SDeleteによる削除 |\n")
-        f.write("| Prefetch (Tools) | 実行回数・タイムスタンプ | ❌ 欠落 | CCleaner/BCWipeによる削除 |\n")
-        f.write("| 一時ファイル | ペイロード本体 | ❌ 欠落 | ワイピングによる物理削除 |\n\n")
-        f.write("🕵️ **Analyst Note**:\n")
-        f.write("これらの証拠欠落は「ツールの限界」ではなく、**「攻撃者による高度な隠蔽工作」**の結果です。\n")
-        f.write("Ghost Detection (USNジャーナル) によりファイルの「存在していた事実」のみを確認できています。\n\n")
+            f.write(t.get('note_anti_cleanup', "Presumed to be used for post-attack evidence cleanup.") + "\n\n")
+
+        # Missing Evidence Assessment
+        f.write(t.get('missing_evidence_header', "### 📉 Missing Evidence Impact Assessment\n\n"))
+        f.write(t.get('missing_evidence_table', ""))
+        f.write(t.get('missing_evidence_note', ""))
+        f.write("---\n\n")
 
     def _extract_dual_run_count(self, ioc, dfs):
         ua_count = "N/A"
@@ -555,89 +660,75 @@ class LachesisRenderer:
         t = self.txt
         f.write(f"## {t['h1_stats']}\n")
         
-        # [Fix Issue #1] Correct Stats Presentation
-        filtered_count = sum(analyzer.noise_stats.values()) if hasattr(analyzer, "noise_stats") else 0
-        critical_count = len(analyzer.visual_iocs)
-        total_events = analyzer.total_events_analyzed if hasattr(analyzer, "total_events_analyzed") else (filtered_count + critical_count + len(medium_events))
-        if total_events == 0: total_events = 1 
+        raw_count = analyzer.total_events_analyzed
+        crit_count = len(analyzer.visual_iocs)
+        noise_removed = sum(analyzer.noise_stats.values()) if analyzer.noise_stats else 0
+        total_processed = raw_count + noise_removed
         
-        f.write("### 📊 Overall Analysis Summary\n")
+        # Avoid division by zero
+        crit_ratio = (crit_count / total_processed * 100) if total_processed > 0 else 0
+        
+        f.write(t.get('stats_header', "### 📊 Overall Analysis Summary\n"))
         f.write("| Category | Count | Note |\n|---|---|---|\n")
-        f.write(f"| **Total Events Analyzed** | **{total_events}** | After filtering |\n")
-        
-        crit_pct = (critical_count / total_events) * 100
-        f.write(f"| Critical Detections | {critical_count} | {crit_pct:.2f}% of analyzed |\n")
-        f.write(f"| Filtered Out (Noise) | {filtered_count} | Removed before analysis |\n\n")
-        
-        f.write("### 🎯 Critical Detection Breakdown\n")
+        f.write(f"| **Total Events Analyzed** | **{total_processed}** | After filtering |\n")
+        f.write(f"| Critical Detections | {crit_count} | {crit_ratio:.2f}% of analyzed |\n")
+        f.write(f"| Filtered Out (Noise) | {noise_removed} | Removed before analysis |\n\n")
+
+        # Critical Breakdown
+        f.write(t.get('stats_critical_breakdown', "### 🎯 Critical Detection Breakdown\n"))
         f.write("| Type | Count | Max Score | Impact |\n|---|---|---|---|\n")
-        type_counts = {}
-        for ioc in analyzer.visual_iocs:
-            typ = ioc.get("Type", "Unknown")
-            if "PHISHING" in typ: typ = "PHISHING / LNK"
-            elif "TIMESTOMP" in typ: typ = "TIMESTOMP"
-            elif "ANTI" in typ: typ = "ANTI_FORENSICS"
-            elif "MASQUERADE" in typ: typ = "MASQUERADE"
-            type_counts[typ] = type_counts.get(typ, 0) + 1
-        for typ, count in sorted(type_counts.items(), key=lambda x: x[1], reverse=True):
-            score = 300 if "ANTI" in typ or "MASQ" in typ else 250
-            impact = "Evidence destruction" if "ANTI" in typ else ("Initial access" if "PHISH" in typ else "Evasion")
-            f.write(f"| **{typ}** | **{count}** | {score} | {impact} |\n")
-        f.write("\n")
         
-        # [Fix Issue #2] Medium Events Breakdown
-        f.write("### ⚠️ Medium Confidence Events\n")
-        if medium_events:
-            f.write(f"**Total Count:** {len(medium_events)} 件 (Timeline CSV参照)\n")
+        grouped = {}
+        for ev in analyzer.visual_iocs:
+            cat = self._get_event_category(ev)
+            if cat not in grouped: grouped[cat] = []
+            grouped[cat].append(ev)
             
-            # Category Breakdown
-            med_counts = {}
-            for ev in medium_events:
-                cat = ev.get('Category', 'Other')
-                med_counts[cat] = med_counts.get(cat, 0) + 1
-            
-            f.write(f"**主なカテゴリ分布:**\n")
-            for cat, count in sorted(med_counts.items(), key=lambda x: x[1], reverse=True)[:5]:
-                f.write(f"- {cat}: {count}件\n")
-            
-            f.write("\n**代表的なイベント (Top 5):**\n")
-            f.write("| Time | Summary |\n|---|---|\n")
-            for ev in medium_events[:5]:
-                t_str = str(ev.get('Time','')).replace('T',' ')[:19]
-                sum_str = str(ev.get('Summary', ''))[:80] + "..."
-                f.write(f"| {t_str} | {sum_str} |\n")
-            f.write("\n")
-            
-        f.write("### 📉 Filtered Noise Statistics\n")
-        f.write("| Filter Reason | Count |\n|---|---|\n")
-        if hasattr(analyzer, "noise_stats") and analyzer.noise_stats:
-            for reason, count in sorted(analyzer.noise_stats.items(), key=lambda x: x[1], reverse=True):
-                f.write(f"| {reason} | {count} |\n")
-        else: f.write("| No noise filtered | 0 |\n")
+        for cat, items in grouped.items():
+            max_score = max([int(x.get('Score', 0) or 0) for x in items])
+            impact = "Evidence destruction" if "ANTI" in cat else "Evasion" if "TIME" in cat else "Compromise"
+            f.write(f"| **{cat}** | **{len(items)}** | {max_score} | {impact} |\n")
         f.write("\n")
+
+        # Medium Events
+        if medium_events:
+            f.write(t.get('stats_medium_events', "### ⚠️ Medium Confidence Events\n").format(count=len(medium_events)))
+            med_counts = {}
+            for m in medium_events:
+                c = m.get('Category', 'Unknown')
+                med_counts[c] = med_counts.get(c, 0) + 1
+            for k, v in med_counts.items():
+                f.write(f"- {k}: {v}\n")
+            f.write("\n")
+
+        # Noise Stats
+        if analyzer.noise_stats:
+            f.write(t.get('stats_noise_header', "### 📉 Filtered Noise Statistics\n"))
+            f.write("| Filter Reason | Count |\n|---|---|\n")
+            sorted_noise = sorted(analyzer.noise_stats.items(), key=lambda x: x[1], reverse=True)
+            for k, v in sorted_noise[:10]:
+                f.write(f"| {k} | {v} |\n")
+            f.write("\n")
 
     def _write_recommendations(self, f, analyzer):
         t = self.txt
+        total_score = sum([int(ioc.get('Score', 0) or 0) for ioc in analyzer.visual_iocs])
         f.write(f"## {t['h1_rec']}\n")
-        f.write("本インシデントにおけるフォレンジック調査結果に基づき、以下の推奨アクションを提案します。\n\n")
+        f.write(t.get('rec_header', "Based on the forensic investigation results..."))
+        f.write(t.get('rec_table_header', "| Priority | Action | Timeline | Reason |\n|---|---|---|---|\n"))
         
-        # Determine Priority based on findings
-        has_phishing = any("PHISHING" in str(ioc.get("Type", "")) for ioc in analyzer.visual_iocs)
-        has_masquerade = any("MASQUERADE" in str(ioc.get("Type", "")) for ioc in analyzer.visual_iocs)
-        has_anti = any("ANTI" in str(ioc.get("Type", "")) for ioc in analyzer.visual_iocs)
-
-        f.write("### 📋 Recommended Actions\n")
-        f.write("| Priority | Action | Timeline | Reason |\n|---|---|---|---|\n")
-        
-        if has_anti or has_phishing:
-             f.write("| 🔥 **P0** | **Event Log (4688) Command Line Recovery** | **Immediate** | LNK引数がワイピングされているため、イベントログが唯一の実行コマンド特定源です。 |\n")
-        
+        has_lnk_destruction = any("ANTI" in str(ioc.get('Type', '')) for ioc in analyzer.visual_iocs)
+        if has_lnk_destruction:
+            f.write(t.get('rec_p0_evtlog', ""))
+            
+        has_masquerade = any("MASQUERADE" in str(ioc.get('Type', '')) for ioc in analyzer.visual_iocs)
         if has_masquerade:
-             f.write("| 🔥 **P0** | **Analyze Suspicious Chrome Extension (.crx)** | 24 Hours | 永続化バックドアとして機能している可能性が高いため、リバースエンジニアリングが必要です。 |\n")
-        
-        f.write("| 🔥 **P0** | **Network Log Analysis (C2 Identification)** | 24 Hours | 外部通信先IPを特定し、ファイアウォールでブロックしてください。 |\n")
-        f.write("| 🟡 P1 | **Lateral Movement Check** | 1 Week | 同一ネットワーク内の他端末への横展開を調査してください。 |\\n")
-        f.write("| 🟡 P1 | **Credential Reset** | Immediate | 侵害された端末で使用された全ユーザーのパスワードリセットを推奨します。 |\\n\\n")
+            f.write(t.get('rec_p0_crx', ""))
+            
+        f.write(t.get('rec_p0_network', ""))
+        f.write(t.get('rec_p1_lateral', ""))
+        f.write(t.get('rec_p1_creds', ""))
+        f.write("\n")
 
     # ==========================================
     # [NEW] Plutos Section Methods (v3.0 Critical Integration)
@@ -851,7 +942,7 @@ class LachesisRenderer:
                     })
             except: pass
 
-        if not rows: return "不審なネットワーク活動や横展開の痕跡は検出されませんでした。\n"
+        if not rows: return self.txt.get('plutos_no_activity', "No suspicious network activity detected.\n")
 
         # 時間順にソートしてMarkdown化
         rows.sort(key=lambda x: x["Time"])
@@ -865,8 +956,8 @@ class LachesisRenderer:
 
     def _write_ioc_appendix_unified(self, f, analyzer):
         t = self.txt
-        f.write(f"## {t['h1_app']}\n(Full IOC List)\n")
-        f.write("本調査で確認されたすべての侵害指標（IOC）の一覧です。\n\n")
+        f.write(f"## {t['h1_app']}\n")
+        f.write(t.get('ioc_header', "(Full IOC List)\nComplete list of all IOCs.\n\n### 📂 File IOCs\n"))
         if analyzer.visual_iocs:
             f.write("### 📂 File IOCs (Malicious/Suspicious Files)\n")
             f.write("| File Name | Path | Source | Note |\n|---|---|---|---|\n")

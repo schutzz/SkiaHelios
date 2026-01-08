@@ -1,10 +1,13 @@
 import re
 from datetime import datetime, timedelta
+from tools.lachesis.intel import TEXT_RES
 
 class LachesisAnalyzer:
-    def __init__(self, intel_module, enricher_module):
+    def __init__(self, intel_module, enricher_module, lang="jp"):
         self.intel = intel_module
         self.enricher = enricher_module
+        self.lang = lang
+        self.txt = TEXT_RES[self.lang if self.lang in TEXT_RES else "jp"]
         self.visual_iocs = []
         self.pivot_seeds = []
         self.infra_ips_found = set()
@@ -55,7 +58,7 @@ class LachesisAnalyzer:
             if chk_score >= 200 or "CRITICAL" in chk_tag or "MASQUERADE" in chk_tag or "TIMESTOMP" in chk_tag or "PHISHING" in chk_tag or "PARADOX" in chk_tag or self.intel.is_dual_use(chk_name):
                 t_val = ev.get('Time') or ev.get('Ghost_Time_Hint') or ev.get('Last_Executed_Time')
                 dt = self.enricher.parse_time_safe(t_val)
-                if dt and dt.year >= 2016:  
+                if dt and dt.year >= 2000:  
                     high_crit_times.append(dt)
 
         # 2. Extract Visual IOCs
@@ -69,13 +72,16 @@ class LachesisAnalyzer:
         self._generate_pivot_seeds()
         
         # 4. Refine Time Range
-        force_include_types = ["TIME_PARADOX", "CRITICAL_MASQUERADE", "CRITICAL_PHISHING", "TIMESTOMP", "CREDENTIALS"]
+        force_include_types = [
+            "TIME_PARADOX", "CRITICAL_MASQUERADE", "CRITICAL_PHISHING", 
+            "TIMESTOMP", "CREDENTIALS", "ANTI_FORENSICS", "PERSISTENCE", "SAM_SCAVENGE"
+        ]
         for ioc in self.visual_iocs:
             ioc_type = str(ioc.get("Type", "")).upper()
             if any(k in ioc_type for k in force_include_types):
                 ioc_time = ioc.get("Time", "")
                 dt = self.enricher.parse_time_safe(ioc_time)
-                if dt and dt.year >= 2016:
+                if dt and dt.year >= 2000:
                     high_crit_times.append(dt)
 
         time_range = "Unknown Range (No Critical Events)"
@@ -84,6 +90,9 @@ class LachesisAnalyzer:
             core_start = min(high_crit_times) - timedelta(hours=3)
             core_end = max(high_crit_times) + timedelta(hours=3)
             time_range = f"{core_start.strftime('%Y-%m-%d %H:%M')} 〜 {core_end.strftime('%H:%M')} (UTC)"
+        
+        # [v5.6] Anti-Forensics Causality Correlation
+        self._correlate_antiforensics_and_user_creation()
 
         return {
             "critical_events": critical_events,
@@ -91,6 +100,58 @@ class LachesisAnalyzer:
             "time_range": time_range,
             "phases": [critical_events] if critical_events else []
         }
+
+    # ============================================================
+    # [v5.6] Anti-Forensics Causality Correlation
+    # ============================================================
+    def _correlate_antiforensics_and_user_creation(self):
+        """
+        Detect correlation between log deletion and user creation.
+        If both detected, generate causality note about EID 4720 concealment.
+        """
+        has_log_deletion = False
+        has_user_creation = False
+        user_names = []
+        
+        for ioc in self.visual_iocs:
+            tag = str(ioc.get('Tag', '')).upper()
+            ioc_type = str(ioc.get('Type', '')).upper()
+            value = str(ioc.get('Value', ''))
+            
+            # Check for log deletion
+            if "LOG_DELETION" in tag or "EVIDENCE_WIPING" in tag or "1102" in value:
+                has_log_deletion = True
+            
+            # Check for user creation
+            if "USER_CREATION" in tag or "NEW_USER_CREATED" in tag or "SAM_USER" in tag:
+                has_user_creation = True
+                if value:
+                    user_names.append(value)
+        
+        # If both patterns detected, add causality note to relevant IOCs
+        if has_log_deletion and has_user_creation:
+            if self.lang == "en":
+                causality_note = f"⚠️ **CAUSALITY DETECTED**: Log deletion + User creation (Scavenged) detected. Missing EID 4720/4732 confirmed. [LOG_WIPE_INDUCED_MISSING_EVENT] for user(s): {', '.join(user_names)}"
+            else:
+                causality_note = f"⚠️ **因果関係検知**: ログ削除とユーザー作成(Scavenged)を検知。イベントログ(EID 4720/4732)の欠落を確認しました。[LOG_WIPE_INDUCED_MISSING_EVENT] 対象: {', '.join(user_names)}"
+            
+            for ioc in self.visual_iocs:
+                tag = str(ioc.get('Tag', '')).upper()
+                if "LOG_DELETION" in tag or "EVIDENCE_WIPING" in tag:
+                    ioc['Causality_Note'] = causality_note
+                    ioc['Score'] = max(int(ioc.get('Score', 0)), 500)  # Escalate
+        
+        # If log deletion detected but NO user creation events (suspicious gap)
+        elif has_log_deletion and not has_user_creation:
+            if self.lang == "en":
+                gap_note = "🚨 **EVIDENCE GAP**: Log deletion detected but no user creation events (EID 4720/4732) found. High probability that events were deleted to hide unauthorized account creation. [LOG_WIPE_INDUCED_MISSING_EVENT]"
+            else:
+                gap_note = "🚨 **証拠の空白**: ログ削除を検知しましたがユーザー作成イベント(EID 4720/4732)が見つかりません。不正アカウント作成を隠蔽した可能性が高いです。[LOG_WIPE_INDUCED_MISSING_EVENT]"
+            
+            for ioc in self.visual_iocs:
+                tag = str(ioc.get('Tag', '')).upper()
+                if "LOG_DELETION" in tag or "EVIDENCE_WIPING" in tag:
+                    ioc['Causality_Note'] = gap_note
 
     def _extract_visual_iocs_from_chronos(self, dfs):
         if dfs.get('Chronos') is not None:
@@ -241,6 +302,7 @@ class LachesisAnalyzer:
                                 self._add_unique_visual_ioc({
                                     "Type": "PERSISTENCE", "Value": name, "Path": row.get("Full_Path"), "Note": "Persist", 
                                     "Time": str(row.get("Last_Executed_Time", "")), "Reason": "Persistence",
+                                    "Tag": str(row.get("AION_Tags", "")),
                                     "Score": score
                                 })
                 except: pass
@@ -310,14 +372,18 @@ class LachesisAnalyzer:
     def is_force_include_ioc(self, ioc):
         force_keywords = [
             "TIME_PARADOX", "CRITICAL_MASQUERADE", "CRITICAL_PHISHING", 
-            "SUSPICIOUS_CMDLINE", "CRITICAL_SIGMA", "ROLLBACK", "BACKDOOR"
+            "SUSPICIOUS_CMDLINE", "CRITICAL_SIGMA", "ROLLBACK", "BACKDOOR",
+            "SAM_SCAVENGE", "NEW_USER_CREATED"
         ]
         ioc_type = str(ioc.get('Type', '')).upper()
         reason = str(ioc.get('Reason', '')).upper()
+        tag = str(ioc.get('Tag', '')).upper()
         
         if any(k in ioc_type for k in force_keywords):
             return True
         if any(k in reason for k in force_keywords):
+            return True
+        if any(k in tag for k in force_keywords):
             return True
         if "DUAL-USE" in reason or "DUAL_USE" in ioc_type:
             return True
@@ -327,6 +393,7 @@ class LachesisAnalyzer:
     
     def generate_ioc_insight(self, ioc):
         ioc_type = str(ioc.get('Type', '')).upper()
+        tag = str(ioc.get('Tag', '')).upper()
         
         if "ANTI_FORENSICS" in ioc_type:
             return "🚨 **Evidence Destruction**: 証拠隠滅ツールです。実行回数やタイムスタンプを確認してください。"
@@ -335,6 +402,70 @@ class LachesisAnalyzer:
         val_lower = val.lower()
         reason = str(ioc.get('Reason', '')).upper()
         path = str(ioc.get('Path', ''))
+        
+        # [v5.6] Chain Scavenger Insight
+        if "SAM_SCAVENGE" in tag or "SAM_SCAVENGE" in ioc_type:
+            insights = ["☠️ **Chain Scavenger Detection** (Dirty Hive Hunter)"]
+            insights.append("- **Detection**: 破損または隠蔽されたSAMハイブから、バイナリレベルのカービングでユーザーアカウントを物理抽出しました。")
+            if "hacker" in val_lower or "user" in val_lower:
+                insights.append(f"- **Suspicion**: ユーザー名 `{val}` は典型的な攻撃用アカウントの命名パターンです。")
+            insights.append("- **Action**: 即時にこのアカウントの作成日時周辺（イベントログ削除の痕跡がある場合はその直前）のタイムラインを確認してください。[LOG_WIPE_INDUCED_MISSING_EVENT]")
+            return "\n".join(insights)
+
+        # [v5.5] WebShell Detection Insight
+        if "WEBSHELL" in tag or "WEBSHELL" in ioc_type:
+            insights = ["🕷️ **CRITICAL WebShell Detection**"]
+            
+            # Determine specific type
+            if "tmp" in val_lower and ".php" in val_lower:
+                insights.append("- **Pattern**: `tmp*.php` - SQLインジェクション攻撃によって動的生成されたWebShellの典型的なファイル名です。")
+                insights.append("- **Attack Vector**: 高確率で IIS/Apache への SQL Injection 経由のRCE (Remote Code Execution) です。")
+            elif any(x in val_lower for x in ["c99", "r57", "b374k", "wso", "chopper"]):
+                insights.append("- **Signature**: 既知のWebShellシグネチャ（China Chopper, c99, r57など）を検知しました。")
+            else:
+                insights.append("- **Detection**: Webサーバーディレクトリ内のスクリプトファイルを検知しました。")
+            
+            if "htdocs" in path.lower() or "wwwroot" in path.lower() or "inetpub" in path.lower():
+                insights.append("- **Location**: Webルートディレクトリ内に配置 → 外部からのHTTPアクセス可能な状態です。")
+            insights.append("- **Next Step**: IISログの同時刻リクエスト、w3wp.exe のプロセス履歴を即座に調査してください。")
+            return "<br/>".join(insights)
+        
+        # [v5.6] User Creation / Privilege Escalation
+        if "USER_CREATION" in tag or "PRIVILEGE_ESCALATION" in tag or "SAM_REGISTRY" in tag:
+            insights = ["👤 **CRITICAL: User Creation/Privilege Escalation Detected**"]
+            
+            if "4720" in val or "user" in val_lower:
+                insights.append("- **Event**: 新規ユーザーアカウントが作成されました (EID 4720)。")
+            if "4732" in val or "4728" in val:
+                insights.append("- **Event**: ユーザーがセキュリティグループに追加されました。")
+            if "administrators" in val_lower:
+                insights.append("- **Impact**: **Administrator権限の付与** - 最高権限の取得です。")
+            if "remote" in val_lower and "desktop" in val_lower:
+                insights.append("- **Impact**: **Remote Desktop Usersへの追加** - RDP経由の永続アクセスが可能になりました。")
+            if "sam" in val_lower or "SAM" in tag:
+                insights.append("- **Registry**: SAMレジストリへのアクセス - ローカルアカウント情報の操作が行われています。")
+            
+            insights.append("- **Next Step**: net user /domain で作成されたアカウントを確認、即座に無効化してください。")
+            return "<br/>".join(insights)
+        
+        # [v5.6] Log Deletion / Evidence Wiping
+        if "LOG_DELETION" in tag or "EVIDENCE_WIPING" in tag:
+            insights = ["🗑️ **CRITICAL: Log Deletion/Evidence Wiping Detected**"]
+            
+            if "1102" in val:
+                insights.append("- **Event**: Securityログがクリアされました (EID 1102)。")
+            if "104" in val:
+                insights.append("- **Event**: Systemログがクリアされました (EID 104)。")
+            if "wevtutil" in val_lower or "clear-eventlog" in val_lower:
+                insights.append("- **Tool**: イベントログ消去コマンドが実行されました。")
+            if "clearev" in val_lower:
+                insights.append("- **Tool**: Meterpreter clearevコマンド - 攻撃者がログを完全消去しようとしています。")
+            if "usnjrnl" in val_lower or "mft" in val_lower:
+                insights.append("- **Target**: ファイルシステムジャーナル ($USNJRNL/$MFT) の削除 - フォレンジック証拠の抹消です。")
+            
+            insights.append("- **Impact**: **アンチフォレンジック活動** - 攻撃者が活動痕跡を隠蔽しようとしています。")
+            insights.append("- **Next Step**: バックアップログ、VSS (Volume Shadow Copy) からの復元を試みてください。")
+            return "<br/>".join(insights)
 
         if "EXECUTION_CONFIRMED" in ioc_type:
             return "🚨 **Confirmed**: このツールは実際に実行された痕跡があります。調査優先度：高"
@@ -402,8 +533,8 @@ class LachesisAnalyzer:
             return "フィッシング活動に関連するアーティファクトを検知しました。"
         
         elif "TIMESTOMP" in ioc_type:
-            tool_name = val.split()[0] if val else "Unknown"
-            return f"`{tool_name}` のタイムスタンプに不整合（Timestomp）を確認。攻撃ツールを隠蔽しようとした痕跡です。"
+            name = ioc.get("Value", "Unknown")
+            return self.txt["note_timestomp"].format(name=name)
         
         elif "CREDENTIALS" in ioc_type:
             return "認証情報の窃取または不正ツールの配置を検知しました。"

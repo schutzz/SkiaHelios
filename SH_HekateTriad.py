@@ -39,6 +39,7 @@ def main():
     parser.add_argument("--csv", help="KAPE CSV Directory")
     
     parser.add_argument("--docx", action="store_true")
+    parser.add_argument("--lang", default="jp", choices=["jp", "en"], help="Report Language")
     parser.add_argument("--input", dest="timeline_input", help="Alias for timeline to satisfy Clotho")
 
     args = parser.parse_args()
@@ -198,8 +199,10 @@ def main():
         "lateral_summary": "Confirmed" if "LATERAL" in verdict_flags else "",
     }
 
-    output_md = Path(args.outdir) / f"Grimoire_{args.case}_jp.md"
-    lachesis = LachesisCore(lang="jp", hostname=final_host, case_name=args.case)
+    # Language suffix for output file
+    lang_suffix = args.lang if args.lang else "jp"
+    output_md = Path(args.outdir) / f"Grimoire_{args.case}_{lang_suffix}.md"
+    lachesis = LachesisCore(lang=lang_suffix, hostname=final_host, case_name=args.case)
     
     lachesis.weave_report(
         analysis_result=analysis_result,

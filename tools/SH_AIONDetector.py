@@ -6,11 +6,12 @@ import io
 import re
 import hashlib
 from tools.SH_ThemisLoader import ThemisLoader # ⚖️ Themis召喚
+from tools.SH_ChainScavenger import ChainScavenger # [v5.6] Chain Scavenger
 
 # ============================================================
-#  SH_AIONDetector v14.1 [Fix: Column Missing]
+#  SH_AIONDetector v14.2 [Chain Scavenger Integration]
 #  Mission: Detect Persistence via External Logic
-#  Update: Preserved 'Threat_Score' for Meddlesome analysis.
+#  Update: Dirty Hive fallback with ChainScavenger
 # ============================================================
 
 def print_logo():
@@ -24,10 +25,11 @@ def print_logo():
     """)
 
 class AIONEngine:
-    def __init__(self, target_dir=None, mft_csv=None, mount_point=None):
+    def __init__(self, target_dir=None, mft_csv=None, mount_point=None, raw_dir=None):
         self.target_dir = Path(target_dir) if target_dir else None
         self.mft_csv = mft_csv
         self.mount_point = Path(mount_point) if mount_point else None
+        self.raw_dir = Path(raw_dir) if raw_dir else None  # [v5.6] For ChainScavenger
         
         # ⚖️ Themis Initialization
         print("[*] Initializing AION with Themis Rules...")
@@ -153,6 +155,129 @@ class AIONEngine:
         
         return detected
 
+    # ============================================================
+    # [v5.6] SAM Hive User Creation Detection
+    # ============================================================
+    def hunt_sam_user_creation(self):
+        """
+        Detect user creation from SAM registry and ProfileList.
+        Suspicious usernames: hacker, user1, admin, test, etc.
+        """
+        print("[*] Phase 1.5: Scanning SAM/ProfileList for User Creation...")
+        detected = []
+        
+        # Suspicious username patterns
+        suspicious_usernames = [
+            r"(?i)^hacker", r"(?i)^user\d+", r"(?i)^admin\d+", r"(?i)^test",
+            r"(?i)^backup", r"(?i)^support", r"(?i)^svc_", r"(?i)^service",
+            r"(?i)^guest\d+", r"(?i)^temp", r"(?i)^new_", r"(?i)^root",
+        ]
+        suspicious_pattern = "|".join(suspicious_usernames)
+        
+        # SAM Registry patterns
+        sam_patterns = [
+            r"(?i)SAM\\Domains\\Account\\Users\\Names",
+            r"(?i)SAM\\SAM\\Domains\\Account\\Users",
+        ]
+        sam_pattern = "|".join(sam_patterns)
+        
+        # ProfileList patterns
+        profile_patterns = [
+            r"(?i)ProfileList",
+            r"(?i)ProfileImagePath",
+        ]
+        profile_pattern = "|".join(profile_patterns)
+        
+        # Find Registry CSVs
+        reg_files = list(self.target_dir.rglob("*Registry*.csv")) + list(self.target_dir.rglob("*RECmd*.csv"))
+        
+        for reg in reg_files:
+            try:
+                df = pl.read_csv(reg, ignore_errors=True, infer_schema_length=0)
+                cols = df.columns
+                
+                # Column detection
+                key_col = next((c for c in cols if "Key" in c or "Path" in c), None)
+                val_col = next((c for c in cols if "Value" in c and "Name" in c), None)
+                data_col = next((c for c in cols if "Value" in c and "Data" in c), None)
+                time_col = next((c for c in cols if "Time" in c), None)
+                
+                if not key_col: continue
+                
+                # Detect SAM User entries
+                sam_hits = df.filter(pl.col(key_col).str.contains(sam_pattern))
+                for row in sam_hits.iter_rows(named=True):
+                    k_path = str(row.get(key_col, ""))
+                    v_data = str(row.get(data_col, "") or row.get(val_col, ""))
+                    ts = str(row.get(time_col, "Unknown_Time"))
+                    
+                    # Extract username from path or value
+                    username = ""
+                    if "Names\\" in k_path:
+                        username = k_path.split("Names\\")[-1].split("\\")[0]
+                    elif v_data:
+                        username = v_data
+                    
+                    if not username: continue
+                    
+                    # Check if suspicious
+                    is_suspicious = bool(re.search(suspicious_pattern, username))
+                    score = 400 if is_suspicious else 100
+                    tags = ["SAM_USER_FOUND"]
+                    if is_suspicious:
+                        tags.append("SUSPICIOUS_USERNAME")
+                        tags.append("NEW_USER_CREATED")
+                    
+                    detected.append({
+                        "Last_Executed_Time": ts,
+                        "AION_Score": score,
+                        "AION_Tags": ", ".join(tags),
+                        "Target_FileName": username,
+                        "Entry_Location": f"SAM: {k_path}",
+                        "Full_Path": username,
+                        "File_Hash_SHA256": "N/A",
+                        "File_Hash_SHA1": "N/A",
+                        "Threat_Score": score,
+                        "Threat_Tag": "NEW_USER_CREATED" if is_suspicious else "USER_ACCOUNT"
+                    })
+                
+                # Detect ProfileList entries
+                profile_hits = df.filter(pl.col(key_col).str.contains(profile_pattern))
+                for row in profile_hits.iter_rows(named=True):
+                    k_path = str(row.get(key_col, ""))
+                    v_data = str(row.get(data_col, "") or "")
+                    ts = str(row.get(time_col, "Unknown_Time"))
+                    
+                    # Extract username from ProfileImagePath
+                    username = ""
+                    if "Users\\" in v_data:
+                        username = v_data.split("Users\\")[-1].split("\\")[0]
+                    
+                    if not username or username in ["Default", "Public", "All Users"]: continue
+                    
+                    # Check if suspicious
+                    is_suspicious = bool(re.search(suspicious_pattern, username))
+                    if is_suspicious:
+                        detected.append({
+                            "Last_Executed_Time": ts,
+                            "AION_Score": 400,
+                            "AION_Tags": "PROFILELIST_USER, SUSPICIOUS_USERNAME, NEW_USER_CREATED",
+                            "Target_FileName": username,
+                            "Entry_Location": f"ProfileList: {k_path}",
+                            "Full_Path": v_data,
+                            "File_Hash_SHA256": "N/A",
+                            "File_Hash_SHA1": "N/A",
+                            "Threat_Score": 400,
+                            "Threat_Tag": "NEW_USER_CREATED,PRIVILEGE_ESCALATION"
+                        })
+                    
+            except Exception as e: pass
+        
+        if detected:
+            print(f"    [!] CRITICAL: {len(detected)} user accounts detected from SAM/ProfileList!")
+        
+        return detected
+
     def hunt_mft_persistence(self, mft_df):
         print("[*] Phase 2: Scanning MFT for Hotspots...")
         # Note: MFT Hotspots could also be moved to YAML, but for now we keep structural logic here
@@ -186,6 +311,33 @@ class AIONEngine:
 
     def analyze(self):
         reg_hits = self.hunt_registry_persistence()
+        sam_hits = self.hunt_sam_user_creation()  # [v5.6] SAM/ProfileList analysis
+        
+        # [v5.6] ChainScavenger fallback for dirty hives
+        scavenge_hits = []
+        if not sam_hits and self.raw_dir:
+            print("    -> [AION] No SAM users from CSV, activating Chain Scavenger...")
+            try:
+                scavenger = ChainScavenger(self.raw_dir)
+                is_dirty, reason = scavenger.is_dirty_hive()
+                print(f"    -> Dirty Check: {reason}")
+                scavenge_results = scavenger.scavenge()
+                for r in scavenge_results:
+                    scavenge_hits.append({
+                        "Last_Executed_Time": r.get("Timestamp", ""),
+                        "AION_Score": r.get("AION_Score", 400),
+                        "AION_Tags": r.get("AION_Tags", "SAM_SCAVENGE"),
+                        "Target_FileName": r.get("Username", ""),
+                        "Entry_Location": r.get("Entry_Location", ""),
+                        "Full_Path": r.get("Username", ""),
+                        "File_Hash_SHA256": "N/A",
+                        "File_Hash_SHA1": "N/A",
+                        "Threat_Score": r.get("Threat_Score", 400),
+                        "Threat_Tag": r.get("Threat_Tag", "NEW_USER_CREATED")
+                    })
+            except Exception as e:
+                print(f"    [-] ChainScavenger error: {e}")
+        
         mft_hits = []
         if self.mft_csv and Path(self.mft_csv).exists():
              try:
@@ -198,7 +350,7 @@ class AIONEngine:
                  mft_hits = self.hunt_mft_persistence(df_mft)
              except: pass
 
-        raw_list = reg_hits + mft_hits
+        raw_list = reg_hits + sam_hits + scavenge_hits + mft_hits  # [v5.6] Include scavenge
         if not raw_list: return None
         
         # --- ⚖️ THEMIS JUDGMENT DAY ---
@@ -251,10 +403,11 @@ def main(argv=None):
     parser.add_argument("--dir", required=True, help="KAPE Artifacts Dir (CSV)")
     parser.add_argument("--mft", help="Master_Timeline.csv")
     parser.add_argument("--mount", help="OPTIONAL: Path to Mounted Disk Image (e.g. E:\) for Hashing")
+    parser.add_argument("--raw", help="[v5.6] Raw Artifacts Dir (for ChainScavenger)")
     parser.add_argument("-o", "--out", default="Persistence_Report.csv")
     args = parser.parse_args(argv)
 
-    engine = AIONEngine(target_dir=args.dir, mft_csv=args.mft, mount_point=args.mount)
+    engine = AIONEngine(target_dir=args.dir, mft_csv=args.mft, mount_point=args.mount, raw_dir=args.raw)
     df = engine.analyze()
 
     if df is not None and df.height > 0:

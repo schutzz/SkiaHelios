@@ -34,6 +34,7 @@ def run_stage(cmd, stage_name):
     print(f">>> [DONE] {stage_name} finished in {end - start:.4f}s")
 
 def main():
+    pipeline_start = time.time()  # Start timing
     print(BANNER)
     parser = argparse.ArgumentParser(description="SkiaHelios Orchestrator")
     parser.add_argument("--dir", required=False, help="Path to KAPE Module Output (CSV)")
@@ -50,6 +51,7 @@ def main():
     
     parser.add_argument("--docx", action="store_true", help="Generate Docx Report")
     parser.add_argument("--lang", default=None, choices=["jp", "en"], help="Report Language (jp/en)")
+    parser.add_argument("--enable-yara-webshell", action="store_true", help="[v5.5] Enable YARA WebShell scanning (optional)")
     args = parser.parse_args()
 
     # --- Interactive Mode ---
@@ -226,7 +228,8 @@ def main():
     run_stage([
         "python", "-m", "tools.SH_AIONDetector", 
         "--dir", str(kape_csv_dir),
-        "--out", str(aion_out)
+        "--out", str(aion_out),
+        "--raw", str(kape_raw_dir) # [v5.6] ChainScavenger
     ], "AION")
     
     # ==========================================
@@ -249,6 +252,17 @@ def main():
 
     run_stage(plutos_cmd, "PLUTOS (Network & Lateral)")
     
+    # [7.6] YARA WebShell Scanner (Optional) [v5.5]
+    if getattr(args, 'enable_yara_webshell', False):
+        yara_out = out_dir / "YARA_WebShell_Results.csv"
+        yara_cmd = [
+            "python", "-m", "tools.SH_YaraScanner",
+            "--raw", str(kape_raw_dir) if kape_raw_dir else "",
+            "--ghost", str(ghost_report),
+            "--out", str(yara_out)
+        ]
+        run_stage(yara_cmd, "YARA (WebShell Hunter)")
+    
     # [8] Hekate -> Raw と CSV の両方を渡す！
     hekate_cmd = [
         "python", "SH_HekateTriad.py",
@@ -268,7 +282,10 @@ def main():
     
     run_stage(hekate_cmd, "HEKATE")
 
-    print(f"\n[*] SUCCESS: Pipeline finished. Case dir: {out_dir}")
+    # Calculate elapsed time
+    elapsed = time.time() - pipeline_start
+    mins, secs = divmod(int(elapsed), 60)
+    print(f"\n[*] SUCCESS: Pipeline finished in {mins}m {secs}s. Case dir: {out_dir}")
 
 if __name__ == "__main__":
     main()

@@ -388,6 +388,54 @@ class HerculesReferee:
             ])
 
         # ========================================================
+        # 1.5 [v5.5] WebShell Detection [Priority: CRITICAL]
+        # ========================================================
+        # PHP/ASP/JSP files in web directories = CRITICAL WebShell
+        print("    -> [Hercules] Scanning for WebShell indicators...")
+        
+        # Web server directories (case-insensitive patterns)
+        web_dir_patterns = [
+            r"(?i)htdocs", r"(?i)wwwroot", r"(?i)inetpub", r"(?i)www",
+            r"(?i)public_html", r"(?i)webapps", r"(?i)sites", r"(?i)html"
+        ]
+        web_dirs_combined = "|".join(web_dir_patterns)
+        
+        # Suspicious web file patterns
+        webshell_file_patterns = [
+            r"(?i)tmp[a-z0-9]+\.php",  # tmpXXXX.php pattern (common webshell)
+            r"(?i)^\d+\.php",          # Numeric named PHP
+            r"(?i)shell\.php", r"(?i)cmd\.php", r"(?i)c99\.php", r"(?i)r57\.php",
+            r"(?i)b374k", r"(?i)wso\.php", r"(?i)chopper",
+            r"(?i)backdoor", r"(?i)pwn", r"(?i)hack",
+        ]
+        webshell_files_combined = "|".join(webshell_file_patterns)
+        
+        if "FileName" in cols and path_col:
+            # Condition 1: Any script file in web directory
+            is_web_script = (
+                pl.col("FileName").str.to_lowercase().str.contains(r"(?i)\.(php|asp|aspx|jsp|jspx)$") &
+                pl.col(path_col).str.to_lowercase().str.contains(web_dirs_combined)
+            )
+            
+            # Condition 2: Suspicious webshell filename pattern
+            is_webshell_name = pl.col("FileName").str.to_lowercase().str.contains(webshell_files_combined)
+            
+            # Combined: Either web script in web dir OR suspicious name
+            is_webshell = is_web_script | is_webshell_name
+            
+            timeline_df = timeline_df.with_columns([
+                pl.when(is_webshell)
+                  .then(300)  # CRITICAL SCORE
+                  .otherwise(pl.col("Threat_Score"))
+                  .alias("Threat_Score"),
+                
+                pl.when(is_webshell)
+                  .then(pl.format("{},CRITICAL_WEBSHELL,WEB_INTRUSION_CHAIN", pl.col("Tag")))
+                  .otherwise(pl.col("Tag"))
+                  .alias("Tag")
+            ])
+
+        # ========================================================
         # 2. Anti-Forensics Tool Detection [Priority: P0]
         # ========================================================
         print("    -> [Hercules] Scanning for Anti-Forensics Tools (Wipers)...")
@@ -652,7 +700,191 @@ class HerculesReferee:
             ])
 
         # ========================================================
-        # 5. Final Verdict Formatting (for Lachesis)
+        # 5. [v5.5] C2 / Lateral Movement / Web Intrusion Detection
+        # ========================================================
+        print("    -> [Hercules] Scanning for C2/Lateral Movement patterns...")
+        
+        # C2 Callback Patterns (Network beaconing indicators)
+        c2_patterns = [
+            r"(?i)beacon", r"(?i)callback", r"(?i)reverse.*shell",
+            r"(?i)connect.*back", r"(?i)meterpreter", r"(?i)cobalt.*strike",
+            r"(?i)empire", r"(?i)sliver", r"(?i)havoc", r"(?i)covenant"
+        ]
+        c2_combined = "|".join(c2_patterns)
+        
+        # Lateral Movement Tools
+        lateral_patterns = [
+            r"(?i)psexec", r"(?i)wmic.*process", r"(?i)winrm",
+            r"(?i)invoke-command", r"(?i)enter-pssession",
+            r"(?i)schtasks.*/create.*/s\\s+[^/]", r"(?i)at\\s+\\\\\\\\",
+            r"(?i)net\\s+use\\s+\\\\\\\\", r"(?i)reg.*\\\\\\\\.*\\\\hklm",
+            r"(?i)sc.*\\\\\\\\.*create"
+        ]
+        lateral_combined = "|".join(lateral_patterns)
+        
+        # Web Intrusion Indicators
+        web_intrusion_patterns = [
+            r"(?i)w3wp\.exe", r"(?i)httpd\.exe", r"(?i)nginx\.exe",
+            r"(?i)aspnet_compiler", r"(?i)csc\.exe.*temp",
+            r"(?i)webshell", r"(?i)china.*chopper", r"(?i)b374k"
+        ]
+        web_combined = "|".join(web_intrusion_patterns)
+        
+        # Check in appropriate text columns
+        check_cols = [msg_col, "Target_Path", "Payload", "FileName"]
+        for check_col in check_cols:
+            if check_col and check_col in cols:
+                # C2 Detection
+                is_c2 = pl.col(check_col).str.to_lowercase().str.contains(c2_combined)
+                timeline_df = timeline_df.with_columns([
+                    pl.when(is_c2)
+                      .then(pl.col("Threat_Score") + 100)
+                      .otherwise(pl.col("Threat_Score"))
+                      .alias("Threat_Score"),
+                    pl.when(is_c2)
+                      .then(pl.format("{},POTENTIAL_C2_CALLBACK", pl.col("Tag")))
+                      .otherwise(pl.col("Tag"))
+                      .alias("Tag")
+                ])
+                
+                # Lateral Movement Detection  
+                is_lateral = pl.col(check_col).str.to_lowercase().str.contains(lateral_combined)
+                timeline_df = timeline_df.with_columns([
+                    pl.when(is_lateral)
+                      .then(pl.col("Threat_Score") + 80)
+                      .otherwise(pl.col("Threat_Score"))
+                      .alias("Threat_Score"),
+                    pl.when(is_lateral)
+                      .then(pl.format("{},LATERAL_MOVEMENT_DETECTED", pl.col("Tag")))
+                      .otherwise(pl.col("Tag"))
+                      .alias("Tag")
+                ])
+                
+                # Web Intrusion Chain Detection
+                is_web_intrusion = pl.col(check_col).str.to_lowercase().str.contains(web_combined)
+                timeline_df = timeline_df.with_columns([
+                    pl.when(is_web_intrusion)
+                      .then(pl.col("Threat_Score") + 150)
+                      .otherwise(pl.col("Threat_Score"))
+                      .alias("Threat_Score"),
+                    pl.when(is_web_intrusion)
+                      .then(pl.format("{},WEB_INTRUSION_CHAIN", pl.col("Tag")))
+                      .otherwise(pl.col("Tag"))
+                      .alias("Tag")
+                ])
+
+        # ========================================================
+        # 5.5 [v5.6] User Creation / Privilege Escalation Detection
+        # ========================================================
+        print("    -> [Hercules] Scanning for User Creation/Privilege Escalation...")
+        
+        # User Creation patterns (generic)
+        user_creation_patterns = [
+            r"(?i)net\s+user\s+\S+\s+/add",          # net user hacker /add
+            r"(?i)net\s+localgroup.*administrators.*/add",  # Group add
+            r"(?i)net\s+localgroup.*remote.*desktop.*/add", # RDP Users add
+            r"(?i)4720",                            # User Created (EID)
+            r"(?i)4732",                            # Member added to Security group
+            r"(?i)4728",                            # Member added to Global group
+            r"(?i)new-localuser",                   # PowerShell
+            r"(?i)add-localgroupmember",            # PowerShell
+        ]
+        user_creation_combined = "|".join(user_creation_patterns)
+        
+        # SAM Registry patterns (generic)
+        sam_patterns = [
+            r"(?i)\\sam\\domains\\account\\users",
+            r"(?i)\\sam\\sam\\domains\\account",
+            r"(?i)hklm\\sam",
+        ]
+        sam_combined = "|".join(sam_patterns)
+        
+        for check_col in check_cols:
+            if check_col and check_col in cols:
+                is_user_creation = pl.col(check_col).str.to_lowercase().str.contains(user_creation_combined)
+                timeline_df = timeline_df.with_columns([
+                    pl.when(is_user_creation)
+                      .then(300)  # CRITICAL
+                      .otherwise(pl.col("Threat_Score"))
+                      .alias("Threat_Score"),
+                    pl.when(is_user_creation)
+                      .then(pl.format("{},CRITICAL_USER_CREATION,PRIVILEGE_ESCALATION", pl.col("Tag")))
+                      .otherwise(pl.col("Tag"))
+                      .alias("Tag")
+                ])
+        
+        # SAM Registry in path column
+        if path_col and path_col in cols:
+            is_sam_access = pl.col(path_col).str.to_lowercase().str.contains(sam_combined)
+            timeline_df = timeline_df.with_columns([
+                pl.when(is_sam_access)
+                  .then(pl.col("Threat_Score") + 200)
+                  .otherwise(pl.col("Threat_Score"))
+                  .alias("Threat_Score"),
+                pl.when(is_sam_access)
+                  .then(pl.format("{},SAM_REGISTRY_ACCESS,PRIVILEGE_ESCALATION", pl.col("Tag")))
+                  .otherwise(pl.col("Tag"))
+                  .alias("Tag")
+            ])
+
+        # ========================================================
+        # 5.6 [v5.6] Log Deletion / Evidence Wiping Detection
+        # ========================================================
+        print("    -> [Hercules] Scanning for Log Deletion/Evidence Wiping...")
+        
+        # Log deletion patterns (generic)
+        log_deletion_patterns = [
+            r"(?i)1102",                            # Security log cleared (EID)
+            r"(?i)104",                             # System log cleared (EID)
+            r"(?i)wevtutil.*cl",                    # wevtutil cl Security
+            r"(?i)clear-eventlog",                  # PowerShell
+            r"(?i)clearev",                         # Meterpreter
+            r"(?i)del.*\.evtx",                     # del *.evtx
+            r"(?i)remove.*\.evtx",                  # Remove evtx
+            r"(?i)auditpol.*/clear",                # auditpol /clear
+        ]
+        log_deletion_combined = "|".join(log_deletion_patterns)
+        
+        # USN/MFT deletion patterns (evidence wiping)
+        evidence_wiping_patterns = [
+            r"(?i)fsutil.*usn.*deletejournal",      # Delete USN Journal
+            r"(?i)\$usnjrnl.*delete",               # USN Journal delete
+            r"(?i)\$mft.*delete",                   # MFT deletion
+            r"(?i)format\s+c:",                     # Format drive
+            r"(?i)cipher\s+/w",                     # Cipher wipe
+        ]
+        evidence_wiping_combined = "|".join(evidence_wiping_patterns)
+        
+        for check_col in check_cols:
+            if check_col and check_col in cols:
+                # Log Deletion
+                is_log_deletion = pl.col(check_col).str.to_lowercase().str.contains(log_deletion_combined)
+                timeline_df = timeline_df.with_columns([
+                    pl.when(is_log_deletion)
+                      .then(300)  # CRITICAL
+                      .otherwise(pl.col("Threat_Score"))
+                      .alias("Threat_Score"),
+                    pl.when(is_log_deletion)
+                      .then(pl.format("{},CRITICAL_LOG_DELETION,ANTI_FORENSICS", pl.col("Tag")))
+                      .otherwise(pl.col("Tag"))
+                      .alias("Tag")
+                ])
+                
+                # Evidence Wiping
+                is_evidence_wiping = pl.col(check_col).str.to_lowercase().str.contains(evidence_wiping_combined)
+                timeline_df = timeline_df.with_columns([
+                    pl.when(is_evidence_wiping)
+                      .then(300)  # CRITICAL
+                      .otherwise(pl.col("Threat_Score"))
+                      .alias("Threat_Score"),
+                    pl.when(is_evidence_wiping)
+                      .then(pl.format("{},EVIDENCE_WIPING,ANTI_FORENSICS", pl.col("Tag")))
+                      .otherwise(pl.col("Tag"))
+                      .alias("Tag")
+                ])
+
+        # ========================================================
+        # 6. Final Verdict Formatting (for Lachesis)
         # ========================================================
         # Phase 2への布石: Force Include対象をVerdictで明確化
         print("    -> [Hercules] Finalizing Verdicts...")
@@ -662,8 +894,8 @@ class HerculesReferee:
               .then(pl.lit("CRITICAL"))
               .when(pl.col("Threat_Score") >= 50)
               .then(pl.lit("HIGH"))
-              # 特定タグは無条件でCRITICAL/HIGH扱いにしてForce Includeさせる
-              .when(pl.col("Tag").str.contains("PARADOX|MASQUERADE|SUSPICIOUS_CMDLINE|CRITICAL_PHISHING|ANTI_FORENSICS"))
+              # 特定タグは無条件でCRITICAL/HIGH扱いにしてForce Includeさせる (v5.6: Added User/Log/Evidence tags)
+              .when(pl.col("Tag").str.contains("PARADOX|MASQUERADE|SUSPICIOUS_CMDLINE|CRITICAL_PHISHING|ANTI_FORENSICS|C2_CALLBACK|LATERAL_MOVEMENT|WEB_INTRUSION|USER_CREATION|PRIVILEGE_ESCALATION|LOG_DELETION|EVIDENCE_WIPING|SAM_REGISTRY"))
               .then(pl.lit("CRITICAL"))
               .otherwise(pl.lit("INFO"))
               .alias("Judge_Verdict")
@@ -901,6 +1133,71 @@ class HerculesReferee:
             df_combined = pl.concat([df_combined, df_sigma_results], how="diagonal")
 
         df_final = self.correlate_ghosts(df_combined, df_ghosts)
+        
+        # [v5.5] Inject Ghost WebShells as CRITICAL Events
+        if df_ghosts is not None and not df_ghosts.is_empty():
+            print("    -> [Hercules] Injecting Ghost WebShells into Timeline...")
+            
+            # Web directories and script patterns
+            web_dir_pattern = r"(?i)htdocs|wwwroot|inetpub|public_html|webapps"
+            script_pattern = r"(?i)\.(php|asp|aspx|jsp|jspx)$"
+            suspicious_name_pattern = r"(?i)^tmp[a-z0-9]+\.|shell|cmd|backdoor|c99|r57|b374k|wso"
+            
+            # Filter for web scripts in web directories
+            ghost_cols = df_ghosts.columns
+            path_col_g = next((c for c in ["ParentPath", "Path", "FullPath"] if c in ghost_cols), None)
+            name_col_g = next((c for c in ["Ghost_FileName", "FileName", "Name"] if c in ghost_cols), None)
+            time_col_g = next((c for c in ["Ghost_Time_Hint", "Time", "Timestamp"] if c in ghost_cols), None)
+            
+            if path_col_g and name_col_g:
+                webshell_ghosts = df_ghosts.filter(
+                    (pl.col(name_col_g).str.to_lowercase().str.contains(script_pattern)) &
+                    (
+                        pl.col(path_col_g).str.to_lowercase().str.contains(web_dir_pattern) |
+                        pl.col(name_col_g).str.to_lowercase().str.contains(suspicious_name_pattern)
+                    )
+                )
+                
+                if webshell_ghosts.height > 0:
+                    print(f"    [!] CRITICAL: {webshell_ghosts.height} WebShell artifacts detected from Ghost!")
+                    
+                    # Determine detection reason dynamically
+                    webshell_ghosts = webshell_ghosts.with_columns([
+                        pl.when(pl.col(name_col_g).str.to_lowercase().str.contains(r"(?i)^tmp[a-z0-9]+\."))
+                          .then(pl.lit("SQLi-dropped temp WebShell (tmp*.php pattern)"))
+                          .when(pl.col(name_col_g).str.to_lowercase().str.contains(r"(?i)c99|r57|b374k|wso|chopper"))
+                          .then(pl.lit("Known WebShell Signature Detected"))
+                          .when(pl.col(name_col_g).str.to_lowercase().str.contains(r"(?i)shell|cmd|backdoor"))
+                          .then(pl.lit("Suspicious WebShell Filename"))
+                          .otherwise(pl.lit("Script in Web Directory"))
+                          .alias("_detection_reason")
+                    ])
+                    
+                    # Convert to events with full filename display
+                    webshell_events = webshell_ghosts.select([
+                        (pl.col(time_col_g) if time_col_g else pl.lit("")).alias("Timestamp_UTC"),
+                        pl.col(name_col_g).alias("FileName"),
+                        pl.col(path_col_g).alias("ParentPath"),
+                        pl.format("🕷️ WEBSHELL: {} - {}", pl.col(name_col_g), pl.col("_detection_reason")).alias("Dynamic_Action"),
+                        pl.lit("CRITICAL_WEBSHELL,WEB_INTRUSION_CHAIN,GHOST_WEBSHELL").alias("Tag"),
+                        pl.lit("CRITICAL").alias("Judge_Verdict"),
+                        pl.lit(300).alias("Threat_Score"),
+                        pl.lit("Ghost_Report").alias("Source_File"),
+                        pl.lit("WebShell").alias("Artifact_Type"),
+                        pl.format("{}/{}", pl.col(path_col_g), pl.col(name_col_g)).alias("Target_Path"),  # Full path with filename
+                        pl.lit("").alias("User"),
+                        pl.lit("").alias("Subject_SID"),
+                        pl.lit("").alias("Resolved_User"),
+                        pl.lit("").alias("Account_Status"),
+                        pl.format("WebShell dropped: {} ({})", pl.col(name_col_g), pl.col("_detection_reason")).alias("Action"),
+                    ])
+                    
+                    # Cast to match schema
+                    webshell_events = webshell_events.with_columns([
+                        pl.col(c).cast(pl.Utf8) for c in webshell_events.columns if c != "Threat_Score"
+                    ])
+                    
+                    df_final = pl.concat([df_final, webshell_events], how="diagonal")
         
         # [v4.21] Apply Justice Logic (Noise Killing & Enrichment)
         df_final = self.judge(df_final)
