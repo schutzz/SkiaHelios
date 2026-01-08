@@ -323,12 +323,17 @@ class AIONEngine:
                 print(f"    -> Dirty Check: {reason}")
                 scavenge_results = scavenger.scavenge()
                 for r in scavenge_results:
+                    ctx_hex = r.get("Context_Hex", "N/A")
+                    location_info = r.get("Entry_Location", "")
+                    if ctx_hex != "N/A":
+                        location_info += f" [HEX: {ctx_hex}]"
+
                     scavenge_hits.append({
                         "Last_Executed_Time": r.get("Timestamp", ""),
                         "AION_Score": r.get("AION_Score", 400),
                         "AION_Tags": r.get("AION_Tags", "SAM_SCAVENGE"),
                         "Target_FileName": r.get("Username", ""),
-                        "Entry_Location": r.get("Entry_Location", ""),
+                        "Entry_Location": location_info,
                         "Full_Path": r.get("Username", ""),
                         "File_Hash_SHA256": "N/A",
                         "File_Hash_SHA1": "N/A",

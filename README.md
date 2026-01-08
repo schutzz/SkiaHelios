@@ -15,7 +15,7 @@
 
 Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** orchestrated by **"Hekate"**, supported by **"Chronos" (The Time Lord feat. Icarus Paradox)**, **"Hercules" (The Referee)**, the **"PlutosGate" (Network Hunter)**, and the **"YARA WebShell Scanner"** to detect advanced threats including **Account Takeover**, **Privilege Escalation**, **Evidence Wiping**, **Web Intrusion Chains**, and **Cross-Artifact Tampering**.
 
-**Current Version:** v5.6.2 (Dirty Hive Hunter / Anchor Extension)
+**Current Version:** v5.6.3 (The Deep Carver: Context Carving & Binary Reporting)
 
 ---
 
@@ -173,7 +173,13 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
 
 ## 📜 Complete Changelog
 
-### v5.6 - The Dirty Hive Hunter & Justice Refined (Current) ☠️
+### v5.6.3 - The Deep Carver (Context & Binary Reporting) 🦁
+* **[Chain Scavenger]** **Context Carving:** Now extracts and reports the **Binary Context (Hex Dump)** surrounding carved user accounts. Helps analysts distinguish valid accounts from random data patterns.
+* **[Chain Scavenger]** **Relaxed Scavenging:** Regex engine now supports short usernames (3+ chars) to capture elusive accounts like `Gues`, `Adm`, etc.
+* **[Lachesis]** **Binary Context Display:** The Analyst Note in the report now natively renders the **Binary Hex Dump** of the carved artifact (`[HEX: 720065...]`).
+* **[Hercules]** **Automated Impact Analysis:** Automatically tags `SAM_SCAVENGE` events with `[LOG_WIPE_INDUCED_MISSING_EVENT]` to guide analysts to check for evidence wiping correlations.
+
+### v5.6 - The Dirty Hive Hunter & Justice Refined
 * **[Chain Scavenger]** **Dirty Hive Hunter (v1.0):** Binary-level SAM hive analyzer that triggers when RECmd fails. Extracts hidden user accounts from corrupted/dirty hives using "Anchor Search" and "Context Carving".
 * **[Chain Scavenger]** **Anchor Extension (v5.6.2):** Enhanced detection using **"Users" key** and **RID-like Hex Patterns** to capture fragmented account traces (e.g., `hacker`) that evade standard parsing.
 * **[Hercules]** **User Creation Detection:** Detects `net user /add`, EID 4720 (User Created), EID 4732/4728 (Group Membership), PowerShell `New-LocalUser`.
@@ -283,6 +289,7 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
 * [x] **v5.2:** **Operation Perfection (Smart Reporting & Statistical Accuracy)**
 * [x] **v5.3:** **Operation Dragnet (PlutosGate v3.4 - Network Thermodynamics & Exfil Hunter)**
 * [x] **v5.4:** **Icarus Flight (Cross-Artifact Paradox Detection / Paradox Breaker)**
+* [x] **v5.6:** **The Deep Carver (Dirty Hive Hunter & Binary Context Reporting)**
 * [ ] **v5.x:** **LLM Integration** (Auto-summarization of Technical Findings) - *Planned*
 
 ---

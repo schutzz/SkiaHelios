@@ -298,9 +298,17 @@ class LachesisAnalyzer:
                         except: score = 0
                         if score >= 50:
                             name = row.get("Target_FileName")
-                            if not self.intel.is_noise(name, row.get("Full_Path", "")):
+                            # [v5.6.3] Prefer Entry_Location for Chain Scavenger Context Hex (Robust Match)
+                            entry_loc = ""
+                            for k, v in row.items():
+                                if "entry" in k.lower() and "location" in k.lower():
+                                    entry_loc = v
+                                    break
+                            path_str = entry_loc or row.get("Full_Path", "")
+                            
+                            if not self.intel.is_noise(name, path_str):
                                 self._add_unique_visual_ioc({
-                                    "Type": "PERSISTENCE", "Value": name, "Path": row.get("Full_Path"), "Note": "Persist", 
+                                    "Type": "PERSISTENCE", "Value": name, "Path": path_str, "Note": "Persist", 
                                     "Time": str(row.get("Last_Executed_Time", "")), "Reason": "Persistence",
                                     "Tag": str(row.get("AION_Tags", "")),
                                     "Score": score
@@ -407,6 +415,15 @@ class LachesisAnalyzer:
         if "SAM_SCAVENGE" in tag or "SAM_SCAVENGE" in ioc_type:
             insights = ["☠️ **Chain Scavenger Detection** (Dirty Hive Hunter)"]
             insights.append("- **Detection**: 破損または隠蔽されたSAMハイブから、バイナリレベルのカービングでユーザーアカウントを物理抽出しました。")
+            
+            # [Deep Carving] Extract Hex Context if available
+            # We packed it into Entry_Location (which maps to Path in IOC object often, or we can check Path)
+            if "[HEX:" in path:
+                try:
+                    hex_part = path.split("[HEX:")[1].split("]")[0].strip()
+                    insights.append(f"- **Binary Context**: `{hex_part}`")
+                except: pass
+
             if "hacker" in val_lower or "user" in val_lower:
                 insights.append(f"- **Suspicion**: ユーザー名 `{val}` は典型的な攻撃用アカウントの命名パターンです。")
             insights.append("- **Action**: 即時にこのアカウントの作成日時周辺（イベントログ削除の痕跡がある場合はその直前）のタイムラインを確認してください。[LOG_WIPE_INDUCED_MISSING_EVENT]")

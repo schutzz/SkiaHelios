@@ -629,9 +629,18 @@ class LachesisWriter:
                         except: score = 0
                         if score >= 50:
                             name = row.get("Target_FileName")
-                            if not self._is_noise(name, row.get("Full_Path", "")):
+                            # [v5.6.3] Prefer Entry_Location for Chain Scavenger Context Hex (Robust Match)
+                            entry_loc = ""
+                            for k, v in row.items():
+                                if "entry" in k.lower() and "location" in k.lower():
+                                    entry_loc = v
+                                    break
+                            
+                            path_val = entry_loc or row.get("Full_Path", "") or row.get("Path", "")
+                            
+                            if not self._is_noise(name, path_val):
                                 self._add_unique_visual_ioc({
-                                    "Type": "PERSISTENCE", "Value": name, "Path": row.get("Full_Path"), "Note": "Persist", 
+                                    "Type": "PERSISTENCE", "Value": name, "Path": path_val, "Note": "Persist", 
                                     "Time": str(row.get("Last_Executed_Time", "")), "Reason": "Persistence",
                                     "Score": score
                                 })

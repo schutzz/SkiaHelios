@@ -26,7 +26,6 @@ class ChainScavenger:
         "administrator", "guest", "support_", "defaultaccount",
         "wdagutilityaccount", "krbtgt", "system", "local service",
         "network service", "everyone", "users", "authenticated users",
-        "interactive", "remote desktop users", "administrators",
         "backup operators", "power users", "replicator", "iis_iusrs"
     ]
     
@@ -281,7 +280,28 @@ class ChainScavenger:
                 if any(re.search(p, decoded, re.IGNORECASE) for p in skip_patterns):
                     continue
                 
-                candidates.append(decoded)
+                # [Deep Carving] Context Hex Extraction
+                # Extract 32 bytes around the match to see RID or F-Key heuristically
+                start_match = match.start()
+                end_match = match.end()
+                
+                # Look ahead for RID pattern (often 4 bytes after name or near it)
+                # But simple context hex is better for Manual Verification
+                ctx_start = max(0, start_match - 16)
+                ctx_end = min(len(carved_data), end_match + 32)
+                ctx_bytes = carved_data[ctx_start:ctx_end]
+                try:
+                    ctx_hex = ctx_bytes.hex()
+                    # Format as readable hex dump
+                    # e.g. "4E006100... [Name]"
+                    ctx_preview = f"{ctx_hex[:32]}...{ctx_hex[-32:]} (Size:{len(ctx_bytes)})"
+                except:
+                    ctx_preview = "N/A"
+
+                candidates.append({
+                    "name": decoded, 
+                    "context_hex": ctx_preview
+                })
                 
             except Exception:
                 continue
@@ -290,7 +310,8 @@ class ChainScavenger:
         seen = set()
         unique = []
         for c in candidates:
-            c_lower = c.lower()
+            c_name = c["name"]
+            c_lower = c_name.lower()
             if c_lower not in seen:
                 seen.add(c_lower)
                 unique.append(c)
@@ -335,7 +356,10 @@ class ChainScavenger:
                     # Step C: Intelligent Filtering
                     usernames = self.intelligent_filter(carved)
                     
-                    for username in usernames:
+                    for user_obj in usernames:
+                        username = user_obj["name"]
+                        ctx_hex = user_obj["context_hex"]
+
                         # Create result entry
                         self.results.append({
                             "Timestamp": datetime.now().isoformat(),
@@ -343,6 +367,7 @@ class ChainScavenger:
                             "Source": f"SCAVENGE:{hive_file.name}",
                             "Offset": hex(offset),
                             "Context_Range": f"{hex(start)}-{hex(end)}",
+                            "Context_Hex": ctx_hex,
                             "Entry_Location": f"SAM_SCAVENGE: {hive_file.name}",
                             "AION_Score": 400,
                             "AION_Tags": "SAM_SCAVENGE, NEW_USER_CREATED, DIRTY_HIVE",
