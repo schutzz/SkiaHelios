@@ -3,39 +3,26 @@
     "Host": "4ORENSICS",
     "Case": "Investigation",
     "Primary_User": "Hunter",
-    "Generated_At": "2026-01-07T19:44:27.803499"
-  },
-  "Verdict": {
-    "Flags": [
-      "PHISHING",
-      "TIMESTOMP"
-    ],
-    "Lateral_Summary": "None"
+    "Generated_At": "2026-01-09T11:56:26.552483"
   },
   "Timeline": [
     {
       "Time": "2016-06-21T12:01:46.054037",
-      "User": null,
       "Category": "EXEC",
       "Summary": "Run Count: 5",
-      "Source": "UserAssist",
-      "Criticality": 100
+      "Source": "UserAssist"
     },
     {
       "Time": "2016-06-21T12:01:44.005640",
-      "User": null,
       "Category": "ANTI",
       "Summary": "ccleaner.exe executed",
-      "Source": "UserAssist",
-      "Criticality": 100
+      "Source": "UserAssist"
     },
     {
       "Time": "2016-06-20T23:48:22.226062",
-      "User": null,
       "Category": "FILE",
       "Summary": "Rollback: -35997",
-      "Source": "USN",
-      "Criticality": 300
+      "Source": "USN"
     }
   ],
   "IOCs": {
@@ -89,6 +76,7 @@
         "Note": "Persist",
         "Time": "2016-06-21T12:01:44",
         "Reason": "Persistence",
+        "Tag": "",
         "Score": 80
       },
       {
@@ -112,7 +100,6 @@
         "Summary": "ccleaner.exe executed"
       }
     ],
-    "Network": [],
-    "Cmd": []
+    "Network": []
   }
 }

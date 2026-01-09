@@ -13,6 +13,100 @@ class LachesisAnalyzer:
         self.infra_ips_found = set()
         self.noise_stats = {}
         self.total_events_analyzed = 0
+        self.dynamic_verdict = None  # [C.1] Dynamic Verdict result
+    
+    def determine_dynamic_verdict(self):
+        """
+        [C.1] Determine dynamic verdict based on detected indicators.
+        
+        Analyzes visual_iocs to determine primary threat type and generates
+        an appropriate verdict for the executive summary.
+        
+        Priority: Ransomware > WebShell > Anti-Forensics > Phishing > Standard
+        
+        Returns:
+            dict: {"title": str, "description": str, "severity": str}
+        """
+        # Count IOC types
+        ioc_counts = {
+            "ransomware": 0,
+            "webshell": 0,
+            "anti_forensics": 0,
+            "phishing": 0,
+            "timestomp": 0,
+            "persistence": 0,
+            "execution": 0
+        }
+        
+        for ioc in self.visual_iocs:
+            ioc_type = str(ioc.get("Type", "")).upper()
+            tags = str(ioc.get("Tags", "")).upper() if "Tags" in ioc else ""
+            combined = ioc_type + " " + tags
+            
+            if "RANSOM" in combined or "RANSOMWARE" in combined:
+                ioc_counts["ransomware"] += 1
+            if "WEBSHELL" in combined:
+                ioc_counts["webshell"] += 1
+            if "ANTI" in combined or "WIPE" in combined or "CCLEANER" in combined or "BCWIPE" in combined:
+                ioc_counts["anti_forensics"] += 1
+            if "PHISHING" in combined or "LNK" in ioc_type:
+                ioc_counts["phishing"] += 1
+            if "TIMESTOMP" in combined:
+                ioc_counts["timestomp"] += 1
+            if "PERSIST" in combined:
+                ioc_counts["persistence"] += 1
+            if "EXEC" in combined:
+                ioc_counts["execution"] += 1
+        
+        # Verdict text by language
+        verdicts = {
+            "jp": {
+                "ransomware": ("🚨 CRITICAL: ランサムウェア攻撃を検出", "暗号化バースト、破壊コマンド、または身代金要求ノートが検出されました。"),
+                "webshell": ("🚨 CRITICAL: WebShell侵害を検出", "Webサーバー上でWebShellの痕跡が確認されました。"),
+                "anti_forensics": ("⚠️ HIGH: 証拠隠滅・偽装を伴う侵害を確認", "ワイピングツールやアンチフォレンジック活動が検出されました。"),
+                "phishing": ("⚠️ HIGH: フィッシング攻撃の痕跡を確認", "偽装されたLNKファイルやソーシャルエンジニアリングの痕跡が検出されました。"),
+                "standard": ("📌 MEDIUM: 不審な活動を検出", "分析対象期間において、複数の不審な活動を確認しました。")
+            },
+            "en": {
+                "ransomware": ("🚨 CRITICAL: RANSOMWARE ACTIVITY DETECTED", "Encryption burst, destructive commands, or ransom notes were detected."),
+                "webshell": ("🚨 CRITICAL: WEBSHELL INTRUSION DETECTED", "WebShell artifacts were found on the web server."),
+                "anti_forensics": ("⚠️ HIGH: COMPROMISE WITH EVIDENCE DESTRUCTION", "Wiping tools and anti-forensics activities were detected."),
+                "phishing": ("⚠️ HIGH: PHISHING ATTACK INDICATORS FOUND", "Masqueraded LNK files or social engineering artifacts were detected."),
+                "standard": ("📌 MEDIUM: SUSPICIOUS ACTIVITY DETECTED", "Multiple suspicious activities were identified during the analysis period.")
+            }
+        }
+        
+        lang_verdicts = verdicts.get(self.lang, verdicts["jp"])
+        
+        # Determine verdict by priority
+        if ioc_counts["ransomware"] > 0:
+            title, desc = lang_verdicts["ransomware"]
+            severity = "CRITICAL"
+        elif ioc_counts["webshell"] > 0:
+            title, desc = lang_verdicts["webshell"]
+            severity = "CRITICAL"
+        elif ioc_counts["anti_forensics"] > 0:
+            title, desc = lang_verdicts["anti_forensics"]
+            severity = "HIGH"
+        elif ioc_counts["phishing"] > 0:
+            title, desc = lang_verdicts["phishing"]
+            severity = "HIGH"
+        else:
+            title, desc = lang_verdicts["standard"]
+            severity = "MEDIUM"
+        
+        self.dynamic_verdict = {
+            "title": title,
+            "description": desc,
+            "severity": severity,
+            "ioc_counts": ioc_counts
+        }
+        
+        try:
+            print(f"    -> [Analyzer] Dynamic Verdict: {severity} - {title}".encode('cp932', errors='replace').decode('cp932'))
+        except:
+             print(f"    -> [Analyzer] Dynamic Verdict: {severity} - {title}".encode('utf-8', errors='ignore').decode('utf-8'))
+        return self.dynamic_verdict
 
     def process_events(self, analysis_result, dfs):
         raw_events = analysis_result.get("events", [])
@@ -66,6 +160,7 @@ class LachesisAnalyzer:
         self._extract_visual_iocs_from_pandora(dfs)
         self._extract_visual_iocs_from_chronos(dfs)
         self._extract_visual_iocs_from_aion(dfs)
+        self._extract_visual_iocs_from_plutos_recon(dfs)
         self._extract_visual_iocs_from_events(raw_events)
         
         # 3. Generate Pivot Seeds
@@ -181,7 +276,9 @@ class LachesisAnalyzer:
                                 "Note": str(row.get("Anomaly_Time", "")), 
                                 "Time": str(row.get("si_dt", "") or row.get("UpdateTimestamp", "")),
                                 "Reason": bypass_reason,
-                                "Score": score 
+                                "Score": score,
+                                "FileName": fname, # [Fix] For Smart Formatting
+                                "Action": "Rollback Detected" # [Fix] Fallback Action
                             })
                             continue
 
@@ -214,7 +311,9 @@ class LachesisAnalyzer:
                             "Time": str(row.get("Anomaly_Time", "")), 
                             "Reason": bypass_reason, 
                             "Score": score,
-                            "Extra": extra_info
+                            "Extra": extra_info,
+                            "FileName": fname, # [Fix] For Smart Formatting
+                            "Action": "Timestomp Detected" # [Fix] Fallback Action
                         })
                 except: pass
 
@@ -284,7 +383,10 @@ class LachesisAnalyzer:
                             "Time": str(row.get("Ghost_Time_Hint", "")), 
                             "Reason": bypass_reason,
                             "Extra": extra_info,
-                            "Score": score
+                            "Extra": extra_info,
+                            "Score": score,
+                            "FileName": fname, # [Fix] For Smart Formatting
+                            "Target_Path": path
                         })
                 except: pass
 
@@ -307,7 +409,8 @@ class LachesisAnalyzer:
                             low_confidence_filtered = False
                             
                             if is_scavenge:
-                                if score < 900:
+                                # [v5.7.1] Adjusted threshold for Score Cap (300)
+                                if score < 150:
                                     # Skip low confidence items
                                     continue
                                 
@@ -361,7 +464,10 @@ class LachesisAnalyzer:
                                     "Type": "PERSISTENCE", "Value": name, "Path": path_str, "Note": "Persist", 
                                     "Time": str(row.get("Last_Executed_Time", "")), "Reason": "Persistence",
                                     "Tag": tags,
-                                    "Score": score
+                                    "Tag": tags,
+                                    "Score": score,
+                                    "Target_FileName": name, # [Fix] For Smart Formatting
+                                    "Target_Path": path_str
                                 })
                 except: pass
                 
@@ -370,9 +476,34 @@ class LachesisAnalyzer:
                 # there's likely output. The high-score ones are shown.
                 # The user request implies filtering is the main action.
 
+    def _extract_visual_iocs_from_plutos_recon(self, dfs):
+        if dfs.get('Recon') is not None:
+             df = dfs['Recon']
+             if df.height > 0:
+                 for row in df.iter_rows(named=True):
+                     url = row.get("URL") or ""
+                     title = row.get("Title") or ""
+                     verdict = row.get("Plutos_Verdict") or "RECON_ACTIVITY"
+                     score = row.get("Heat_Score") or 0
+                     timestamp = row.get("Timestamp")
+                     
+                     self._add_unique_visual_ioc({
+                         "Type": verdict, 
+                         "Value": url if url else title,
+                         "Path": "Browser History",
+                         "Note": title if url else "Reconnaissance",
+                         "Time": str(timestamp), 
+                         "Reason": f"High Score ({score})",
+                         "Score": int(score),
+                         "Tag": verdict,
+                         "Analysis": "Reconnaissance Detected"
+                     })
+
     def _extract_visual_iocs_from_events(self, events):
         re_ip = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b')
-        infra_ips = ["10.0.2.15", "10.0.2.2", "127.0.0.1", "0.0.0.0", "::1"]
+        infra_ips = self.intel.infra_ips
+        if not infra_ips:
+            infra_ips = {"10.0.2.15", "10.0.2.2", "127.0.0.1", "0.0.0.0", "::1"} # Fallback
         for ev in events:
             content = ev['Summary'] + " " + str(ev.get('Detail', ''))
             ips = re_ip.findall(content)
@@ -391,7 +522,8 @@ class LachesisAnalyzer:
             
             is_dual = self.intel.is_dual_use(ev.get('Summary', ''))
             tag = str(ev.get('Tag', '')).upper()
-            is_af = "ANTI_FORENSICS" in tag
+            # [FIX] Match both ANTI_FORENSICS and ANTIFORENSICS patterns
+            is_af = "ANTI_FORENSICS" in tag or "ANTIFORENSICS" in tag
             score = ev.get('Criticality', 0)
 
             if (ev['Criticality'] >= 90 or is_dual or is_af) and (ev['Category'] == 'EXEC' or ev['Category'] == 'ANTI'):
@@ -414,7 +546,16 @@ class LachesisAnalyzer:
                             "Reason": reason_label,
                             "Time": ev.get('Time'),
                             "Score": score,
-                            "Summary": ev.get('Summary', '')
+                            "Score": score,
+                            "Summary": ev.get('Summary', ''),
+                            # [Fix] Preserve fields for Smart Formatting
+                            "FileName": ev.get('FileName'),
+                            "Target_FileName": ev.get('Target_FileName'),
+                            "Target_Path": ev.get('Target_Path'),
+                            "Action": ev.get('Action'),
+                            "Payload": ev.get('Payload'),
+                            "Reg_Key": ev.get('Reg_Key'),
+                            "CommandLine": ev.get('CommandLine')
                         })
 
     def _add_unique_visual_ioc(self, ioc_dict):
@@ -614,4 +755,6 @@ class LachesisAnalyzer:
         elif "COMMUNICATION_CONFIRMED" in reason or "COMMUNICATION_CONFIRMED" in ioc_type:
             return "🚨 ブラウザ履歴との照合により、**実際にネットワーク通信が成功した痕跡**を確認しました。C2サーバへのビーコン送信、またはペイロードダウンロードの可能性が極めて高いです。"
         
+
+
         return None

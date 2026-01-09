@@ -405,16 +405,16 @@ threat_signatures:
     # Actionカラムに "System time changed" が含まれていたら即検知
     pattern: "(?i)(system time changed|previous time|new time)"
 
-  - name: "File Wiping Tool"
-    tag: "CRITICAL_WIPING"
+  - name: "File Wiping Tool (Anti-Forensics)"
+    tag: "CRITICAL_ANTIFORENSICS"
     score: 300
     target: "FileName"
     condition: "regex"
     pattern: "(?i)(bcwipe|sdelete|eraser|cipher\\.exe)"
 
-  - name: "Evidence Cleaner"
-    tag: "CRITICAL_CLEANER"
-    score: 250
+  - name: "Evidence Cleaner (Anti-Forensics)"
+    tag: "CRITICAL_ANTIFORENSICS"
+    score: 300
     target: "FileName"
     condition: "regex"
     pattern: "(?i)(ccleaner|glary|bleachbit)"
@@ -449,3 +449,165 @@ threat_signatures:
     target: "Artifact_Type"
     condition: "contains"
     pattern: "AppCompatCache"
+
+  # ==========================================
+  # 🔧 SysInternals Tool Detection (Challenge #7)
+  # ==========================================
+  # --- Remote Execution (Critical) ---
+  - name: "SysInternals PsExec Execution"
+    tag: "CRITICAL_LATERAL_PSEXEC"
+    score: 200
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)^(psexec|psexec64|paexec)\\.exe$"
+
+  - name: "PsExec Service Created"
+    tag: "CRITICAL_LATERAL_PSEXEC"
+    score: 250
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)^(psexesvc|remcomsvc)\\.exe$"
+
+  # --- Credential/Memory Dump (Critical) ---
+  - name: "SysInternals Procdump Execution"
+    tag: "CRITICAL_CREDENTIAL_DUMP"
+    score: 250
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)^(procdump|procdump64)\\.exe$"
+
+  # --- Reconnaissance Tools (Medium-High) ---
+  - name: "SysInternals Process Monitor"
+    tag: "RECON_SYSINTERNALS"
+    score: 100
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)^(procmon|procmon64)\\.exe$"
+
+  - name: "SysInternals Process Explorer"
+    tag: "RECON_SYSINTERNALS"
+    score: 80
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)^(procexp|procexp64)\\.exe$"
+
+  - name: "SysInternals Autoruns"
+    tag: "RECON_PERSISTENCE"
+    score: 100
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)^(autoruns|autorunsc|autoruns64)\\.exe$"
+
+  - name: "SysInternals AccessChk"
+    tag: "RECON_PRIVESC"
+    score: 120
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)^(accesschk|accesschk64)\\.exe$"
+
+  # --- Process Manipulation ---
+  - name: "SysInternals PsKill"
+    tag: "DEFENSE_EVASION"
+    score: 150
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)^(pskill|pskill64)\\.exe$"
+
+  - name: "SysInternals PsSuspend"
+    tag: "DEFENSE_EVASION"
+    score: 100
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)^(pssuspend|pssuspend64)\\.exe$"
+
+  # ==========================================
+  # 🔔 Service Creation Detection (Event ID 7045/4697)
+  # ==========================================
+  - name: "Service Installation Detected (Event 7045)"
+    tag: "PERSISTENCE_SERVICE"
+    score: 150
+    target: "Action"
+    condition: "regex"
+    pattern: "(?i)(service.*install|7045|a new service was installed)"
+
+  - name: "Service Installation via Security Log (Event 4697)"
+    tag: "PERSISTENCE_SERVICE"
+    score: 150
+    target: "Action"
+    condition: "regex"
+    pattern: "(?i)(4697|service was installed)"
+
+  - name: "Suspicious Service Name Pattern"
+    tag: "CRITICAL_PERSISTENCE"
+    score: 200
+    target: "Message"
+    condition: "regex"
+    pattern: "(?i)(PSEXESVC|RemComSvc|BTOBTO|metsvc|persistence)"
+
+  # ==========================================
+  # 🌐 SysInternals Download Source Detection
+  # ==========================================
+  - name: "SysInternals Download Detected"
+    tag: "TOOLING_DOWNLOAD"
+    score: 120
+    target: "Target_Path"
+    condition: "regex"
+    pattern: "(?i)(live\\.sysinternals\\.com|download\\.sysinternals\\.com)"
+
+  # ==========================================
+  # 🎭 Case 7: Masquerade Detection
+  # ==========================================
+  - name: "SysInternals.exe Masquerade (Exact)"
+    tag: "CRITICAL_MASQUERADE"
+    score: 300
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)^sysinternals\\.exe$"
+
+  - name: "VMToolsIO.exe Masquerade"
+    tag: "CRITICAL_MASQUERADE"
+    score: 300
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)^vmtoolsio\\.exe$"
+
+  # ==========================================
+  # 📁 Suspicious Path Execution
+  # ==========================================
+  - name: "Execution from Public Downloads"
+    tag: "SUSPICIOUS_PATH_EXEC"
+    score: 200
+    target: "Target_Path"
+    condition: "regex"
+    pattern: "(?i)\\\\Users\\\\Public\\\\(Downloads|Documents)?\\\\.*\\.exe$"
+
+  - name: "Execution from User Downloads"
+    tag: "SUSPICIOUS_PATH_EXEC"
+    score: 150
+    target: "Target_Path"
+    condition: "regex"
+    pattern: "(?i)\\\\Users\\\\[^\\\\]+\\\\Downloads\\\\.*\\.exe$"
+
+  - name: "Execution from Temp Folder"
+    tag: "SUSPICIOUS_PATH_EXEC"
+    score: 180
+    target: "Target_Path"
+    condition: "regex"
+    pattern: "(?i)\\\\(Temp|Tmp)\\\\.*\\.exe$"
+
+  # ==========================================
+  # 🔍 Recon Indicators (Case 7 Specific)
+  # ==========================================
+  - name: "Task Manager Execution"
+    tag: "RECON_INDICATOR"
+    score: 30
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)^taskmgr\\.exe$"
+
+  - name: "Run Dialog Usage"
+    tag: "RECON_INDICATOR"
+    score: 40
+    target: "Target_Path"
+    condition: "regex"
+    pattern: "(?i)Microsoft\\.Windows\\.Shell\\.RunDialog"

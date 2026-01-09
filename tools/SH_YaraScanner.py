@@ -117,6 +117,66 @@ WEBSHELL_SIGNATURES = {
     }
 }
 
+# [A.3] Ransomware Note Signatures
+RANSOM_NOTE_SIGNATURES = {
+    "generic_ransom_note_filename": {
+        "name": "Ransom Note Filename Pattern",
+        "patterns": [
+            r"(?i)readme.*decrypt",
+            r"(?i)how.*recover",
+            r"(?i)help.*decrypt",
+            r"(?i)instructions.*pay",
+            r"(?i)your.*files.*encrypted",
+            r"(?i)decrypt_?instructions",
+            r"(?i)recover_?your_?files",
+            r"(?i)readme_?for_?decrypt",
+            r"(?i)!+.*readme.*!+",
+        ],
+        "extensions": [".txt", ".html", ".htm", ".hta"],
+        "severity": "CRITICAL",
+        "score": 400
+    },
+    "crypto_payment_indicator": {
+        "name": "Cryptocurrency Payment Indicator",
+        "content_patterns": [
+            rb"(?i)bitcoin",
+            rb"(?i)btc",
+            rb"(?i)monero",
+            rb"(?i)ethereum",
+            rb"(?i)crypto\s*wallet",
+            rb"(?i)bc1[a-z0-9]{25,39}",  # Bitcoin address pattern
+            rb"(?i)1[a-km-zA-HJ-NP-Z1-9]{25,34}",  # Legacy bitcoin address
+            rb"(?i)3[a-km-zA-HJ-NP-Z1-9]{25,34}",  # P2SH bitcoin address
+        ],
+        "severity": "CRITICAL",
+        "score": 350
+    },
+    "onion_url_indicator": {
+        "name": "Tor .onion URL Indicator",
+        "content_patterns": [
+            rb"(?i)\.onion",
+            rb"(?i)tor\s*browser",
+            rb"(?i)torproject",
+            rb"(?i)dark\s*web",
+        ],
+        "severity": "HIGH",
+        "score": 300
+    },
+    "ransom_threat_indicator": {
+        "name": "Ransom Threat Language",
+        "content_patterns": [
+            rb"(?i)files?\s+(are|were|have been)\s+encrypted",
+            rb"(?i)pay\s+within\s+\d+\s+(hours?|days?)",
+            rb"(?i)your\s+personal\s+(id|key|code)",
+            rb"(?i)private\s+key\s+will\s+be\s+destroyed",
+            rb"(?i)do\s+not\s+(try|attempt)\s+to\s+(decrypt|recover)",
+            rb"(?i)decryption\s+(tool|key|software)",
+        ],
+        "severity": "CRITICAL",
+        "score": 400
+    }
+}
+
 # Common web root directories to scan
 WEB_ROOTS = [
     "htdocs", "wwwroot", "inetpub", "www", "public_html", 
@@ -264,10 +324,71 @@ class YaraScanner:
         
         return None
     
+    def scan_ransom_notes(self):
+        """[A.3] Scan for ransomware ransom note indicators in ghost entries."""
+        print("[*] Ransomware Scanner: Scanning for ransom note indicators...")
+        
+        if not self.ghost_csv or not os.path.exists(self.ghost_csv):
+            print("    [*] No Ghost_Report.csv found. Skipping ransom note scan.")
+            return []
+        
+        hits = []
+        
+        try:
+            df = pl.read_csv(self.ghost_csv, ignore_errors=True, infer_schema_length=0)
+            
+            # Identify filename/path columns
+            schema = df.columns
+            name_col = next((c for c in ["Ghost_FileName", "FileName", "Name", "File"] if c in schema), None)
+            path_col = next((c for c in ["ParentPath", "Path", "FullPath", "Directory"] if c in schema), None)
+            
+            if not name_col:
+                print("    [!] Cannot identify filename column in Ghost_Report.")
+                return []
+            
+            # Get ransom note filename patterns
+            ransom_patterns = RANSOM_NOTE_SIGNATURES.get("generic_ransom_note_filename", {}).get("patterns", [])
+            ransom_extensions = RANSOM_NOTE_SIGNATURES.get("generic_ransom_note_filename", {}).get("extensions", [])
+            
+            for row in df.iter_rows(named=True):
+                filename = str(row.get(name_col, ""))
+                filepath = str(row.get(path_col, "")).lower()
+                
+                # Skip system paths
+                if any(x in filepath for x in ["windows\\", "program files", "winsxs", "assembly"]):
+                    continue
+                
+                # Check file extension first
+                ext = Path(filename).suffix.lower()
+                if ext not in ransom_extensions:
+                    continue
+                
+                # Check against ransom note patterns
+                for pattern in ransom_patterns:
+                    if re.search(pattern, filename):
+                        hits.append({
+                            "Type": "RANSOM_NOTE_DETECTED",
+                            "FileName": filename,
+                            "Path": row.get(path_col, ""),
+                            "Signature": "Ransom Note Filename Pattern",
+                            "Severity": "CRITICAL",
+                            "Score": 400,
+                            "Tag": "Ransomware_Detected"
+                        })
+                        print(f"    [!] RANSOM NOTE DETECTED: {filename}")
+                        break
+            
+            print(f"    [+] Ransom note scan complete: {len(hits)} indicators found")
+            
+        except Exception as e:
+            print(f"    [!] Ransom note scan error: {e}")
+        
+        return hits
+    
     def run_full_scan(self):
-        """Run both live and ghost scans, returning combined results."""
+        """Run all scans (live, ghost, ransomware), returning combined results."""
         print("\n" + "="*60)
-        print("  SH_YaraScanner v1.0 [WebShell Hunter]")
+        print("  SH_YaraScanner v1.1 [WebShell & Ransomware Hunter]")
         print("="*60)
         
         all_hits = []
@@ -276,15 +397,21 @@ class YaraScanner:
         live_hits = self.scan_live_files()
         all_hits.extend(live_hits)
         
-        # Ghost entry scan
+        # Ghost entry scan (WebShell)
         ghost_hits = self.scan_ghost_entries()
         all_hits.extend(ghost_hits)
         
+        # Ransom note scan
+        ransom_hits = self.scan_ransom_notes()
+        all_hits.extend(ransom_hits)
+        
         if all_hits:
-            print(f"\n[!] TOTAL WEBSHELL INDICATORS: {len(all_hits)}")
+            webshell_count = len([h for h in all_hits if "WebShell" in h.get("Tag", "")])
+            ransom_count = len([h for h in all_hits if "Ransomware" in h.get("Tag", "")])
+            print(f"\n[!] TOTAL INDICATORS: {len(all_hits)} (WebShell: {webshell_count}, Ransomware: {ransom_count})")
             return pl.DataFrame(all_hits)
         
-        print("\n[*] No WebShell indicators detected.")
+        print("\n[*] No WebShell or Ransomware indicators detected.")
         return None
 
 

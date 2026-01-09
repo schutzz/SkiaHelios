@@ -3,14 +3,23 @@ import argparse
 import sys
 import os
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from tools.SH_ThemisLoader import ThemisLoader
 
 # ============================================================
-#  SH_PandorasLink v18.17 [Triage Cleaner]
-#  Mission: Surgical removal & Cross-Correlation.
-#  Update: Expanded Triage Kill List (McAfee, BMP, GIF).
+#  SH_PandorasLink v18.20 [Ransomware Hunter]
+#  Mission: Surgical removal, Cross-Correlation & Ransomware Detection.
+#  Update: A.1 Encryption Burst Detection (Polars集計)
 # ============================================================
+
+# Ransomware Extension List (Configurable)
+RANSOMWARE_EXTENSIONS = [
+    ".encrypted", ".lock", ".crypt", ".crypto", ".cerber", ".zepto", ".locky",
+    ".odin", ".aesir", ".osiris", ".thor", ".loptr", ".sage", ".wallet",
+    ".wncry", ".wcry", ".wnry", ".wannacry", ".ransomware", ".petya",
+    ".notpetya", ".gandcrab", ".ryuk", ".sodinokibi", ".revil", ".conti",
+    ".lockbit", ".blackcat", ".hive", ".akira", ".rhysida", ".babuk"
+]
 
 def print_logo():
     logo = r"""
@@ -345,6 +354,109 @@ class PandoraEngine:
 
     def run_anti_forensics(self, limit=50): return pl.LazyFrame([])
     def run_necromancer(self, lf_ghosts, pf_csv=None, shim_csv=None, chaos_csv=None): return lf_ghosts 
+
+    def detect_encryption_burst(self, threshold_count: int = 50, threshold_seconds: int = 60):
+        """
+        [A.1] Ransomware Encryption Burst Detection
+        
+        MFT/USNデータフレームから暗号化バースト（短時間での大量ファイル生成）を検知する。
+        
+        Args:
+            threshold_count: バーストとみなす最小ファイル数 (default: 50)
+            threshold_seconds: バーストとみなす最大継続時間（秒） (default: 60)
+            
+        Returns:
+            pl.DataFrame with detected burst events
+        """
+        print(f"[*] Ransomware Burst Detection: Scanning for {threshold_count}+ files in {threshold_seconds}s...")
+        
+        results = []
+        
+        # User領域パスフィルタ (システム領域のノイズ除去)
+        user_path_regex = r"(?i)(\\Users\\[^\\]+\\(Documents|Desktop|Pictures|Music|Downloads|Videos|OneDrive|Dropbox))"
+        
+        try:
+            # USN Journal を使用（リアルタイムに近いタイムスタンプ）
+            lf_usn = self.lf_usn.with_columns(
+                self._robust_date_parse(pl.col("TimeStamp")).alias("Parsed_Timestamp")
+            )
+            
+            # 拡張子を抽出
+            lf_usn = lf_usn.with_columns(
+                pl.col("FileName").str.to_lowercase().str.extract(r"(\.[a-z0-9]+)$", 1).alias("Extension")
+            )
+            
+            # ランサムウェア拡張子にマッチするエントリを抽出
+            ransom_entries = lf_usn.filter(
+                pl.col("Extension").is_in(RANSOMWARE_EXTENSIONS)
+            )
+            
+            # ParentPath がある場合、ユーザー領域でフィルタ
+            if "ParentPath" in lf_usn.collect_schema().names():
+                ransom_entries = ransom_entries.filter(
+                    pl.col("ParentPath").str.contains(user_path_regex)
+                )
+            
+            # 集計: 拡張子ごとに最初と最後のタイムスタンプ、ファイル数をカウント
+            burst_candidates = (
+                ransom_entries
+                .group_by("Extension")
+                .agg([
+                    pl.count().alias("file_count"),
+                    pl.min("Parsed_Timestamp").alias("start_time"),
+                    pl.max("Parsed_Timestamp").alias("end_time"),
+                    pl.col("FileName").head(5).alias("sample_files")
+                ])
+            ).collect()
+            
+            # バースト判定: Naive Approach (全体の時間差でチェック)
+            for row in burst_candidates.iter_rows(named=True):
+                file_count = row["file_count"]
+                start_time = row["start_time"]
+                end_time = row["end_time"]
+                extension = row["Extension"]
+                sample_files = row["sample_files"]
+                
+                if start_time is None or end_time is None:
+                    continue
+                    
+                duration = (end_time - start_time).total_seconds()
+                
+                if file_count >= threshold_count and duration <= threshold_seconds:
+                    results.append({
+                        "Timestamp": str(start_time),
+                        "Extension": extension,
+                        "File_Count": file_count,
+                        "Duration_Seconds": duration,
+                        "Sample_Files": ", ".join(sample_files) if sample_files else "",
+                        "Verdict": "CRITICAL_RANSOMWARE_BURST",
+                        "Score": min(file_count * 10, 1000),  # Cap at 1000
+                        "Description": f"Detected {file_count} files with extension {extension} created in {duration:.1f}s"
+                    })
+                    print(f"    [!] BURST DETECTED: {file_count} x '{extension}' in {duration:.1f}s")
+                elif file_count >= threshold_count // 2:
+                    # Low Burst: Half threshold (still worth noting)
+                    results.append({
+                        "Timestamp": str(start_time),
+                        "Extension": extension,
+                        "File_Count": file_count,
+                        "Duration_Seconds": duration,
+                        "Sample_Files": ", ".join(sample_files) if sample_files else "",
+                        "Verdict": "SUSPICIOUS_ENCRYPTION_ACTIVITY",
+                        "Score": min(file_count * 5, 500),
+                        "Description": f"Detected {file_count} files with extension {extension}"
+                    })
+                    print(f"    [~] Suspicious activity: {file_count} x '{extension}'")
+                    
+        except Exception as e:
+            print(f"    [-] Burst Detection Error: {e}")
+            
+        if results:
+            print(f"    [+] Ransomware Burst Detection: {len(results)} events found!")
+            return pl.DataFrame(results)
+        else:
+            print(f"    [-] Ransomware Burst Detection: No bursts detected.")
+            return pl.DataFrame()
 
 def auto_detect_ntfs(target_dir):
     target = Path(target_dir)

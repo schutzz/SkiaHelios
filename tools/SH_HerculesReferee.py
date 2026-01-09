@@ -145,6 +145,50 @@ class HerculesReferee:
         data = {"OS_Info": self.os_info, "Analyzed_At": datetime.datetime.now().isoformat()}
         with open(meta_file, "w", encoding="utf-8") as f: json.dump(data, f, indent=2)
 
+    def _hunt_specific_execution(self, df):
+        """
+        [Execution Hunting - YAML Driven]
+        特定のファイル名の実行痕跡を、ノイズフィルタ無視で強制検出する。
+        スコアは intel_signatures.yaml の execution_hunting.targets から読み込む。
+        """
+        print("    -> [Hercules] Execution Hunting Phase (YAML-Driven)...")
+        
+        # Load targets from YAML config
+        targets = self.config.get("execution_hunting", {}).get("targets", {})
+        
+        # Fallback to minimal defaults if YAML not configured
+        if not targets:
+            print("    -> [!] Warning: execution_hunting.targets not found in config, using defaults")
+            targets = {
+                "sysinternals.exe": 300,
+                "vmtoolsio.exe": 300,
+                "mimikatz.exe": 500,
+                "wannacry.exe": 500,
+            }
+        
+        # Build regex pattern from all targets
+        pattern = "(?i)(" + "|".join([re.escape(t) for t in targets.keys()]) + ")"
+        
+        # Build filter condition across relevant columns
+        cond = pl.lit(False)
+        if "FileName" in df.columns:
+            cond = cond | pl.col("FileName").str.to_lowercase().str.contains(pattern)
+        if "Target_Path" in df.columns:
+            cond = cond | pl.col("Target_Path").str.to_lowercase().str.contains(pattern)
+        if "CommandLine" in df.columns:
+            cond = cond | pl.col("CommandLine").str.to_lowercase().str.contains(pattern)
+
+        hits = df.filter(cond)
+        
+        if hits.height > 0:
+            print(f"    -> [!] HUNT SUCCESS: Found {hits.height} traces of targeted execution!")
+            # Store targets for later score assignment
+            self._hunt_targets = targets
+            return hits
+        
+        self._hunt_targets = targets
+        return None
+
     def judge(self, timeline_df):
         print("    -> [Hercules] Judging events with Modular Detectors...")
         
@@ -160,12 +204,50 @@ class HerculesReferee:
         if text_cols:
             timeline_df = timeline_df.with_columns([pl.col(c).fill_null("") for c in text_cols])
 
+        # ▼▼▼【追加1】Hunterによる事前スキャン ▼▼▼
+        hunter_hits = self._hunt_specific_execution(timeline_df)
+
         # Run Detectors Pipeline
         for detector in self.detectors:
             try:
                 timeline_df = detector.analyze(timeline_df)
             except Exception as e:
                 print(f"    [!] Detector Error ({type(detector).__name__}): {e}")
+
+        # ▼▼▼【追加2】Hunterの結果を強制適用（上書き） ▼▼▼
+        if hunter_hits is not None and hunter_hits.height > 0:
+            targets = [
+                "sysinternals.exe", "vmtoolsio.exe", "vssadmin.exe", 
+                "wannacry.exe", "tasksche.exe", "@wanadecryptor@.exe"
+            ]
+            pattern = "(?i)(" + "|".join([re.escape(t) for t in targets]) + ")"
+            
+            # ターゲットに一致する行のスコアを 300 に強制変更
+            # Note: 必要なカラムが存在するか確認してからフィルタ条件を構築
+            cond = pl.lit(False)
+            if "FileName" in timeline_df.columns:
+                cond = cond | pl.col("FileName").str.contains(pattern)
+            if "Target_Path" in timeline_df.columns:
+                cond = cond | pl.col("Target_Path").str.contains(pattern)
+            if "CommandLine" in timeline_df.columns:
+                cond = cond | pl.col("CommandLine").str.contains(pattern)
+
+            timeline_df = timeline_df.with_columns(
+                pl.when(cond)
+                 .then(pl.lit(300))  # 強制黒判定
+                 .otherwise(pl.col("Threat_Score"))
+                 .alias("Threat_Score")
+            )
+            
+            # タグが空なら専用タグを付与
+            timeline_df = timeline_df.with_columns(
+                pl.when(
+                    (pl.col("Threat_Score") == 300) & 
+                    (pl.col("Tag") == "")
+                ).then(pl.lit("CRITICAL_EXECUTION_HUNT"))
+                 .otherwise(pl.col("Tag"))
+                 .alias("Tag")
+            )
 
         # The Linker (Phase 4 Logic) - kept inline for now as it needs instance state
         print("    -> [Hercules] Phase 4: Network Correlation Analysis...")
@@ -182,20 +264,45 @@ class HerculesReferee:
             # Simple content based tagging for now
             if confirmed_indices:
                 print(f"       >> [CRITICAL] {len(confirmed_indices)} confirmed network events!")
-                # Note: Correct way would be to join back, but simplified for this pass
-                # Assuming Linker logic is robust enough to be a standalone or integrated into NetworkDetector later
+        # [Refinement Phase 2] Row Normalization & Deduplication
+        print("    -> [Hercules] Normalizing Scores & Deduplicating Rows...")
+        
+        # 1. Row Deduplication (Merge duplicate events)
+        group_cols = [c for c in ["Timestamp_UTC", "Action", "FileName", "Source_File"] if c in timeline_df.columns]
+        if group_cols:
+            timeline_df = timeline_df.group_by(group_cols).agg([
+                pl.col("Threat_Score").max(),
+                pl.col("Tag").map_elements(lambda x: ",".join(sorted(set(",".join([str(v) for v in x if v]).split(",")))), return_dtype=pl.Utf8).first(),
+                pl.exclude("Threat_Score", "Tag", *group_cols).first()
+            ])
 
-        # Final Verdict Formatting
-        print("    -> [Hercules] Finalizing Verdicts...")
+        # 2. Tag Cleanup (Dedup internal string)
         timeline_df = timeline_df.with_columns(
-            pl.when(pl.col("Threat_Score") >= 80).then(pl.lit("CRITICAL"))
-              .when(pl.col("Threat_Score") >= 50).then(pl.lit("HIGH"))
-              .when(pl.col("Tag").str.contains("CRITICAL|ANTI_FORENSICS|WEBSHELL|TIMESTOMP"))
-              .then(pl.lit("CRITICAL"))
-              .otherwise(pl.lit("INFO"))
-              .alias("Judge_Verdict")
+            pl.col("Tag").map_elements(
+                lambda x: ",".join(sorted(set([t.strip() for t in str(x).split(",") if t.strip()]))),
+                return_dtype=pl.Utf8
+            ).alias("Tag")
         )
 
+        # 3. Score Cap (0-300)
+        timeline_df = timeline_df.with_columns(
+            pl.col("Threat_Score").cast(pl.Int64).clip(0, 300).alias("Threat_Score")
+        )
+
+        # 4. Final Verdict Formatting
+        print("    -> [Hercules] Finalizing Verdicts...")
+        timeline_df = timeline_df.with_columns(
+            pl.when(
+                (pl.col("Threat_Score") >= 200) | 
+                (pl.col("Tag").str.contains("CRITICAL|PERSISTENCE|WIPING"))
+            )
+            .then(pl.lit("COMPROMISED"))
+            .when(pl.col("Threat_Score") >= 100)
+            .then(pl.lit("SUSPICIOUS"))
+            .otherwise(pl.lit("INFO"))
+            .alias("Judge_Verdict")
+        )
+        
         return timeline_df
 
     def correlate_ghosts(self, df_events, df_ghosts):

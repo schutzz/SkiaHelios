@@ -11,9 +11,21 @@ class NoiseFilter(BaseDetector):
         noise_config = self.config.get("noise_filters", {})
         noise_paths = noise_config.get("paths", [])
         
-        if path_col and noise_paths:
+        if noise_paths:
             combined_noise = "|".join(noise_paths)
-            is_noise = pl.col(path_col).str.to_lowercase().str.contains(combined_noise)
+            
+            # [v5.7.1] Enhanced Context Filter: Check ALL relevant text columns
+            # This ensures "choco install" in CommandLine is caught even if ParentPath is generic (e.g. powershell.exe)
+            check_candidates = ["ParentPath", "Source_File", "CommandLine", "Target_Path", "Target_FileName", "Payload", "Message", "Action", "FileName"]
+            
+            # Build a boolean mask that is True if ANY candidate column matches the noise pattern
+            is_noise = pl.lit(False)
+            
+            for col_name in check_candidates:
+                if col_name in cols:
+                    is_noise = is_noise | pl.col(col_name).str.to_lowercase().str.contains(combined_noise)
+
+
             
             # Additional column check for Judge_Verdict
             if "Judge_Verdict" not in cols:
@@ -63,7 +75,12 @@ class NoiseFilter(BaseDetector):
             for pat in sys_files:
                 is_system_item = is_system_item | pl.col(fname_col).str.contains(pat)
                 
-        should_demote = is_timestomp_or_af & is_system_item
+        # [Signal Rescue] Bypass Demotion for Critical Threats
+        # Even if it is a system file (e.g. vssadmin), if it has a CRITICAL tag or Score > 200, do NOT demote.
+        is_critical = pl.col("Tag").str.contains("CRITICAL") | (pl.col("Threat_Score") >= 200)
+        
+        # Demote ONLY if it's (Timestomp/AF) AND (System Item) AND (NOT Critical)
+        should_demote = is_timestomp_or_af & is_system_item & (~is_critical)
         
         df = df.with_columns([
             pl.when(should_demote)

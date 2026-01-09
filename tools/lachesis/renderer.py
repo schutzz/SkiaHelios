@@ -56,6 +56,12 @@ class LachesisRenderer:
 
         # 1. Prepare Context Data
         try:
+            # [Fix] Pre-calculate technical findings to extract LNKs for template
+            tech_findings = self._prepare_technical_findings(analyzer, origin_stories)
+            init_access = tech_findings.get("INITIAL ACCESS", [])
+            high_lnks = [i for i in init_access if i.get("Insight")]
+            gen_lnks = [i for i in init_access if not i.get("Insight")]
+
             context = {
                 "txt": self.txt,
                 "hostname": self.hostname,
@@ -69,9 +75,9 @@ class LachesisRenderer:
                 "phishing_lnks": self._prepare_origin_seeds(analyzer.pivot_seeds, "PHISHING", origin_stories),
                 "drop_items": self._prepare_origin_seeds(analyzer.pivot_seeds, "DROP", origin_stories, exclude="PHISHING"),
                 "anti_forensics_tools": self._prepare_anti_forensics(analyzer.visual_iocs, dfs_for_ioc),
-                "technical_findings": self._prepare_technical_findings(analyzer, origin_stories),
-                "high_interest_lnks": [], 
-                "generic_lnks": [], 
+                "technical_findings": tech_findings,
+                "high_interest_lnks": high_lnks,
+                "generic_lnks": gen_lnks,
                 "attack_chain_mermaid": self._render_attack_chain_mermaid(analyzer.visual_iocs),
                 "plutos_section": self._render_plutos_section_text(dfs_for_ioc),
                 "stats": self._prepare_stats(analyzer, analysis_data, dfs_for_ioc),
@@ -121,7 +127,7 @@ class LachesisRenderer:
         has_masquerade = any("MASQUERADE" in str(ioc.get('Type', '')) for ioc in visual_iocs)
         has_phishing = any("PHISHING" in str(ioc.get('Type', '')) for ioc in visual_iocs)
         has_timestomp = any("TIMESTOMP" in str(ioc.get('Type', '')) for ioc in visual_iocs)
-        has_anti = any("ANTI" in str(ioc.get('Type', '')) for ioc in visual_iocs)
+        has_anti = any("ANTI" in str(ioc.get('Type', '')) or "ANTIFORENSICS" in str(ioc.get('Tag', '')) for ioc in visual_iocs)
 
         methods = []
         if has_phishing: methods.append(t.get('attack_phishing', "Phishing"))
@@ -131,6 +137,80 @@ class LachesisRenderer:
         if has_anti: methods.append(t.get('attack_anti', "Anti-Forensics"))
         if not methods: methods.append(t.get('attack_default', "General Intrusion"))
         return methods
+
+    def _get_display_value(self, row):
+        """
+        Smart Formatting: Prioritize meaningful columns over generic 'system' or placeholders.
+        """
+        candidates = [
+            row.get("FileName"),
+            row.get("Target_Path"),
+            row.get("Target_FileName"), 
+            row.get("CommandLine"),
+            row.get("Reg_Key"),
+            row.get("Service_Name"), # [v5.7.1] Smart Formatting: Service
+            row.get("Payload"),
+            row.get("Message"),      # [v5.7.1] Smart Formatting: EventMsg
+            row.get("Action"),
+            row.get("Value")         # [Fix] Fallback to Value (e.g. URL)
+        ]
+        for c in candidates:
+            if c and str(c).strip() not in ["", "None", "N/A"]:
+                return str(c).strip()
+        return "Unknown Activity"
+
+    def _compress_timeline_for_mermaid(self, events, time_window_minutes=5):
+        """
+        Timeline Aggregation: Group dense events into buckets to declutter visualization.
+        """
+        compressed = []
+        if not events: return []
+        
+        # Sort by time just in case
+        sorted_events = sorted(events, key=lambda x: x.get('Time', ''))
+        
+        # Parse first event time
+        try:
+            current_bucket = sorted_events[0].copy()
+            current_bucket['dt'] = datetime.strptime(str(current_bucket['Time']).split('.')[0], '%Y-%m-%dT%H:%M:%S')
+        except:
+            return events # Fallback if parsing fails
+
+        count = 1
+        bucket_tags = set()
+        if 'Tag' in current_bucket: bucket_tags.update(str(current_bucket['Tag']).split(','))
+
+        for i in range(1, len(sorted_events)):
+            ev = sorted_events[i].copy()
+            try:
+                ev_dt = datetime.strptime(str(ev['Time']).split('.')[0], '%Y-%m-%dT%H:%M:%S')
+            except:
+                continue
+
+            delta = ev_dt - current_bucket['dt']
+            if delta.total_seconds() < (time_window_minutes * 60):
+                # Merge into bucket
+                count += 1
+                if 'Tag' in ev: bucket_tags.update(str(ev['Tag']).split(','))
+            else:
+                # Flush bucket
+                current_bucket['Display'] = f"{', '.join(sorted(bucket_tags))} ({count} Events)" if count > 1 else current_bucket.get('Summary', '')
+                current_bucket['Tag'] = ', '.join(sorted(bucket_tags))
+                compressed.append(current_bucket)
+                
+                # Start new bucket
+                current_bucket = ev
+                current_bucket['dt'] = ev_dt
+                count = 1
+                bucket_tags = set()
+                if 'Tag' in current_bucket: bucket_tags.update(str(current_bucket['Tag']).split(','))
+        
+        # Flush last bucket
+        current_bucket['Display'] = f"{', '.join(sorted(bucket_tags))} ({count} Events)" if count > 1 else current_bucket.get('Summary', '')
+        current_bucket['Tag'] = ', '.join(sorted(bucket_tags))
+        compressed.append(current_bucket)
+        
+        return compressed
 
     def _prepare_key_indicators(self, events):
         grouped = {}
@@ -156,6 +236,8 @@ class LachesisRenderer:
                 if tgt and tgt != "Unknown":
                     impact = f"Target: {tgt[:30]}..."
             ev['Impact'] = impact
+            # [Refinement] Smart Formatting
+            ev['Value'] = self._get_display_value(ev)
             temp_groups[cat].append(ev)
 
         for k in temp_groups:
@@ -285,7 +367,7 @@ class LachesisRenderer:
         tag = str(ev.get('Tag', '')).upper()
         if "SYSTEM_TIME" in tag or "TIME_CHANGE" in tag or "4616" in tag or "ROLLBACK" in tag: return "SYSTEM MANIPULATION"
         if "PHISH" in typ or "LNK" in typ: return "INITIAL ACCESS"
-        if "WIPE" in typ or "ANTI" in typ: return "ANTI-FORENSICS"
+        if "WIPE" in typ or "ANTI" in typ or "ANTIFORENSICS" in tag: return "ANTI-FORENSICS"
         if "PERSIST" in typ or "SAM_SCAVENGE" in tag or "DIRTY_HIVE" in tag: return "PERSISTENCE"
         if "EXEC" in typ or "RUN" in typ: return "EXECUTION"
         if "TIMESTOMP" in typ: return "TIMESTOMP (FILE)"
@@ -318,7 +400,9 @@ class LachesisRenderer:
         f.append("    classDef phishing fill:#ff6b6b,stroke:#c92a2a,stroke-width:2px,color:white;")
         
         critical_events = [ev for ev in events if ev.get('Score', 0) >= 60 or "CRITICAL" in str(ev.get('Type', ''))]
-        sorted_events = sorted(critical_events, key=lambda x: x.get('Time', '9999'))
+        # [Refinement] Timeline Aggregation (Mermaid)
+        sorted_events = self._compress_timeline_for_mermaid(critical_events)
+        
         if not sorted_events: return "\n(No critical events found)\n"
         
         has_paradox = any("TIME_PARADOX" in str(ev.get('Type', '')) for ev in events)

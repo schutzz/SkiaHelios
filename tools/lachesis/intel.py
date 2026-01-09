@@ -164,23 +164,39 @@ class LachesisIntel:
         self.loader = ThemisLoader(["rules/triage_rules.yaml"])
         self.dual_use_keywords = self.loader.get_dual_use_keywords()
         self.noise_stats = {}
-        self.intel_sigs = self._load_intel_signatures()
+        self.intel_sigs, self.lachesis_conf = self._load_intel_signatures()
+        
+        # Load Config Values
+        self.garbage_paths = self.lachesis_conf.get("garbage_paths", [])
+        self.trusted_roots = self.lachesis_conf.get("trusted_system_roots", [])
+        self.suspicious_subdirs = self.lachesis_conf.get("suspicious_subdirs", ["/temp", "/tmp", "/users/public", "/appdata", "/programdata", "downloads", "documents", "desktop"])
+        self.infra_ips = set(self.lachesis_conf.get("infra_ips", []))
+        self.force_include_tags = self.lachesis_conf.get("force_include_tags", [])
+        self.force_include_types = self.lachesis_conf.get("force_include_types", [])
 
     def _load_intel_signatures(self):
         """Load Intelligence Signatures from YAML"""
-        # Note: Correcting path assumption relative to this module
-        # Assuming structure: tools/lachesis/intel.py -> need to go up to project root -> rules/
         sig_path = Path(__file__).parent.parent.parent / "rules" / "intel_signatures.yaml"
         sigs = []
+        conf = {}
         if sig_path.exists():
             try:
                 with open(sig_path, "r", encoding="utf-8") as f:
                     data = yaml.safe_load(f)
-                    if data and "signatures" in data:
-                        sigs = data["signatures"]
+                    if data:
+                        sigs = data # Return full config object for compatibility
+                        if "signatures" in data: sigs = data["signatures"] # Or just list
+                        # Actually keeping same structure as LachesisWriter for safety:
+                        # But wait, match_intel expects list of dicts.
+                        # data structure in yaml is:
+                        # signatures: [...]
+                        # plutos_config: ...
+                        # lachesis_config: ...
+                        sigs = data.get("signatures", [])
+                        conf = data.get("lachesis_config", {})
             except Exception as e:
                 print(f"    [!] Failed to load intel signatures: {e}")
-        return sigs
+        return sigs, conf
 
     def match_intel(self, text):
         """Check text against loaded intelligence signatures."""
@@ -195,25 +211,17 @@ class LachesisIntel:
 
     def is_trusted_system_path(self, path):
         p = str(path).lower().replace("\\", "/")
-        trusted_roots = [
-            "c:/windows/", "c:/program files/", "c:/program files (x86)/",
-            "{windows}", "{system32}", "{program files", "{common program files"
-        ]
-        suspicious_subdirs = ["/temp", "/tmp", "/users/public", "/appdata", "/programdata", "downloads", "documents", "desktop"]
-        if any(s in p for s in suspicious_subdirs): return False
-        return any(root in p for root in trusted_roots)
+        if not self.trusted_roots:
+             # Fallback if config failed
+             return False
+        if any(s in p for s in self.suspicious_subdirs): return False
+        return any(root in p for root in self.trusted_roots)
 
     def is_noise(self, name, path=""):
         name = str(name).strip().lower()
         path = str(path).strip().lower().replace("\\", "/")
-        garbage_paths = [
-            "appdata/local/google/chrome", "appdata/roaming/microsoft/spelling",
-            "appdata/roaming/skype", "appdata/local/packages", 
-            "windows/assembly", "windows/servicing", "windows/prefetch", 
-            "inetcache", "tkdata", "thumbcache", "iconcache",
-            "windows/notifications", "appdata/local/microsoft/windows/notifications"
-        ]
-        for gp in garbage_paths:
+        
+        for gp in self.garbage_paths:
             if gp in path:
                 self.log_noise("Garbage Path", gp)
                 return True

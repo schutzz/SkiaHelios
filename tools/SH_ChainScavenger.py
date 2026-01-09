@@ -61,10 +61,7 @@ class ChainScavenger:
             549: "Server Operators",
             550: "Print Operators",
             551: "Backup Operators",
-            552: "Replicator",
-            1000: "Interactive",
-            1001: "Network Service",
-            1002: "Local Service"
+            552: "Replicator"
         }
         
         self.STOPLIST = {
@@ -74,6 +71,81 @@ class ChainScavenger:
             "root", "local", "machine", "user", "names", "sids",
             "schema", "objects"
         }
+        
+        # [B.2] Event Log Path for Correlation
+        self.event_log_csv = None
+        self._event_users = set()  # Cache for users found in event logs
+    
+    def set_event_log_path(self, evtx_csv_path):
+        """[B.2] Set the path to EvtxECmd output CSV for event correlation."""
+        self.event_log_csv = evtx_csv_path
+        self._load_event_users()
+    
+    def _load_event_users(self):
+        """[B.2] Pre-load users from Security Event Log for fast correlation."""
+        if not self.event_log_csv or not Path(self.event_log_csv).exists():
+            return
+        
+        print(f"    -> [ChainScavenger] Loading event log users from: {self.event_log_csv}")
+        try:
+            import polars as pl
+            df = pl.read_csv(self.event_log_csv, ignore_errors=True, infer_schema_length=0)
+            
+            # Target Event IDs: 4624 (Logon), 4625 (Failed Logon), 4688 (Process Creation)
+            target_eids = ["4624", "4625", "4688", "4720", "4728", "4732"]
+            
+            # Filter by EventId
+            if "EventId" in df.columns:
+                df = df.filter(pl.col("EventId").is_in(target_eids))
+            elif "Event Id" in df.columns:
+                df = df.filter(pl.col("Event Id").is_in(target_eids))
+            
+            # Extract usernames from various columns
+            user_cols = ["TargetUserName", "SubjectUserName", "TargetUser", "User", "Account"]
+            for col in user_cols:
+                if col in df.columns:
+                    users = df.select(pl.col(col).str.to_lowercase().unique()).to_series().to_list()
+                    self._event_users.update([u for u in users if u and len(u) >= 3])
+            
+            print(f"        [+] Loaded {len(self._event_users)} unique users from event logs")
+        except Exception as e:
+            print(f"        [!] Event log loading error: {e}")
+    
+    def correlate_with_events(self, scavenge_results):
+        """
+        [B.2] Cross-reference scavenged accounts with event log activity.
+        
+        If an account has NO corresponding events (4624/4625/4688), 
+        demote its score and mark as LOW_CONFIDENCE.
+        
+        Args:
+            scavenge_results: List of scavenge result dicts
+            
+        Returns:
+            List of results with adjusted scores
+        """
+        if not self._event_users:
+            print("    -> [ChainScavenger] No event log data loaded, skipping correlation.")
+            return scavenge_results
+        
+        print(f"    -> [ChainScavenger] Correlating {len(scavenge_results)} accounts with event logs...")
+        
+        correlated_count = 0
+        for result in scavenge_results:
+            username = result.get("Username", "").lower()
+            
+            if username in self._event_users:
+                # Account has event correlation - boost confidence
+                result["AION_Tags"] = result.get("AION_Tags", "") + ",EVENT_CORRELATED"
+                correlated_count += 1
+            else:
+                # No event correlation - demote score
+                original_score = result.get("Threat_Score", 0)
+                result["Threat_Score"] = max(0, int(original_score * 0.3))  # 70% reduction
+                result["AION_Tags"] = result.get("AION_Tags", "") + ",LOW_CONFIDENCE_NO_EVENT"
+        
+        print(f"        [+] Correlated: {correlated_count}/{len(scavenge_results)} accounts")
+        return scavenge_results
     
     # ================================================================
     # Trigger Detection: Dirty Hive Recognition
@@ -267,7 +339,7 @@ class ChainScavenger:
              for m in re.finditer(rid_pattern_a, chunk):
                 rid_real_pos = start + m.start()
                 dist = abs(rid_real_pos - match_pos)
-                matches.append((dist, m.group()))
+                matches.append((dist, m.group(), "strong")) # Strong
 
         # Heuristic 2: Raw DWORD Search (Little Endian Integer 500-10000)
         # Often RID is stored as a 4-byte integer in the V-Key data nearby
@@ -287,7 +359,7 @@ class ChainScavenger:
                    dist = abs(current_pos - match_pos)
                    # Prioritize this BUT string matches are stronger
                    # We append with a penalty to distance (so string matches preferred)
-                   matches.append((dist + 1000, str(val).encode())) 
+                   matches.append((dist + 1000, str(val).encode(), "weak")) 
             except: pass
 
         # Heuristic 3: Binary SID parsing (01 0X 00 00 00 00 00 05 ...)
@@ -304,6 +376,15 @@ class ChainScavenger:
                 
                 if sid_start + sid_size <= len(chunk):
                     sid_bytes = chunk[sid_start:sid_start+sid_size]
+                    
+                    # Validate First SubAuthority (should be 21 or 32)
+                    # SubAuth starts at offset 8. 4 bytes Little Endian.
+                    try:
+                        sub_auth_0 = struct.unpack('<I', sid_bytes[8:12])[0]
+                        if sub_auth_0 not in [21, 32]:
+                            continue
+                    except: continue
+
                     # Extract last SubAuth (RID)
                     # Last 4 bytes
                     rid_bytes = sid_bytes[-4:]
@@ -311,29 +392,37 @@ class ChainScavenger:
                     
                     if 500 <= rid_val < 10000:
                          dist = abs((start + sid_start) - match_pos)
-                         matches.append((dist + 500, str(rid_val).encode())) # Penalty 500 (Better than raw, worse than string)
+                         matches.append((dist + 500, str(rid_val).encode(), "strong")) # Binary SID is Strong
             except: pass
 
         if matches:
             # Pick closest RID (considering penalties)
             matches.sort(key=lambda x: x[0])
             best_match = matches[0][1]
+            method_type = matches[0][2]
+            
             try:
                 # If it was a hex string (byte string starting with 30 or 00), decode.
                 # If it was raw int (byte string of digits), just use it.
                 if best_match.startswith(b'0') or best_match.startswith(b'\x30'):
                      rid_str = best_match.replace(b'\x00', b'').decode('ascii')
                      rid_val = int(rid_str, 16)
+                     # method = "strong" # String pattern (already set)
+                elif len(best_match) == 4: # encoded raw int bytes
+                     rid_val = struct.unpack('<I', best_match)[0]
+                     # method = "strong" if dist == 500 else "weak" # Logic moved to append
                 else:
                      rid_val = int(best_match.decode('ascii'))
+                     # method = "strong"
                      
                 return {
                     "rid": str(rid_val),
-                    "sid": f"S-1-5-21-UNKNOWN-{rid_val}"
+                    "sid": f"S-1-5-21-UNKNOWN-{rid_val}",
+                    "method": method_type
                 }
             except: pass
             
-        return {"rid": "", "sid": ""}
+        return {"rid": "", "sid": "", "method": "none"}
 
     def _extract_hash_heuristics(self, data, match_pos):
         """
@@ -452,6 +541,26 @@ class ChainScavenger:
                 ]
                 if any(re.search(p, decoded, re.IGNORECASE) for p in skip_patterns):
                     continue
+
+                # [v5.7.1] Anti-Hallucination: Strict Garbage Filter
+                # Reject localized resource strings (%%1843) and common English noise (have co, Security)
+                junk_patterns = [
+                    r'^%%',           # Resource Strings
+                    r'(?i)^have co',  # Fragment: "have come"
+                    r'(?i)^security', # Registry Key Name
+                    r'(?i)^system',   # Registry Key Name
+                    r'(?i)^only',     # Fragment
+                    r'(?i)^default',  # Default User
+                    r'(?i)^software', 
+                    r'(?i)^policy',
+                    r'(?i)^current',
+                    r'(?i)^local',
+                    r'(?i)^machine', 
+                    r'(?i)^unknown',
+                    r'(?i)^account'   # "Account"
+                ]
+                if any(re.search(p, decoded) for p in junk_patterns):
+                    continue
                 
                 # [Deep Carving] Context Hex Extraction
                 # Extract 32 bytes around the match to see RID or F-Key heuristically
@@ -480,6 +589,7 @@ class ChainScavenger:
                     "context_hex": ctx_preview,
                     "rid": rid_info.get("rid", ""),
                     "sid": rid_info.get("sid", ""),
+                    "rid_method": rid_info.get("method", "none"),
                     "hash_state": hash_info.get("state", "Unknown"),
                     "hash_detail": hash_info.get("detail", "")
                 })
@@ -503,6 +613,29 @@ class ChainScavenger:
     # Main Entry Point: Scavenge
     # ================================================================
     
+    # [Strict Validation Check]
+    def _is_valid_username(self, candidate_str):
+        if not candidate_str: return False
+        
+        # 1. Length & Composition Check
+        if len(candidate_str) < 4: return False
+        if re.match(r'^[\W\d_]+$', candidate_str): return False # Only symbols/digits
+        
+        # 2. Specific Garbage Patterns (Case 7 observed)
+        garbage_patterns = [
+            r"%%", r"have co", r"iCg t", r"Distribute", r"Syst", 
+            r"Members are", r"Performance", r"Cryptographic"
+        ]
+        for pat in garbage_patterns:
+            if re.search(pat, candidate_str, re.IGNORECASE):
+                return False
+                
+        # 3. Charset (Allow Alphanumeric, dot, dash, underscore, space)
+        if not re.match(r'^[a-zA-Z0-9\.\-_ ]+$', candidate_str):
+            return False
+            
+        return True
+
     def scavenge(self):
         """
         Main scavenging operation.
@@ -537,20 +670,50 @@ class ChainScavenger:
                     # Step C: Intelligent Filtering
                     usernames = self.intelligent_filter(carved)
                     
+                    # [v5.7.1] Capture File ModTime for Accurate Timeline
+                    try:
+                        f_mtime = hive_file.stat().st_mtime
+                        f_iso = datetime.fromtimestamp(f_mtime).isoformat()
+                    except:
+                        f_iso = datetime.now().isoformat()
+
                     for user_obj in usernames:
+                        # [Strict Validation]
+                        if not self._is_valid_username(user_obj["name"]):
+                            continue
+
+                        user_obj["File_ModTime"] = f_iso # Pass to result builder
                         username = user_obj["name"]
                         ctx_hex = user_obj["context_hex"]
                         rid = user_obj.get("rid", "")
                         sid = user_obj.get("sid", "")
+                        rid_method = user_obj.get("rid_method", "none")
                         hash_st = user_obj.get("hash_state", "")
 
                         # Score Boost for Complete Recovery (RID found)
+                        # [v5.6.3] Noise Reduction: Only boost score for STRONG RID matches (Binary SID / String Pattern)
+                        # We do NOT boost for "Raw DWORD" heuristic (weak) UNLESS it is a known Privileged RID (e.g. 544).
                         base_score = 400
                         tags = "SAM_SCAVENGE, NEW_USER_CREATED, LOG_WIPE_INDUCED_MISSING_USER_EVENT" # [v5.6.3] Verdict Added
                         
                         extra_note = ""
                         
+                        is_privileged = False
                         if rid:
+                            try:
+                                rid_int = int(rid)
+                                # [Final Sanity Check]
+                                # Reject RIDs that are unreasonably high (noise).
+                                # Valid User RIDs usually don't exceed 10000-20000 in typical scenarios.
+                                # Anomalous RIDs (e.g. 900000000) are carving artifacts.
+                                if rid_int > 20000:
+                                    rid = "" # Invalidate
+                                    rid_method = "none"
+                                elif rid_int in self.RID_MAP: 
+                                    is_privileged = True
+                            except: pass
+                        
+                        if rid and (rid_method == "strong" or is_privileged):
                             base_score = 900 # Critical
                             tags += ", ACCOUNT_FULLY_RECOVERED, SID_RESTORED"
                             
@@ -573,8 +736,10 @@ class ChainScavenger:
                             except: pass
 
                         # Create result entry
+                        # [v5.7.1] Timestamp Fix: Use Hive File ModTime logic (passed from scavenge loop)
+                        # If not available, fallback to now. But scavenge loop should provide it.
                         self.results.append({
-                            "Timestamp": datetime.now().isoformat(),
+                            "Timestamp": user_obj.get("File_ModTime", datetime.now().isoformat()),
                             "Username": username,
                             "Source": f"SCAVENGE:{hive_file.name}",
                             "Offset": hex(offset),
@@ -593,16 +758,41 @@ class ChainScavenger:
             except Exception as e:
                 print(f"    [-] Error scavenging {hive_file.name}: {e}")
         
-        # Deduplicate by username
-        seen_users = set()
-        unique_results = []
-        for r in self.results:
-            user_lower = r["Username"].lower()
-            if user_lower not in seen_users:
-                seen_users.add(user_lower)
-                unique_results.append(r)
+        # Deduplicate Logic
+        # 1. Group by RID (if present) -> Keep Longest Name
+        # 2. Key by Username (if no RID) -> Keep as is
         
-        self.results = unique_results
+        from collections import defaultdict
+        rid_groups = defaultdict(list)
+        no_rid_list = []
+        
+        for r in self.results:
+            rid = r.get("RID", "")
+            # Only use RID for grouping if it's a valid integer-like string
+            if rid and rid.isdigit():
+                rid_groups[rid].append(r)
+            else:
+                no_rid_list.append(r)
+                
+        final_results = []
+        
+        # Process RID groups: Keep the candidate with the longest Username
+        for rid, group in rid_groups.items():
+            # Sort by Name Length (Desc)
+            group.sort(key=lambda x: len(x["Username"]), reverse=True)
+            best_candidate = group[0]
+            final_results.append(best_candidate)
+            
+        # Add non-RID entries (ensure username uniqueness among them)
+        seen_users = set(r["Username"].lower() for r in final_results)
+        
+        for r in no_rid_list:
+            u_lower = r["Username"].lower()
+            if u_lower not in seen_users:
+                seen_users.add(u_lower)
+                final_results.append(r)
+                
+        self.results = final_results
         
         if self.results:
             print(f"    [!] SCAVENGE SUCCESS: {len(self.results)} unique usernames extracted!")

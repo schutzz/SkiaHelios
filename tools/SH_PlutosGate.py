@@ -31,53 +31,42 @@ class PlutosGate:
         self.start_time = start_time
         self.end_time = end_time
         
+        # Load External Intelligence
+        self.config = self._load_config()
+        self.plutos_conf = self.config.get("plutos_config", {})
+
         # 設定: ヒートスコア計算用プロセス
-        self.high_heat_processes = [
-            "mstsc.exe", "svchost.exe", "7z.exe", "rar.exe", "curl.exe", 
-            "wget.exe", "powershell.exe", "psexesvc.exe", "chrome.exe", "msedge.exe",
-            "rundll32.exe", "regsvr32.exe", "wmic.exe", "git.exe", "ssh.exe",
-            "outlook.exe", "thunderbird.exe", "hxoutlook.exe"
-        ]
-        self.burst_threshold = 50 * 1024 * 1024  # 50MB
+        self.high_heat_processes = self.plutos_conf.get("high_heat_processes", [])
+        self.burst_threshold = self.plutos_conf.get("burst_threshold_bytes", 50 * 1024 * 1024)
 
         # 監視対象ドメイン定義 (Dragnet)
-        self.exfil_domains = [
-            # Cloud Storage
-            r"drive\.google", r"docs\.google", r"dropbox", r"onedrive", r"sharepoint", 
-            r"box\.com", r"icloud", r"pcloud", r"kdrive", r"amazon\.com/clouddrive",
-            # File Transfer / Sharing
-            r"wetransfer", r"sendspace", r"mediafire", r"mega\.nz", r"gofile\.io", 
-            r"anonfiles", r"file\.io", r"transfer\.sh", r"ufile\.io", r"sendgb", 
-            # Code Repositories
-            r"github\.com", r"gitlab\.com", r"bitbucket", r"pastebin",
-            # Webmail Providers
-            r"mail\.google", r"outlook\.live", r"mail\.yahoo", r"proton\.me", r"tutanota"
-        ]
+        self.exfil_domains = self.plutos_conf.get("exfil_domains", [])
         
         # URL不審キーワード
-        self.suspicious_url_keywords = [
-            r"/upload", r"attachment", r"share", r"dl=0", r"export"
-        ]
+        self.suspicious_url_keywords = self.plutos_conf.get("suspicious_url_keywords", [])
 
         # メール送出を示唆するキーワード (URL/Title)
-        self.mail_action_keywords = [
-            r"sent", r"compose", r"draft", r"outbox", r"send", r"attachment", r"upload"
-        ]
+        self.mail_action_keywords = self.plutos_conf.get("mail_action_keywords", [])
 
         # [v5.5] IIS Log Analysis Patterns
-        self.iis_attack_signatures = [
-            # SQL Injection
-            r"(?i)union\s+select", r"(?i)xp_cmdshell", r"(?i)exec\s*\(", r"(?i)select\s+.*\s+from",
-            r"'\s*or\s*'1'\s*=\s*'1", r"(?i)drop\s+table", r"(?i)insert\s+into",
-            # WebShell / RCE
-            r"(?i)eval\s*\(", r"(?i)base64_decode", r"(?i)cmd\.exe", r"(?i)powershell",
-            r"(?i)/c\+", r"(?i)%2Fc%2B", r"(?i)wscript", r"(?i)cscript",
-            # Path Traversal
-            r"\.\./", r"\.\.%2f", r"%2e%2e%2f", r"(?i)\.\.\\",
-            # WebShell Indicators
-            r"(?i)china\s*chopper", r"(?i)c99\.php", r"(?i)r57\.php", r"(?i)b374k",
-            r"\.asp;\.", r"\.aspx;\.",  # IIS vulnerability patterns
-        ]
+        self.iis_attack_signatures = self.plutos_conf.get("iis_attack_signatures", [])
+
+    def _load_config(self):
+        try:
+            from pathlib import Path
+            import yaml
+            # Assuming rules directory is peer to tools or similar logic
+            # This logic mimics HerculesReferee
+            base_dir = Path(__file__).parent.parent
+            config_path = base_dir / "rules" / "intel_signatures.yaml"
+            if not config_path.exists():
+                print(f"[!] Config not found: {config_path}")
+                return {}
+            with open(config_path, "r", encoding="utf-8") as f:
+                return yaml.safe_load(f)
+        except Exception as e:
+            print(f"[!] Error loading config: {e}")
+            return {}
 
     def _load_csv(self, pattern, columns=None):
         """高速読み込み用ラッパー (LazyFrame)"""
@@ -219,8 +208,8 @@ class PlutosGate:
                 time_col = next((c for c in ["TimeCreated", "Timestamp_UTC"] if c in schema), "Time")
 
                 if dst_ip_col and dst_port_col:
-                    noise_ips = ["0.0.0.0", "255.255.255.255", "127.0.0.1", "::1"]
-                    target_eids = [3, 5156, 5154, 5157]
+                    noise_ips = self.plutos_conf.get("network_noise_ips", ["0.0.0.0", "255.255.255.255", "127.0.0.1", "::1"])
+                    target_eids = self.plutos_conf.get("target_event_ids", [3, 5156, 5154, 5157])
                     
                     q_evtx = (
                         lf_evtx
@@ -236,13 +225,43 @@ class PlutosGate:
                             pl.lit(0).alias("Heat_Score")
                         ])
                     )
+
+                    # [Phase 7] Orphan Rescue & Port Analysis
+                    # Load Network Spec from Config
+                    net_conf = self.config.get("network_config", {})
+                    susp_ports = net_conf.get("suspicious_ports", [445, 3389, 5985, 5986, 8080, 4444])
+                    private_ranges = net_conf.get("private_ip_ranges", ["192.168.", "10.", "172."])
+
                     try: 
                         evtx_raw = q_evtx.collect()
+                        
                         if evtx_raw.height > 0:
-                            evtx_res = evtx_raw.with_columns([
-                                pl.lit("NETWORK_CONNECTION").alias("Plutos_Verdict"),
-                                pl.lit("EVTX_TRACE").alias("Tags")
-                            ]).select(["Timestamp", "Process", "Remote_IP", "Remote_Port", "Heat_Score", "Plutos_Verdict", "Tags"])
+                            # Apply Rescue Logic in Memory (Polars)
+                            # 1. Flag Suspicious Ports (Lateral/C2)
+                            evtx_res = evtx_raw.with_columns(
+                                pl.when(pl.col("Remote_Port").cast(pl.Int64, strict=False).is_in(susp_ports))
+                                .then(pl.lit("CRITICAL_NETWORK_TRACE"))
+                                .otherwise(pl.lit("NETWORK_CONNECTION"))
+                                .alias("Plutos_Verdict"),
+                                
+                                pl.when(pl.col("Remote_Port").cast(pl.Int64, strict=False).is_in(susp_ports))
+                                .then(pl.lit("ORPHAN_RESCUE"))
+                                .otherwise(pl.lit("EVTX_TRACE"))
+                                .alias("Tags"),
+
+                                pl.when(pl.col("Remote_Port").cast(pl.Int64, strict=False).is_in(susp_ports))
+                                .then(200) # High Score for Suspicious Ports
+                                .otherwise(0)
+                                .alias("Heat_Score")
+                            )
+
+                            # 2. Filter: Only keep Rescued/Suspicious items if "Orphan" mode is strict
+                            # But for now, user wants ANY suspicious orphan.
+                            # We filter out low-score noise if needed, but keep High Score.
+                            evtx_res = evtx_res.filter(pl.col("Heat_Score") > 0)
+
+                            if evtx_res.height > 0:
+                                print(f"    [+] ORPHAN RESCUE: Recovered {evtx_res.height} suspicious network events.")
                     except Exception as e: print(f"[!] EVTX Analysis Error: {e}")
 
         return srum_res, evtx_res
@@ -506,6 +525,85 @@ class PlutosGate:
         
         return None
 
+    # ============================================================
+    # [v6.0] Browser Reconnaissance Hunter
+    # ============================================================
+    def analyze_browser_recon(self):
+        """
+        Analyze browser history for reconnaissance activities.
+        Detects: Hacking tools research, exfiltration methods, security conference downloads
+        """
+        print("[*] Phase 6: Hunting Browser Reconnaissance (Kali, Metasploit, Exfiltration)...")
+        
+        lf_hist = self._load_csv("Browser_History*.csv")
+        if lf_hist is None:
+            return None
+
+        # Load Recon Indicators from Config
+        recon_conf = self.config.get("recon_indicators", {})
+        susp_domains = recon_conf.get("suspicious_domains", [])
+        susp_terms = recon_conf.get("suspicious_search_terms", [])
+        susp_downloads = recon_conf.get("suspicious_downloads", {}).get("patterns", [])
+        
+        # Fallback if config unavailable (Safety Net)
+        if not susp_domains:
+             susp_domains = ["kali.org", "metasploit.com", "exploit-db.com", "packetstorm"]
+        
+        try:
+            schema = lf_hist.collect_schema().names()
+            url_col = next((c for c in ["URL", "ValueData", "Url"] if c in schema), "URL")
+            title_col = next((c for c in ["Title", "ValueName"] if c in schema), "Title")
+            time_col = next((c for c in ["VisitTime", "LastWriteTimestamp"] if c in schema), "VisitTime")
+            
+            # 1. Domain & Search Term Matching (Regex Construction)
+            domain_pattern = "|".join([re.escape(d) for d in susp_domains])
+            term_pattern = "|".join(susp_terms) if susp_terms else r"(?!)" # Match nothing if empty
+            download_pattern = "|".join(susp_downloads) if susp_downloads else r"(?!)"
+            
+            # Combine all recon patterns for filtering
+            recon_hits = (
+                lf_hist
+                .filter(
+                    pl.col(url_col).str.contains(f"(?i)({domain_pattern}|{term_pattern}|{download_pattern})") |
+                    pl.col(title_col).str.contains(f"(?i)({term_pattern})")
+                )
+                .with_columns([
+                    # Timestamp normalization
+                    pl.col(time_col).alias("Timestamp"),
+                    pl.col(url_col).alias("URL"),
+                    pl.col(title_col).alias("Title"),
+                    
+                    # Verdict Determination
+                    pl.when(pl.col(url_col).str.contains(f"(?i)({domain_pattern})"))
+                    .then(pl.lit("RECON_ACTIVITY"))
+                    .when(pl.col(url_col).str.contains(f"(?i)({download_pattern})"))
+                    .then(pl.lit("RECON_SECTOOLS"))
+                    .otherwise(pl.lit("RECON_EXFILTRATION"))
+                    .alias("Plutos_Verdict"),
+                    
+                    # Score Assignment
+                    pl.when(pl.col(url_col).str.contains(f"(?i)({download_pattern})"))
+                    .then(150) # Tool Download is Critical
+                    .when(pl.col(url_col).str.contains("(?i)exfiltrat"))
+                    .then(120) # Exfiltration Research is High
+                    .otherwise(100) # General Recon is Medium
+                    .alias("Heat_Score"),
+                    
+                    pl.lit("RECONNAISSANCE").alias("Tags")
+                ])
+                .select(["Timestamp", "URL", "Title", "Plutos_Verdict", "Heat_Score", "Tags"])
+                .collect()
+            )
+            
+            if recon_hits.height > 0:
+                print(f"[!] BROWSER RECONNAISSANCE DETECTED: {recon_hits.height} events")
+                return recon_hits
+                
+        except Exception as e:
+            print(f"[!] Browser Recon Analysis Error: {e}")
+            
+        return None
+
 def main(argv=None):
     print_logo()
     parser = argparse.ArgumentParser()
@@ -551,6 +649,12 @@ def main(argv=None):
     if df_iis is not None and df_iis.height > 0:
         print(f"[!] WEB SERVER ANOMALIES DETECTED: {df_iis.height} events")
         df_iis.write_csv(args.out.replace(".csv", "_iis_analysis.csv"))
+
+    # 6. Browser Reconnaissance [v6.0]
+    df_recon = gate.analyze_browser_recon()
+    if df_recon is not None and df_recon.height > 0:
+        print(f"[!] BROWSER RECONNAISSANCE IDENTIFIED: {df_recon.height} events")
+        df_recon.write_csv(args.out.replace(".csv", "_recon.csv"))
 
 if __name__ == "__main__":
     main()

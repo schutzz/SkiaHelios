@@ -5,19 +5,20 @@ import sys
 import io
 import re
 import hashlib
+import yaml # [v14.4] Added for keyword config
 from tools.SH_ThemisLoader import ThemisLoader # ⚖️ Themis召喚
 from tools.SH_ChainScavenger import ChainScavenger # [v5.6] Chain Scavenger
 
 # ============================================================
-#  SH_AIONDetector v14.2 [Chain Scavenger Integration]
+#  SH_AIONDetector v14.4 [Selective Scavenger]
 #  Mission: Detect Persistence via External Logic
-#  Update: Dirty Hive fallback with ChainScavenger
+#  Update: Limited Scavenger Release via Keyword Matching
 # ============================================================
 
 def print_logo():
     print(r"""
         / \
-       / _ \     (The Eye of Truth v14.1)
+       / _ \     (The Eye of Truth v14.4)
       / | | \    "Themis guides the hunt."
      /_/   \_\
 
@@ -36,7 +37,6 @@ class AIONEngine:
         self.loader = ThemisLoader()
         
         # Load Scan Targets from YAML
-        # Load Scan Targets from YAML
         raw_targets = self.loader.get_persistence_targets("Registry")
         self.reg_targets = []
         for t in raw_targets:
@@ -50,6 +50,17 @@ class AIONEngine:
         if not self.reg_targets:
             print("[!] Warning: No Registry targets found in rules. Using fallback.")
             self.reg_targets = [r"Run", r"Services"]
+
+        # [v14.4] Load Scavenger Keywords from YAML
+        self.scavenger_keywords = []
+        try:
+            if Path("rules/intel_signatures.yaml").exists():
+                with open("rules/intel_signatures.yaml", "r", encoding="utf-8") as f:
+                    config = yaml.safe_load(f)
+                    self.scavenger_keywords = config.get("aion_tuning", {}).get("scavenger_keywords", [])
+                    print(f"    [+] Loaded {len(self.scavenger_keywords)} Scavenger Keywords (Selective Mode).")
+        except Exception as e:
+            print(f"    [!] Failed to load Scavenger Keywords: {e}")
 
     def _calculate_file_hash(self, relative_path):
         if not self.mount_point or not relative_path: return "N/A", "N/A"
@@ -313,39 +324,55 @@ class AIONEngine:
         reg_hits = self.hunt_registry_persistence()
         sam_hits = self.hunt_sam_user_creation()  # [v5.6] SAM/ProfileList analysis
         
-        # [v5.6] ChainScavenger fallback for dirty hives
+        # [v14.4] Selective ChainScavenger (Limited Release)
         scavenge_hits = []
-        if not sam_hits and self.raw_dir:
-            print("    -> [AION] No SAM users from CSV, activating Chain Scavenger...")
+        if self.raw_dir and self.scavenger_keywords:
+            print(f"    -> [AION] Activating Selective Chain Scavenger (Keywords: {len(self.scavenger_keywords)})...")
             try:
                 scavenger = ChainScavenger(self.raw_dir)
-                is_dirty, reason = scavenger.is_dirty_hive()
-                print(f"    -> Dirty Check: {reason}")
-                scavenge_results = scavenger.scavenge()
-                for r in scavenge_results:
-                    ctx_hex = r.get("Context_Hex", "N/A")
-                    location_info = r.get("Entry_Location", "")
-                    if ctx_hex != "N/A":
-                        location_info += f" [HEX: {ctx_hex}]"
+                # We use the existing scavenge method but filter strictly
+                raw_results = scavenger.scavenge()
+                
+                resurrected_count = 0
+                for r in raw_results:
+                    # Create a composite string for keyword matching
+                    # (Username often holds the key name in Scavenger results)
+                    item_str = (str(r.get("Username", "")) + str(r.get("Entry_Location", "")) + str(r.get("AION_Tags", ""))).lower()
+                    
+                    is_match = False
+                    for kw in self.scavenger_keywords:
+                        if kw.lower() in item_str:
+                            is_match = True
+                            break
+                    
+                    if is_match:
+                        # Map Scavenger result structure to AION expected format
+                        ctx_hex = r.get("Context_Hex", "N/A")
+                        location_info = r.get("Entry_Location", "")
+                        if ctx_hex != "N/A":
+                            location_info += f" [HEX: {ctx_hex}]"
 
-                    scavenge_hits.append({
-                        "Last_Executed_Time": r.get("Timestamp", ""),
-                        "AION_Score": r.get("AION_Score", 400),
-                        "AION_Tags": r.get("AION_Tags", "SAM_SCAVENGE"),
-                        "Target_FileName": r.get("Username", ""),
-                        "Entry_Location": location_info,
-                        "Full_Path": r.get("Username", ""),
-                        "File_Hash_SHA256": "N/A",
-                        "File_Hash_SHA1": "N/A",
-                        "Threat_Score": r.get("Threat_Score", 400),
-                        "Threat_Tag": r.get("Threat_Tag", "NEW_USER_CREATED"),
-                        "RID": r.get("RID", ""),
-                        "SID": r.get("SID", ""),
-                        "Hash_State": r.get("Hash_State", ""),
-                        "Hash_Detail": r.get("Hash_Detail", "")
-                    })
+                        scavenge_hits.append({
+                            "Last_Executed_Time": r.get("Timestamp", ""),
+                            "AION_Score": r.get("AION_Score", 400),
+                            "AION_Tags": f"{r.get('AION_Tags', 'SAM_SCAVENGE')} (RESURRECTED)",
+                            "Target_FileName": r.get("Username", ""),
+                            "Entry_Location": location_info,
+                            "Full_Path": r.get("Username", ""),
+                            "File_Hash_SHA256": "N/A",
+                            "File_Hash_SHA1": "N/A",
+                            "Threat_Score": r.get("Threat_Score", 400),
+                            "Threat_Tag": r.get("Threat_Tag", "PERSISTENCE_ARTIFACT"),
+                            "RID": r.get("RID", ""),
+                            "SID": r.get("SID", ""),
+                            "Hash_State": r.get("Hash_State", ""),
+                        })
+                        resurrected_count += 1
+                
+                print(f"    [+] Scavenger Resurrected {resurrected_count} artifacts matching keywords!")
+
             except Exception as e:
-                print(f"    [-] ChainScavenger error: {e}")
+                print(f"    [-] Scavenger error: {e}")
         
         mft_hits = []
         if self.mft_csv and Path(self.mft_csv).exists():
@@ -359,7 +386,7 @@ class AIONEngine:
                  mft_hits = self.hunt_mft_persistence(df_mft)
              except: pass
 
-        raw_list = reg_hits + sam_hits + scavenge_hits + mft_hits  # [v5.6] Include scavenge
+        raw_list = reg_hits + sam_hits + scavenge_hits + mft_hits  # Include scavenge hits
         if not raw_list: return None
         
         # --- ⚖️ THEMIS JUDGMENT DAY ---
@@ -386,7 +413,6 @@ class AIONEngine:
         lf = lf.filter((~noise_expr) | (pl.col("Threat_Score") > 0))
         
         # 4. Clean up columns for output
-        # [FIX] Keep Threat_Score for suggest_new_noise_rules
         lf = lf.select([
             pl.col("Last_Executed_Time"),
             pl.col("Final_Score").alias("AION_Score"),
@@ -406,7 +432,6 @@ class AIONEngine:
         df_result = lf.sort("AION_Score", descending=True).unique(subset=["Full_Path", "Entry_Location"]).collect()
         
         # 5. Meddlesome Suggestion (Osekkay)
-        # ここで Threat_Score が必要になるっス
         suggestions = self.loader.suggest_new_noise_rules(df_result)
         if suggestions:
             print("\n[?] Themis Suggestions to reduce noise:")

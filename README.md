@@ -1,11 +1,11 @@
-# SkiaHelios v5.6 - The Causality & Justice Engine (Account Takeover / Evidence Wiping)
+# SkiaHelios v5.8 - The Watcher (Reconnaissance & Phishing Insights)
 
 ![SkiaHelios CI](https://github.com/schutzz/SkiaHelios/actions/workflows/test.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
 ![Polars](https://img.shields.io/badge/Engine-Polars_0.20%2B-orange?logo=polars)
 ![Mermaid](https://img.shields.io/badge/Report-Mermaid_Visuals-ff69b4?logo=mermaid)
 ![Tests](https://img.shields.io/badge/Tests-55%2F55_PASS-brightgreen)
-![Status](https://img.shields.io/badge/Status-Account_Takeover-red)
+![Status](https://img.shields.io/badge/Status-Active_Defense-red)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey)
 
 > *"From Shadows to Sun. From Data to Gold."*
@@ -13,9 +13,9 @@
 
 **SkiaHelios** is a high-resolution, modular DFIR (Digital Forensics & Incident Response) framework built for **speed**, **causality**, **origin tracing**, and **visual narrative**.
 
-Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** orchestrated by **"Hekate"**, supported by **"Chronos" (The Time Lord feat. Icarus Paradox)**, **"Hercules" (The Referee)**, the **"PlutosGate" (Network Hunter)**, and the **"YARA WebShell Scanner"** to detect advanced threats including **Account Takeover**, **Privilege Escalation**, **Evidence Wiping**, **Web Intrusion Chains**, and **Cross-Artifact Tampering**.
+Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** orchestrated by **"Hekate"**, supported by **"Chronos" (The Time Lord feat. Icarus Paradox)**, **"Hercules" (The Referee)**, the **"PlutosGate" (Network & Recon Hunter)**, and the **"YARA WebShell Scanner"** to detect advanced threats including **Account Takeover**, **Privilege Escalation**, **Evidence Wiping**, **Web Intrusion Chains**, and **Cross-Artifact Tampering**.
 
-**Current Version:** v5.6.3 (The Deep Carver: Context Carving & Binary Reporting)
+**Current Version:** v5.8 (The Watcher: Reconnaissance & Phishing Insights)
 
 ---
 
@@ -30,6 +30,7 @@ graph TD
     classDef judge fill:#ffebee,stroke:#b71c1c,stroke-width:3px;
     classDef report fill:#f3e5f5,stroke:#4a148c,stroke-width:2px;
     classDef submod fill:#ede7f6,stroke:#512da8,stroke-width:1px,stroke-dasharray: 5 5;
+    classDef recon fill:#e0f2f1,stroke:#00695c,stroke-width:2px,stroke-dasharray: 2 2;
 
     %% Input Stage
     Input[("KAPE Artifacts\n(CSV)")]:::input --> Hekate{{"🔥 Hekate\n(The Orchestrator)"}}:::core
@@ -44,20 +45,33 @@ graph TD
     Atropos --> Pandora["📦 Pandora\n(File & Masquerade)"]:::engine
     Atropos --> Hercules["⚖️ Hercules\n(Justice V3 Engine)\nLNK & CRX Hunter"]:::judge
     Atropos --> Aion["👁️ AION\n(Persistence)"]:::engine
-    Atropos --> Plutos["⚡ PlutosGate\n(Network & Exfil)\nThermodynamics Engine"]:::judge
+    Atropos --> Plutos["⚡ PlutosGate\n(Network & Exfil)\nReconnaissance Hunter"]:::judge
     
-    %% Origin Tracing
+    %% Recon & Origin Tracing
     LNKs["Phishing LNKs"] -.-> Tartaros["⛓️ Tartaros v4.1\n(Adaptive Origin Tracing)"]:::engine
     History["Browser History"] -.-> Tartaros
+    History -.-> Plutos
     
+    %% Plutos Sub-Flow
+    subgraph Plutos_Engine ["PlutosGate Core"]
+        direction LR
+        P_SRUM["SRUM Analysis\n(Heat Score)"]
+        P_Recon["Recon Hunter\n(Kali/Exploits)"]
+        P_Exfil["Exfil Correlation\n(The Trinity)"]
+        
+        P_SRUM --> P_Exfil
+        P_Recon --> P_Exfil
+    end
+    Plutos --- Plutos_Engine
+
     %% Reporting Stage (Modular Lachesis)
-    subgraph Lachesis_Module ["🕸️ Lachesis v5.3 (The Weaver)"]
+    subgraph Lachesis_Module ["🕸️ Lachesis v5.8 (The Weaver)"]
         direction TB
         L_Core[("Core Controller")]:::report
-        L_Intel["Intel (Knowledge Base)"]:::submod
+        L_Intel["Intel (YAML Rules)"]:::submod
         L_Enrich["Enricher (Data Fusion)"]:::submod
         L_Analyzer["Analyzer (Event Scoring)"]:::submod
-        L_Render["Renderer (Smart Grouping)"]:::submod
+        L_Render["Renderer (Jinja2 Engine)"]:::submod
         
         L_Core --> L_Intel
         L_Core --> L_Enrich
@@ -92,7 +106,8 @@ graph TD
     * **Smart Grouping (v5.2):** Automatically differentiates "High Interest" LNKs (e.g., Confirmed Downloads) from generic noise-like artifacts.
     * **Remediation Engine:** Generates a prioritized "Recommended Actions" table (P0/P1) compliant with NIST SP 800-61.
     * **Enricher:** Fuses data from multiple sources (e.g., matching LNK targets with Process execution).
-    * **Renderer:** Generates the "Grimoire" (Markdown) with **Mermaid Visuals** and **Aggregated Critical Tables**.
+    * **Renderer (Jinja2):** Uses **Jinja2 Templates** to generate high-fidelity Markdown reports, separating logic from presentation.
+    * **Config Sovereign:** All intelligence rules and whitelists are now externalized in `rules/intel_signatures.yaml`.
 
 ### 2. The Judges (Chronos, Hercules & Plutos) - **[UPDATED]**
 * **Chronos (The Time Lord) feat. Icarus Paradox v1.4:**
@@ -108,9 +123,10 @@ graph TD
     * **Deep LNK Analysis:** Extracts Target Paths and Arguments to detect **PowerShell encoding**, **Hidden Windows**, and **Script Chaining**.
     * **Anti-Forensics Detection:** Detects usage of wiping tools (e.g., `BCWipe`, `CCleaner`) and flags missing artifacts as "Deleted Evidence".
     * **Masquerade Killer:** Instantly identifies `.crx` backdoors hiding in non-browser directories.
-* **PlutosGate (The Network Hunter - v3.4):**
+* **PlutosGate (The Network & Recon Hunter - v3.5):**
     * **Network Thermodynamics:** Uses **SRUM** to calculate "Heat Scores" based on data burst volume (BytesSent/Received).
     * **Exfil Correlation (The Trinity):** Correlates **SRUM (Heat)**, **Browser History (URL)**, and **MFT (File Creation)** to prove data theft intent.
+    * **[NEW] Reconnaissance Analysis:** Scans browser history for suspicious search terms ("exfiltration", "exploit"), known hacking domains (Kali, Metasploit), and security conference downloads (DEFCON).
     * **Email Hunter:** Detects `.pst/.ost` theft (Local MFT scan) and "Sent" actions in Webmail (History scan).
     * **Safe-Mode Map:** Generates Mermaid network topology without encoding errors.
 
@@ -137,6 +153,7 @@ graph TD
 ### Prerequisites
 * Python 3.10+
 * Polars (`pip install polars`)
+* Jinja2 (`pip install jinja2`)
 * Pandas (`pip install pandas`) - *Legacy support*
 * Colorama (`pip install colorama`)
 
@@ -172,6 +189,18 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
 ---
 
 ## 📜 Complete Changelog
+
+### v5.8 - The Watcher (Reconnaissance & Phishing Insights) 🏹
+* **[PlutosGate]** **Reconnaissance Hunter:** Implemented browser history analysis to detect pre-attack research (e.g., searches for "exfiltration", visits to "kali.org", or downloads of "DEFCON" materials).
+* **[Lachesis]** **Phishing Insight:** Enhanced "Initial Access" reporting to clearly distinguish confirmed **Phishing Vectors** (LNKs) with Analyst Notes explaining the threat (e.g., "Web Download Suspicious Shortcut").
+* **[Lachesis]** **Reliability Fix:** Fixed a critical bug in `renderer.py` where the "Initial Access" section was occasionally rendered empty due to template variable mismatch.
+* **[Core]** **Unicode Resilience:** Hardened console outputs against `cp932` encoding errors in Japanese environments.
+
+### v5.7 - The Architect (Templated Reporting) 🏛️
+* **[Lachesis]** **Jinja2 Templating Engine:** Completely refactored the reporting engine. Reports are now generated from `report.md.j2` templates, separating Python logic from Markdown presentation.
+* **[Core]** **Config Normalization:** Externalized all hardcoded paths, IPs, and noise signatures to `rules/intel_signatures.yaml`.
+* **[Lachesis]** **Robust Rendering:** Implemented absolute path resolution and file-based debug logging (`renderer_debug_log.txt`) to capture and diagnose silent reporting failures.
+* **[Hercules]** **Noise Reduction:** Optimized filtering for `Windows\Notifications` artifacts, achieving ~30% reduction in timeline size while preserving 100% of critical threats.
 
 ### v5.6.3 - The Deep Carver (Context Carving & Binary Reporting) 🦁
 * **[Chain Scavenger]** **Context Carving:** Now extracts and reports the **Binary Context (Hex Dump)** surrounding carved user accounts. Helps analysts distinguish valid accounts from random data patterns.
@@ -292,7 +321,9 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
 * [x] **v5.3:** **Operation Dragnet (PlutosGate v3.4 - Network Thermodynamics & Exfil Hunter)**
 * [x] **v5.4:** **Icarus Flight (Cross-Artifact Paradox Detection / Paradox Breaker)**
 * [x] **v5.6:** **The Deep Carver (Dirty Hive Hunter & Binary Context Reporting)**
-* [ ] **v5.x:** **LLM Integration** (Auto-summarization of Technical Findings) - *Planned*
+* [x] **v5.7:** **The Architect (Templated Reporting & Config Justice)**
+* [x] **v5.8:** **The Watcher (Reconnaissance Hunter & Phishing Insights)**
+* [ ] **v6.0:** **The Oracle (LLM Auto-Summarization & Chat)** - *Planned*
 
 ---
 
