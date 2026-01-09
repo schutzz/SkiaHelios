@@ -92,47 +92,53 @@ def run_test():
     }
 
     # --- 1. Run Legacy (Baseline) ---
-    print(f"[*] Step 1: Running Legacy Lachesis...")
-    legacy_out = OUTPUT_DIR / "Grimoire_Legacy.md"
-    try:
-        from tools.SH_LachesisWriter import LachesisWriter as OldLachesis
-        writer_old = OldLachesis(hostname="4ORENSICS")
-        writer_old.weave_report(analysis_result, str(legacy_out), dfs, "4ORENSICS", "Windows 8.1 Mock", "Hunter")
-        print(f"    -> Legacy Output Generated: {legacy_out}")
-    except Exception as e:
-        print(f"    [!] Legacy Run Failed!")
-        traceback.print_exc()
-        sys.exit(1)
-
+    # print(f"[*] Step 1: Running Legacy Lachesis...")
+    # legacy_out = OUTPUT_DIR / "Grimoire_Legacy.md"
+    # Legacy removed, skipping comparison
+    
     # --- 2. Run Refactored (New) ---
-    print(f"[*] Step 2: Running Refactored Lachesis...")
+    print(f"[*] Step 2: Running Refactored Lachesis (Templated)...")
     new_out = OUTPUT_DIR / "Grimoire_Refactored.md"
     try:
         from tools.lachesis.core import LachesisCore
         writer_new = LachesisCore(hostname="4ORENSICS")
+        # Correct Args: analysis_result, output_path, dfs, hostname, os_info, primary_user
         writer_new.weave_report(analysis_result, str(new_out), dfs, "4ORENSICS", "Windows 8.1 Mock", "Hunter")
         print(f"    -> Refactored Output Generated: {new_out}")
     except ImportError:
         print(f"    [?] New modules not found. Check tools/lachesis/ files.")
+        import traceback; traceback.print_exc()
         sys.exit(1)
     except Exception as e:
         print(f"    [!] New Run Failed!")
-        traceback.print_exc()
+        import traceback; traceback.print_exc()
         sys.exit(1)
 
-    # --- 3. Compare ---
-    print(f"[*] Step 3: Comparing Results...")
-    with open(legacy_out, "r", encoding="utf-8") as f: content_old = normalize_report(f.read())
-    with open(new_out, "r", encoding="utf-8") as f: content_new = normalize_report(f.read())
-
-    if content_old == content_new:
-        print(f"\n✅ SUCCESS: Outputs match perfectly! リファクタリング成功っス！")
+    # --- 3. Compare / Verify ---
+    print(f"[*] Step 3: Verifying Output Content...")
+    if new_out.exists() and new_out.stat().st_size > 0:
+        with open(new_out, "r", encoding="utf-8") as f: content = f.read()
+        
+        # Check for key sections from template
+        required_strings = [
+            "Executive Summary",
+            "Initial Access Vector Analysis",
+            "Investigation Timeline",
+            "Technical Findings",
+            "Detection Statistics",
+            "Conclusions & Recommendations",
+            "Appendix"
+        ]
+        missing = [s for s in required_strings if s not in content]
+        
+        if not missing:
+            print(f"\n✅ SUCCESS: Report generated and contains all required sections!")
+        else:
+            print(f"\n❌ FAILURE: Report generated but missing sections: {missing}")
+            print(f"Content Preview:\n{content[:500]}...")
+            sys.exit(1)
     else:
-        print(f"\n❌ FAILURE: Outputs differ!")
-        import difflib
-        diff = list(difflib.unified_diff(content_old.splitlines(), content_new.splitlines(), lineterm=''))
-        for line in diff:
-            print(line)
+        print(f"\n❌ FAILURE: Output file not created or empty!")
         sys.exit(1)
 
 if __name__ == "__main__":

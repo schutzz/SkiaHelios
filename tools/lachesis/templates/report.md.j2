@@ -1,0 +1,196 @@
+# {{ txt.title }} - {{ hostname }}
+
+### 🛡️ {{ txt.coc_header }}
+| Item | Details |
+|---|---|
+| **Target Host** | **{{ hostname }}** |
+| **OS Info** | {{ metadata.os_info }} |
+| **Primary User** | {{ metadata.primary_user }} |
+| **Incident Scope** | **{{ analysis_data.time_range }}** |
+| **Report Date** | {{ now }} |
+
+---
+
+## 📚 Table of Contents
+- [{{ txt.h1_exec }}](#{{ txt.h1_exec | lower | replace(' ', '-') | replace('.', '') | replace('&', '') | replace('(', '') | replace(')', '') | replace('/', '') }})
+- [{{ txt.h1_origin }}](#{{ txt.h1_origin | lower | replace(' ', '-') | replace('.', '') | replace('&', '') | replace('(', '') | replace(')', '') | replace('/', '') }})
+- [{{ txt.h1_time }}](#{{ txt.h1_time | lower | replace(' ', '-') | replace('.', '') | replace('&', '') | replace('(', '') | replace(')', '') | replace('/', '') }})
+- [{{ txt.h1_tech }}](#{{ txt.h1_tech | lower | replace(' ', '-') | replace('.', '') | replace('&', '') | replace('(', '') | replace(')', '') | replace('/', '') }})
+- [{{ txt.h1_stats }}](#{{ txt.h1_stats | lower | replace(' ', '-') | replace('.', '') | replace('&', '') | replace('(', '') | replace(')', '') | replace('/', '') }})
+- [{{ txt.h1_rec }}](#{{ txt.h1_rec | lower | replace(' ', '-') | replace('.', '') | replace('&', '') | replace('(', '') | replace(')', '') | replace('/', '') }})
+- [{{ txt.h1_app }}](#{{ txt.h1_app | lower | replace(' ', '-') | replace('.', '') | replace('&', '') | replace('(', '') | replace(')', '') | replace('/', '') }})
+- [Pivot Config (Deep Dive Targets)](#deep-dive-recommendation)
+
+---
+
+## {{ txt.h1_exec }}
+{{ dynamic_verdict.title }}
+{{ dynamic_verdict.description }}
+
+{{ txt.attack_methods_label }} {{ attack_methods | join(', ') }}.
+
+{{ txt.deep_dive_note }}
+
+{{ mermaid_timeline }}
+
+### 💎 Key Indicators (Critical Only)
+{% for cat, items in key_indicators.items() %}
+#### {{ cat }}
+| Time (UTC) | Value / Artifact | Impact/Target | Score |
+|---|---|---|---|
+{% for ioc in items -%}
+| {{ ioc.Time | replace('T', ' ') | truncate(19, True, '') }} | `{{ ioc.Value }}` | {{ ioc.Impact }} | {{ ioc.Score }} |
+{% endfor %}
+{% endfor %}
+
+---
+
+## {{ txt.h1_origin }}
+{% if phishing_lnks %}
+{{ txt.phishing_confirmed }}
+{{ txt.phishing_lnk_detected.format(count=phishing_lnks|length) }}
+{{ txt.phishing_table_header }}
+{% for seed in phishing_lnks[:10] %}
+| `{{ seed.Target_File }}` | {{ seed.Timestamp_Hint | replace('T', ' ') | truncate(19, True, '') }} | {{ seed.Origin_Desc }} |
+{% endfor %}
+{% endif %}
+
+{% if drop_items %}
+{{ txt.dropped_artifacts_header }}
+{{ txt.dropped_table_header }}
+{% for seed in drop_items[:10] %}
+| `{{ seed.Target_File }}` | {{ seed.Timestamp_Hint | replace('T', ' ') | truncate(19, True, '') }} | {{ seed.Origin_Desc }} |
+{% endfor %}
+{% endif %}
+
+{% if not phishing_lnks and not drop_items %}
+{{ txt.no_vector_found }}
+{% endif %}
+
+---
+
+## {{ txt.h1_time }}
+(Detailed Timeline)
+
+{% for phase in analysis_data.phases %}
+### 📅 Phase {{ loop.index }} ({{ phase[0].Time.split('T')[0] if phase else 'Unknown' }})
+| Time (UTC) | Category | Event Summary | Source |
+|---|---|---|---|
+{% for ev in phase -%}
+| {{ ev.Time.replace('T', ' ').split('.')[0] }} | {{ txt.cats.get(ev.Category, ev.Category) }} | **{{ ev.Summary }}** | {{ ev.Source }} |
+{% endfor %}
+{% endfor %}
+
+---
+
+## {{ txt.h1_tech }}
+{% if anti_forensics_tools %}
+{{ txt.anti_forensics_header }}
+{% for tool in anti_forensics_tools %}
+#### {{ tool.Name }}
+- 📊 **Run Count**: **{{ tool.RunCount }}**
+- 🕐 **Last Execution**: {{ tool.LastRun }} (UTC)
+- ⚠️ **Severity**: CRITICAL
+- 🔍 **Description**: {{ tool.Desc }}
+
+🕵️ **Analyst Note**:
+{{ tool.AnalystNote }}
+
+{% endfor %}
+{{ txt.missing_evidence_header }}
+{{ txt.missing_evidence_table }}
+{{ txt.missing_evidence_note }}
+---
+{% endif %}
+
+### 🔍 Detailed Findings by Category
+
+{% for cat, items in technical_findings.items() %}
+#### {{ cat }}
+{% if "INITIAL ACCESS" in cat %}
+{% if high_interest_lnks %}
+{{ txt.high_interest_artifacts }}
+{% for ioc in high_interest_lnks %}
+- **{{ ioc.Time | replace('T', ' ') | truncate(19, True, '') }}** | `{{ ioc.Value }}`
+{% if ioc.Insight %}  - 🕵️ **Analyst Note:** {{ ioc.Insight }}{% endif %}
+{% endfor %}
+{% endif %}
+{% if generic_lnks %}
+{{ txt.other_lnks_header.format(count=generic_lnks|length) }}
+{{ txt.other_lnks_desc }}
+{% for ioc in generic_lnks %}
+- {{ ioc.Time | replace('T', ' ') | truncate(19, True, '') }} | `{{ ioc.Value }}`
+{% endfor %}
+{% endif %}
+{% else %}
+{% for ioc in items %}
+- **{{ ioc.Time | replace('T', ' ') | truncate(19, True, '') }}** | `{{ ioc.Value }}`
+{% if ioc.Insight %}  - 🕵️ **Analyst Note:** {{ ioc.Insight }}{% endif %}
+{% endfor %}
+{% endif %}
+
+{% endfor %}
+
+{{ attack_chain_mermaid }}
+
+---
+
+{{ plutos_section }}
+
+---
+
+## {{ txt.h1_stats }}
+{{ txt.stats_header }}
+| Category | Count | Note |
+|---|---|---|
+| **Total Events Analyzed** | **{{ stats.total_processed }}** | After filtering |
+| Critical Detections | {{ stats.crit_count }} | {{ "%.2f"|format(stats.crit_ratio) }}% of analyzed |
+| Filtered Out (Noise) | {{ stats.noise_removed }} | Removed before analysis |
+
+{{ txt.stats_critical_breakdown }}
+| Type | Count | Max Score | Impact |
+|---|---|---|---|
+{% for row in stats.critical_breakdown %}
+| **{{ row.Type }}** | **{{ row.Count }}** | {{ row.MaxScore }} | {{ row.Impact }} |
+{% endfor %}
+
+{% if stats.medium_events %}
+{{ txt.stats_medium_events.format(count=stats.medium_count) }}
+{% for k, v in stats.medium_breakdown.items() %}
+- {{ k }}: {{ v }}
+{% endfor %}
+{% endif %}
+
+{% if stats.noise_stats %}
+{{ txt.stats_noise_header }}
+| Filter Reason | Count |
+|---|---|
+{% for k, v in stats.noise_stats.items() %}
+| {{ k }} | {{ v }} |
+{% endfor %}
+{% endif %}
+
+---
+
+## {{ txt.h1_rec }}
+{{ txt.rec_header }}
+{{ txt.rec_table_header }}
+{% if recommendations.p0_evtlog %}{{ txt.rec_p0_evtlog }}{% endif %}
+{% if recommendations.p0_crx %}{{ txt.rec_p0_crx }}{% endif %}
+{{ txt.rec_p0_network }}
+{{ txt.rec_p1_lateral }}
+{{ txt.rec_p1_creds }}
+
+---
+
+## {{ txt.h1_app }}
+{{ txt.ioc_header }}
+| Type | Value | Score | Tag |
+|---|---|---|---|
+{% for ioc in all_iocs %}
+| {{ ioc.Type }} | `{{ ioc.Value }}` | {{ ioc.Score }} | {{ ioc.Tag }} |
+{% endfor %}
+
+
+---
+*Report woven by SkiaHelios (The Triad v5.2 Perfection)* 🦁
