@@ -15,7 +15,7 @@
 
 Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** orchestrated by **"Hekate"**, supported by **"Chronos" (The Time Lord feat. Icarus Paradox)**, **"Hercules" (The Referee)**, the **"PlutosGate" (Network & Recon Hunter)**, and the **"YARA WebShell Scanner"** to detect advanced threats including **Account Takeover**, **Privilege Escalation**, **Evidence Wiping**, **Web Intrusion Chains**, and **Cross-Artifact Tampering**.
 
-**Current Version:** v5.8 (The Watcher: Reconnaissance & Phishing Insights)
+**Current Version:** v5.9 (The Ghost Hunter: Noise Eradication & Timeline Purity)
 
 ---
 
@@ -190,6 +190,14 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
 
 ## 📜 Complete Changelog
 
+### v5.9 - The Ghost Hunter (Noise Eradication & Timeline Purity) 👻
+* **[Vis]** **Attack Flow Sequence:** Replaced the legacy Mermaid graph with a **Sequence Diagram** (`sequenceDiagram`) to clearly visualize the causality chain (Prep → Phishing → Exec → Recon → Anti) with precise timestamps and confidence indicators.
+* **[USN]** **USN Storm Condenser (v2.0):** Implemented aggressive "Seconds-Level" grouping for USN Journal events. Compress hundreds of repetitive file operations (e.g., `DataExtend`, `FileCreate`) into single, readable summary lines (e.g., `****27x USN Events**`).
+* **[Hekate]** **Kill the Ghost (Date Filter):** Implemented a relative time filter that automatically identifies the "Cluster of Interest" and hides artifacts older than 1 year relative to the incident, eliminating historical noise.
+* **[Hekate]** **Strict USN Demotion:** Forcefully downgrades generic USN events (e.g., `db.opt` creation) to "Noise" status (Score 40/60) and strips their `CRITICAL` tags to prevent report clutter.
+* **[Hekate]** **Protection Logic:** Intelligent exception handling that **preserves** USN events if they are tagged as `WEBSHELL` or `TIMESTOMP`, ensuring that critical anti-forensic evidence remains visible (Score 150) while noise is suppressed.
+* **[Lachesis]** **Strict Threshold Enforcement:** `FILE` category events (including USN) now require **Score >= 80** to appear in the timeline, ensuring a pristine report.
+
 ### v5.8 - The Watcher (Reconnaissance & Phishing Insights) 🏹
 * **[PlutosGate]** **Reconnaissance Hunter:** Implemented browser history analysis to detect pre-attack research (e.g., searches for "exfiltration", visits to "kali.org", or downloads of "DEFCON" materials).
 * **[Lachesis]** **Phishing Insight:** Enhanced "Initial Access" reporting to clearly distinguish confirmed **Phishing Vectors** (LNKs) with Analyst Notes explaining the threat (e.g., "Web Download Suspicious Shortcut").
@@ -323,6 +331,7 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
 * [x] **v5.6:** **The Deep Carver (Dirty Hive Hunter & Binary Context Reporting)**
 * [x] **v5.7:** **The Architect (Templated Reporting & Config Justice)**
 * [x] **v5.8:** **The Watcher (Reconnaissance Hunter & Phishing Insights)**
+* [x] **v5.9:** **The Ghost Hunter (USN Condenser & Strict Demotion)**
 * [ ] **v6.0:** **The Oracle (LLM Auto-Summarization & Chat)** - *Planned*
 
 ---

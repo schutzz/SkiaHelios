@@ -56,8 +56,29 @@ class LachesisRenderer:
 
         # 1. Prepare Context Data
         try:
-            # [Fix] Pre-calculate technical findings to extract LNKs for template
-            tech_findings = self._prepare_technical_findings(analyzer, origin_stories)
+            # [User Request] Apply USN Condenser to Timeline Phases (Section 3)
+            # This fixes the "USN Storm" in the Detailed Timeline table.
+            if analysis_data and 'phases' in analysis_data:
+                new_phases = []
+                for phase in analysis_data['phases']:
+                    # Apply condensation to each timeline phase
+                    new_phase = self._condense_usn_events(phase)
+                    new_phases.append(new_phase)
+                analysis_data['phases'] = new_phases
+
+            # [Optimization] Apply Grouping & Noise Reduction Globally
+            # This ensures Section 4 (Detailed Findings), Section 7 (IOCs), and Stats are consistent.
+            refined_iocs = self._group_all_iocs(analyzer.visual_iocs)
+            
+            # [Fix] Global Clean of VOID bug (Targeting the typo version specifically)
+            # This ensures Tables (Section 7) are clean, not just the diagram.
+            for ioc in refined_iocs:
+                t_str = str(ioc.get('Time', ''))
+                if "VOID_VISUALIZA" in t_str: # Matches both correct and typo versions
+                     ioc['Time'] = "-"
+
+            # [Fix] Pre-calculate technical findings using refined IOCs (passing analyzer)
+            tech_findings = self._prepare_technical_findings_from_list(refined_iocs, analyzer, origin_stories)
             init_access = tech_findings.get("INITIAL ACCESS", [])
             high_lnks = [i for i in init_access if i.get("Insight")]
             gen_lnks = [i for i in init_access if not i.get("Insight")]
@@ -70,19 +91,24 @@ class LachesisRenderer:
                 "now": datetime.now().strftime('%Y-%m-%d'),
                 "dynamic_verdict": analyzer.determine_dynamic_verdict(),
                 "attack_methods": self._get_attack_methods(analyzer),
-                "mermaid_timeline": self._render_mermaid_vertical_clustered(analyzer.visual_iocs),
-                "key_indicators": self._prepare_key_indicators(analyzer.visual_iocs),
+                
+                # [CHANGE] Replace the old vertical flowchart with the new Sequence Diagram
+                # Old: self._render_mermaid_vertical_clustered(refined_iocs)
+                # New: self._render_attack_chain_mermaid(refined_iocs)
+                "mermaid_timeline": self._render_attack_chain_mermaid(refined_iocs),
+                
+                "key_indicators": self._prepare_key_indicators(refined_iocs),
                 "phishing_lnks": self._prepare_origin_seeds(analyzer.pivot_seeds, "PHISHING", origin_stories),
                 "drop_items": self._prepare_origin_seeds(analyzer.pivot_seeds, "DROP", origin_stories, exclude="PHISHING"),
-                "anti_forensics_tools": self._prepare_anti_forensics(analyzer.visual_iocs, dfs_for_ioc),
+                "anti_forensics_tools": self._prepare_anti_forensics(refined_iocs, dfs_for_ioc),
                 "technical_findings": tech_findings,
                 "high_interest_lnks": high_lnks,
                 "generic_lnks": gen_lnks,
-                "attack_chain_mermaid": self._render_attack_chain_mermaid(analyzer.visual_iocs),
+                "attack_chain_mermaid": self._render_attack_chain_mermaid(refined_iocs), # Keep for backup/template compat
                 "plutos_section": self._render_plutos_section_text(dfs_for_ioc),
-                "stats": self._prepare_stats(analyzer, analysis_data, dfs_for_ioc),
+                "stats": self._prepare_stats(analyzer, analysis_data, dfs_for_ioc, refined_iocs),
                 "recommendations": self._prepare_recommendations(analyzer),
-                "all_iocs": sorted(analyzer.visual_iocs, key=lambda x: str(x.get('Score', 0)), reverse=True)
+                "all_iocs": refined_iocs 
             }
             with open(log_file, "a", encoding="utf-8") as log: 
                 log.write(f"[{datetime.now()}] Context Prepared. Keys: {list(context.keys())}\n")
@@ -117,6 +143,187 @@ class LachesisRenderer:
             with open(log_file, "a", encoding="utf-8") as log:
                 log.write(f"[{datetime.now()}] {msg}\n")
                 traceback.print_exc(file=log)
+
+    def _group_all_iocs(self, iocs):
+        # Flattened grouping for Section 7
+        grouped_iocs = []
+        
+        # Helper: Extract directory path
+        def get_parent(path):
+            if not path: return ""
+            return str(Path(path).parent)
+
+        # 1. Bucket by Type + Tag + ParentDir
+        buckets = {}
+        processed_ids = set() # To avoid double processing if logic changes
+
+        # Sort by directory to help sequential processing
+        try:
+            sorted_iocs = sorted(iocs, key=lambda x: get_parent(x.get('Value', '')))
+        except:
+            sorted_iocs = iocs
+        
+        # Grouping candidates
+        for ev in sorted_iocs:
+            cat = self._get_event_category(ev)
+            tag = str(ev.get('Tag', ''))
+            val = str(ev.get('Value', ''))
+            score = int(ev.get('Score', 0))
+            
+            # Smart Filename Extraction for Grouping
+            filename = str(ev.get('FileName') or ev.get('Target_FileName') or ev.get('Target_Path') or '')
+            if not filename and "USN" in tag:
+                # Try parsing from Note or Summary if it looks like a path
+                # Note format: "Lateral Movement (USN)" or similar
+                # Summary might be better.
+                summ = str(ev.get('Summary', ''))
+                if "." in summ and "\\" in summ: # rudimentary path check
+                     filename = summ
+                elif str(ev.get('Note', '')).find(":\\") > 0:
+                     filename = str(ev.get('Note', ''))
+
+            # --- PHASE 0: Score Cut (Noise Reduction) ---
+            # User Request: Score < 90 Cut (Drop low confidence items)
+            # Exceptions: CRITICAL, TIMESTOMP tags
+            
+            rescue_tags = ["CRITICAL", "TIMESTOMP", "KNOWN_WEBSHELL", "C2", "RANSOM", "ROOTKIT"]
+            has_rescue_tag = any(t in tag for t in rescue_tags)
+            
+            # [Debug Verbose]
+            if "USN" in tag:
+                with open("debug_verbose.log", "a", encoding="utf-8") as f:
+                     import os
+                     if os.path.getsize("debug_verbose.log") < 50000: # Increase limit
+                         f.write(f"USN Item: Cat={cat} Tag={tag} Val={val} Sc={score} Time={ev.get('Time')}\n")
+            
+            # Strict Drop for low scores unless rescued
+            if score < 90 and not has_rescue_tag:
+                 continue
+
+            # --- PHASE 1: Grouping Logic ---
+            
+            should_group = False
+            group_key = ""
+            
+            # 1.1 VULNERABLE APP (Bulk Grouping)
+            if "VULNERABLE APP" in cat:
+                should_group = True
+                group_key = f"VULN|{tag}" 
+
+            # 1.2 RECON / EXFILTRATION (Google Search Grouping)
+            # [User Request] Group repetitive Google URLs to improve readability
+            elif "RECON" in tag or "EXFIL" in tag:
+                # Check for Google Search URL patterns
+                if "google" in val.lower() and ("search?" in val or "url?" in val):
+                    should_group = True
+                    group_key = "RECON_GOOGLE_SEARCH"
+                    filename = "Google Search URLs (Reconnaissance)" # Override filename for display
+
+            # 1.2 WEBSHELL (Obfuscation Grouping) - Now mostly handled by Score Cut (<90 dropped)
+            elif "WEBSHELL" in cat:
+                if score <= 85 and "OBFUSCATION" in tag and not has_rescue_tag:
+                    parent = get_parent(val)
+                    group_key = f"OBFUSC|{parent}"
+                    should_group = True
+
+            # 1.3 LATERAL / USN Condensation
+            # Group by Filename for USN bursts
+            elif "LATERAL" in cat:
+                 # Check if USN related (Value is Action like 'FileCreate') OR Tag has USN
+                 if ("USN" in tag or "|" in val):
+                      if filename:
+                          group_key = f"USN|{filename}"
+                          should_group = True
+                      else:
+                          # Fallback: Group by Timestamp (Minute precision to catch bursts)
+                          # Time format often: 2015-09-03 10:03:01
+                          t = str(ev.get('Time', ''))
+                          if len(t) >= 16:
+                              group_key = f"USN|BURST|{t[:16]}" # Group by minute e.g. 2015-09-03 10:03
+                              should_group = True
+                          
+                          # [Debug]
+                          if "USN" in tag:
+                               with open("debug_grouping.log", "a", encoding="utf-8") as f:
+                                   f.write(f"USN Item: T={t} F={filename} Group={should_group} Key={group_key}\n")
+
+            if not should_group:
+                grouped_iocs.append(ev)
+                continue
+            
+            if group_key not in buckets: buckets[group_key] = []
+            buckets[group_key].append(ev)
+            
+        # 2. Process Buckets
+        with open("debug_grouping.log", "a", encoding="utf-8") as f:
+             f.write(f"Buckets: {len(buckets)} keys. Sizes: {[len(v) for v in buckets.values()]}\n")
+
+        for key, bucket in buckets.items():
+            # Threshold: 5 items (User suggested 10 for USN, but 5 is safe default)
+            threshold = 5 
+            if "USN" in key: threshold = 5 # Strict condensation for USN
+            
+            if len(bucket) >= threshold:
+                first = bucket[0]
+                
+                # Determine Label
+                if "VULN" in key:
+                    label_type = "VULNERABLE APP"
+                    label_desc = f"Files (Related to {first.get('Tag', '')})"
+                    
+                elif "RECON_GOOGLE_SEARCH" in key:
+                    label_type = "RECONNAISSANCE"
+                    label_desc = "Google Search URLs related to Exfiltration/Recon"
+                    
+                elif "OBFUSC" in key:
+                    label_type = "WEBSHELL" 
+                    filenames = [os.path.basename(str(b.get('Value'))) for b in bucket[:3]]
+                    examples = ", ".join(filenames)
+                    label_desc = f"Files (Potential Noise / Obfuscated Libs) - e.g. {examples}..."
+                    
+                elif "USN" in key:
+                    label_type = "LATERAL MOVEMENT"
+                    # User: 10x USN Events (FileCreate/DataExtend) - tmpudvfh.php
+                    # Using Set of Actions for description
+                    actions = sorted(list(set(str(b.get('Value')) for b in bucket)))
+                    action_str = "/".join(actions[:3]) # Limit to 3 actions
+                    if len(actions) > 3: action_str += "..."
+                    
+                    if "BURST" in key:
+                        label_desc = f"USN Activity Burst ({action_str}) - Unknown File"
+                    else:
+                        fname = key.split("|")[1]
+                        # Clean filename if it's a full path
+                        fname_short = os.path.basename(fname)
+                        label_desc = f"USN Events ({action_str}) - File: {fname_short}"
+
+                else:
+                    label_type = "GROUP"
+                    label_desc = "Events"
+                
+                # Check timestamps span
+                times = [b.get('Time') for b in bucket if b.get('Time')]
+                t_str = "Unknown"
+                if times: 
+                    min_t, max_t = min(times), max(times)
+                    t_str = f"{min_t} - {max_t}"
+                    # If simplified to minutes or same second
+                    if min_t == max_t: t_str = str(min_t)
+                
+                summary_ev = first.copy()
+                summary_ev['Type'] = label_type 
+                summary_ev['Value'] = f"{len(bucket)}x {label_desc}" # This value will be shown in table
+                summary_ev['Note'] = "Grouped Artifacts"
+                summary_ev['Time'] = t_str
+                # Inherit Max Score of group to avoid hiding risk
+                max_score = max(int(b.get('Score', 0)) for b in bucket)
+                summary_ev['Score'] = max_score
+                
+                grouped_iocs.append(summary_ev)
+            else:
+                grouped_iocs.extend(bucket)
+        
+        return sorted(grouped_iocs, key=lambda x: str(x.get('Score', 0)), reverse=True)
 
     # --- Context Helper Methods ---
 
@@ -217,7 +424,9 @@ class LachesisRenderer:
         cat_titles = {
             "INITIAL ACCESS": "🎣 Initial Access", "ANTI-FORENSICS": "🙈 Anti-Forensics",
             "SYSTEM MANIPULATION": "🚨 System Time Manipulation", "PERSISTENCE": "⚓ Persistence",
-            "EXECUTION": "⚡ Execution", "TIMESTOMP (FILE)": "🕒 Timestomp (Files)"
+            "EXECUTION": "⚡ Execution", "TIMESTOMP (FILE)": "🕒 Timestomp (Files)",
+            "WEBSHELL": "🕸️ WebShell Intrusion", "LATERAL MOVEMENT": "🐛 Lateral Movement",
+            "VULNERABLE APP": "🔓 Vulnerable Application"
         }
         
         temp_groups = {}
@@ -240,7 +449,32 @@ class LachesisRenderer:
             ev['Value'] = self._get_display_value(ev)
             temp_groups[cat].append(ev)
 
+        # [Grouping] Collapse repetitive events
         for k in temp_groups:
+            if k == "VULNERABLE APP" or k == "EXECUTION":
+                bucket = []
+                collapsed_group = []
+                
+                # Simple groupings by Tag
+                tag_map = {}
+                for ev in temp_groups[k]:
+                    t = ev.get('Tag', 'Other')
+                    if t not in tag_map: tag_map[t] = []
+                    tag_map[t].append(ev)
+                
+                for t, ev_list in tag_map.items():
+                    if len(ev_list) > 5:
+                        first = ev_list[0]
+                        last = ev_list[-1]
+                        summary_ev = first.copy()
+                        summary_ev['Value'] = f"{len(ev_list)}x Files ({t})"
+                        summary_ev['Impact'] = f"Bulk Artifacts (e.g. {first.get('Value')})"
+                        summary_ev['Time'] = f"{first.get('Time')} - {last.get('Time')}"
+                        collapsed_group.append(summary_ev)
+                    else:
+                        collapsed_group.extend(ev_list)
+                temp_groups[k] = collapsed_group
+
             temp_groups[k].sort(key=lambda x: x.get('Time', '9999'))
 
         ordered_keys = sorted(temp_groups.keys(), key=lambda k: 0 if "SYSTEM" in k else 1)
@@ -297,8 +531,8 @@ class LachesisRenderer:
             })
         return processed
 
-    def _prepare_technical_findings(self, analyzer, origin_stories):
-        high_conf_events = [ioc for ioc in analyzer.visual_iocs if analyzer.is_force_include_ioc(ioc) or "ANTI" in str(ioc.get("Type", ""))]
+    def _prepare_technical_findings_from_list(self, ioc_list, analyzer, origin_stories):
+        high_conf_events = [ioc for ioc in ioc_list if analyzer.is_force_include_ioc(ioc) or "ANTI" in str(ioc.get("Type", ""))]
         groups = {}
         
         for ioc in high_conf_events:
@@ -315,20 +549,147 @@ class LachesisRenderer:
                  insight = web_note + (insight if insight else "")
             
             ioc['Insight'] = insight
+            ioc['Insight'] = insight
             groups[cat].append(ioc)
-            
+        
+        # [User Request] Apply USN Storm Condenser for LATERAL MOVEMENT
+        with open("debug_groups.log", "a", encoding="utf-8") as f:
+             import datetime
+             f.write(f"\n--- Call at {datetime.datetime.now()} ---\n")
+             f.write(f"Input List Size: {len(ioc_list)}\n")
+             f.write(f"Groups Keys: {list(groups.keys())}\n")
+             for k, v in groups.items():
+                 f.write(f"Key: '{k}' Count: {len(v)}\n")
+
+        if "LATERAL MOVEMENT" in groups:
+             groups["LATERAL MOVEMENT"] = self._condense_usn_events(groups["LATERAL MOVEMENT"])
+             
         return groups
 
-    def _prepare_stats(self, analyzer, analysis_data, dfs):
+        return groups
+
+    def _condense_usn_events(self, events):
+        """
+        USN Journal high-volume condenser. Groups by (TimeSecond, FileName).
+        Target: Source/Tag is USN, Category LATERAL or FILE.
+        Handles both Visual IOCs and Timeline Events.
+        """
+        condensed = []
+        buffer = {} # Key: (TimeSecond, FileName), Value: EventDict
+        
+        for ev in events:
+            # Check fields
+            tag = str(ev.get('Tag', ''))
+            src = str(ev.get('Source', ''))
+            cat = str(ev.get('Category', '') or ev.get('Type', '')).upper()
+            
+            is_usn_source = "USN" in tag or "USN" in src
+            # [User Request] Modified to accept FILE category (due to demotion)
+            is_target_cat = "LATERAL" in cat or "FILE" in cat
+            
+            if not (is_usn_source and is_target_cat):
+                condensed.append(ev)
+                continue
+
+            # Grouping Key: Time (Second) ONLY to achieve max decluttering
+            # User request: "Group single lines if same second"
+            t_str = str(ev.get('Time', ''))
+            ts_sec = t_str[:19] # "2015-09-03 10:03:01"
+            
+            # Filename extraction
+            fname = str(ev.get('FileName') or ev.get('Target_FileName') or ev.get('Target_Path') or '')
+            if not fname:   
+                 val = str(ev.get('Value', ''))
+                 summ = str(ev.get('Summary', ''))
+                 if ":\\" in summ: fname = summ 
+                 elif ":\\" in val: fname = val
+                 elif ":\\" in str(ev.get('Note', '')): fname = str(ev.get('Note', ''))
+                 else: fname = 'Unknown'
+
+            key = ts_sec # Key is just Time
+
+            if key not in buffer:
+                new_ev = ev.copy()
+                act = str(ev.get('Value', '') or ev.get('Summary', ''))
+                new_ev['Action_Set'] = {act} 
+                new_ev['USN_Count'] = 1
+                new_ev['File_Set'] = {fname} # Collect filenames
+                buffer[key] = new_ev
+            else:
+                buffer[key]['USN_Count'] += 1
+                act = str(ev.get('Value', '') or ev.get('Summary', ''))
+                buffer[key]['Action_Set'].add(act)
+                buffer[key]['File_Set'].add(fname)
+                current_score = int(buffer[key].get('Score', 0) or 0)
+                new_score = int(ev.get('Score', 0) or 0)
+                buffer[key]['Score'] = max(current_score, new_score)
+
+        # Flush Buffer
+        for key, ev in buffer.items():
+            count = ev.pop('USN_Count')
+            files = ev.pop('File_Set', set())
+            files.discard('Unknown')
+            
+            if count > 1:
+                actions = "|".join(sorted(list(ev.pop('Action_Set'))))
+                # Summarize files
+                file_list = sorted(list(files))
+                if len(file_list) > 3:
+                    f_summary = f"{file_list[0]}, {file_list[1]}... (+{len(file_list)-2})"
+                else:
+                    f_summary = ", ".join(file_list)
+                
+                summary_text = f"**{count}x USN Events ({actions})**"
+                if f_summary:
+                    summary_text += f" - {f_summary}"
+
+                
+                # Update fields for display
+                # For VisualIOCs (Section 4): Update Value, Tag
+                if 'Value' in ev:
+                    ev['Value'] = summary_text
+                    ev['Tag'] = fname
+                
+                # For Timeline (Section 3): Update Summary, Source?
+                # Template uses: {{ ev.Summary }}
+                if 'Summary' in ev:
+                    ev['Summary'] = summary_text
+                    # Append filename to Summary or ensure it's visible?
+                    # Section 3 columns: Time | Category | Summary | Source
+                    # Put filename in Summary
+                    ev['Summary'] = f"{summary_text} - {fname}"
+
+            else:
+                 ev.pop('Action_Set', None)
+            
+            condensed.append(ev)
+            
+        # Re-sort by Time to ensure order
+        try:
+            condensed.sort(key=lambda x: str(x.get('Time', '')))
+        except:
+            pass
+            
+        return condensed
+
+    def _prepare_technical_findings(self, analyzer, origin_stories):
+        # Wrapper for backward compatibility if needed, using raw visual_iocs
+        return self._prepare_technical_findings_from_list(analyzer.visual_iocs, analyzer, origin_stories)
+
+    def _prepare_stats(self, analyzer, analysis_data, dfs, refined_iocs=None):
         raw_count = analyzer.total_events_analyzed
-        crit_count = len(analyzer.visual_iocs)
+        
+        # Use refined IOCs if available, else raw
+        target_iocs = refined_iocs if refined_iocs is not None else analyzer.visual_iocs
+        crit_count = len(target_iocs)
+        
         noise_removed = sum(analyzer.noise_stats.values()) if analyzer.noise_stats else 0
         total_processed = raw_count + noise_removed
         crit_ratio = (crit_count / total_processed * 100) if total_processed > 0 else 0
         
         crit_breakdown = []
         grouped = {}
-        for ev in analyzer.visual_iocs:
+        for ev in target_iocs:
             cat = self._get_event_category(ev)
             grouped.setdefault(cat, []).append(ev)
         for cat, items in grouped.items():
@@ -340,7 +701,7 @@ class LachesisRenderer:
         for m in analysis_data["medium_events"]:
              c = m.get('Category', 'Unknown')
              med_breakdown[c] = med_breakdown.get(c, 0) + 1
-
+ 
         return {
             "total_processed": total_processed,
             "crit_count": crit_count,
@@ -369,7 +730,10 @@ class LachesisRenderer:
         if "PHISH" in typ or "LNK" in typ: return "INITIAL ACCESS"
         if "WIPE" in typ or "ANTI" in typ or "ANTIFORENSICS" in tag: return "ANTI-FORENSICS"
         if "PERSIST" in typ or "SAM_SCAVENGE" in tag or "DIRTY_HIVE" in tag: return "PERSISTENCE"
+        if "VULN" in typ or "VULN" in tag: return "VULNERABLE APP"
         if "EXEC" in typ or "RUN" in typ: return "EXECUTION"
+        if "WEBSHELL" in typ or "WEBSHELL" in tag: return "WEBSHELL"
+        if "LATERAL" in typ or "LATERAL" in tag: return "LATERAL MOVEMENT"
         if "TIMESTOMP" in typ: return "TIMESTOMP (FILE)"
         return "OTHER ACTIVITY"
     
@@ -398,6 +762,8 @@ class LachesisRenderer:
         f.append("    classDef anti fill:#264653,stroke:#333,stroke-width:2px,color:white;")
         f.append("    classDef time fill:#a8dadc,stroke:#457b9d,stroke-width:4px,color:black;")
         f.append("    classDef phishing fill:#ff6b6b,stroke:#c92a2a,stroke-width:2px,color:white;")
+        f.append("    classDef web fill:#d62828,stroke:#333,stroke-width:2px,color:white;")
+        f.append("    classDef lateral fill:#e9c46a,stroke:#333,stroke-width:2px,color:black;")
         
         critical_events = [ev for ev in events if ev.get('Score', 0) >= 60 or "CRITICAL" in str(ev.get('Type', ''))]
         # [Refinement] Timeline Aggregation (Mermaid)
@@ -448,6 +814,8 @@ class LachesisRenderer:
                     elif "ANTI" in ev_cat: icon = "🗑️"; style = ":::anti"
                     elif "PERSIST" in ev_cat: icon = "⚓"; style = ":::persist"
                     elif "INITIAL" in ev_cat: icon = "🎣"; style = ":::init"
+                    elif "WEBSHELL" in ev_cat: icon = "🕸️"; style = ":::web"
+                    elif "LATERAL" in ev_cat: icon = "🐛"; style = ":::lateral"
                     elif "PHISH" in ev_cat: icon = "🎣"; style = ":::phishing"
                     label = f"{t_str} {icon} {s_sum}"
                     target_list.append(f"{node_id}[\"{label}\"]{style}")
@@ -496,59 +864,122 @@ class LachesisRenderer:
         return "\n".join(f)
 
     def _render_attack_chain_mermaid(self, visual_iocs):
-        web_events = []
-        file_events = []
+        """
+        [User Request] Convert to Sequence Diagram for better readability.
+        Phases: Prep -> Phishing -> Exec -> Recon -> Anti
+        """
+        # 0. Localization Map
+        is_jp = self.lang == 'jp'
+        txt_map = {
+            "p_prep": "🛠️ 準備段階" if is_jp else "🛠️ Prep/Tools",
+            "p_phish": "🎣 初期侵入" if is_jp else "🎣 Initial Access",
+            "p_exec": "⚙️ 実行・永続化" if is_jp else "⚙️ Execution",
+            "p_recon": "🔍 偵察活動" if is_jp else "🔍 Recon/Exfil",
+            "p_anti": "🧹 証拠隠滅" if is_jp else "🧹 Anti-Forensics",
+            "note_time": "📅 タイムライン範囲: " if is_jp else "📅 Timeline Scope: ",
+            "msg_prep": "攻撃ツールを事前配置 ({}件)" if is_jp else "Tools Staged ({} items)",
+            "msg_phish": "LNK実行 / ペイロード展開" if is_jp else "LNKs/Payloads Triggered",
+            "msg_exec": "不正プロセス実行 / 侵害活動" if is_jp else "Malicious Process Activity",
+            "msg_recon": "情報持ち出し / 内部偵察" if is_jp else "Exfil & Cleanup Initiated",
+            "note_anti": "⚠️ 証拠隠滅 / Timestomp検知" if is_jp else "⚠️ Evidence Wiping/Timestomp Detected"
+        }
+
+        # 1. Bucket Events by Phase
+        prep_events = []
+        phish_events = []
         exec_events = []
-        c2_events = []
-        lateral_events = []
+        recon_events = []
+        anti_events = []
+        
         for ioc in visual_iocs:
             tag = str(ioc.get('Tag', ''))
-            typ = str(ioc.get('Type', ''))
-            if "WEB_INTRUSION" in tag or "WEB_ATTACK" in tag: web_events.append(ioc)
-            elif "C2_CALLBACK" in tag: c2_events.append(ioc)
-            elif "LATERAL_MOVEMENT" in tag: lateral_events.append(ioc)
-            elif "EXEC" in typ or "Process" in typ: exec_events.append(ioc)
-            elif "DROP" in typ or "FILE" in typ or "PHISHING" in typ: file_events.append(ioc)
-        if not (web_events or c2_events or lateral_events): return ""
-        f = []
-        f.append("\n### 🔗 Attack Chain Visualization (Causality)\n")
-        f.append("```mermaid")
-        f.append("graph TD")
-        f.append("    classDef web fill:dodgerblue,stroke:darkblue,color:white,stroke-width:2px;")
-        f.append("    classDef file fill:orange,stroke:darkorange,color:black,stroke-width:2px;")
-        f.append("    classDef exec fill:crimson,stroke:darkred,color:white,stroke-width:2px;")
-        f.append("    classDef c2 fill:purple,stroke:indigo,color:white,stroke-width:2px;")
-        f.append("    classDef lateral fill:gold,stroke:orange,color:black,stroke-width:2px;")
-        
-        node_id = 0
-        def dump_nodes(evs, label, style):
-            nonlocal node_id
-            ids = []
-            if evs:
-                f.append(f"    subgraph {label.split(' ')[0]} [\"{label}\"]")
-                for ev in evs[:5]:
-                    val = self._get_short_summary(ev)
-                    nid = f"N{node_id}"
-                    f.append(f"        {nid}[\"{val}\"]:::{style}")
-                    ids.append(nid)
-                    node_id += 1
-                f.append("    end")
-            return ids
-        
-        web_ids = dump_nodes(web_events, "WEB 🌐 Web Anomalies", "web")
-        file_ids = dump_nodes(file_events, "FILES 📁 File Changes", "file")
-        exec_ids = dump_nodes(exec_events, "EXEC ⚡ Execution", "exec")
-        c2_ids = dump_nodes(c2_events, "C2 📡 C2 Comm", "c2")
-        lat_ids = dump_nodes(lateral_events, "LAT 🦀 Lateral Move", "lateral")
+            val = str(ioc.get('Value', ''))
+            
+            # Classification Logic
+            if "SYSINTERNALS" in tag or "ADMIN_TOOL" in tag or "Uncommon" in tag:
+                prep_events.append(ioc)
+            elif "PHISHING" in tag or "Visual_IOC" in tag:
+                phish_events.append(ioc)
+            elif "RECON" in tag or "EXFIL" in tag or "Network" in tag:
+                recon_events.append(ioc)
+            elif "TIMESTOMP" in tag or "WIPE" in tag or "ANTIFORENSIC" in tag or "CCleaner" in val:
+                anti_events.append(ioc)
+            elif "EXEC" in tag or "Process" in tag or "Run" in val:
+                exec_events.append(ioc)
+                
+        if not (prep_events or phish_events or exec_events or recon_events or anti_events):
+            return ""
 
-        if web_ids and file_ids: f.append(f"    WEB --> FILES")
-        if file_ids and exec_ids: f.append(f"    FILES --> EXEC")
-        if exec_ids and c2_ids: f.append(f"    EXEC --> C2")
-        if exec_ids and lat_ids: f.append(f"    EXEC --> LAT")
-        if web_ids and exec_ids and not file_ids: f.append(f"    WEB --> EXEC")
+        f = []
+        f.append("\n### 🏹 Attack Flow Visualization (Sequence Identity)\n")
+        f.append("```mermaid")
+        f.append("sequenceDiagram")
+        # Define Participants with Icons
+        f.append(f"    participant Prep as {txt_map['p_prep']}")
+        f.append(f"    participant Phishing as {txt_map['p_phish']}")
+        f.append(f"    participant Exec as {txt_map['p_exec']}")
+        f.append(f"    participant Recon as {txt_map['p_recon']}")
+        f.append(f"    participant Anti as {txt_map['p_anti']}")
+        
+        # Note for Timeline
+        dates = sorted([x.get('Time') for x in visual_iocs if x.get('Time')])
+        if dates:
+            start_d = dates[0].split('T')[0]
+            end_d = dates[-1].split('T')[0]
+            date_label = start_d if start_d == end_d else f"{start_d} ~ {end_d}"
+            f.append(f"    Note over Prep,Anti: {txt_map['note_time']}{date_label}")
+
+        # Helper to summarize bucket
+        # [MODIFIED] Added Truncation and Newline Stack
+        def summarize(evs):
+            if not evs: return ""
+            vals = [str(e.get('Value', '')).split('\\')[-1] for e in evs]
+            uniq = sorted(list(set(vals)))
+            
+            lines = []
+            for i, val in enumerate(uniq):
+                if i >= 2: # Max 2 lines
+                    lines.append(f"(+{len(uniq)-2} more..)")
+                    break
+                # Truncate to 25 chars
+                if len(val) > 25: val = val[:23] + ".."
+                lines.append(val)
+            
+            return "<br/>".join(lines)
+
+        # Generate Connections (Story Flow)
+        # 1. Prep -> Phishing
+        if prep_events:
+            msg = summarize(prep_events)
+            f.append(f"    Prep->>Phishing: {txt_map['msg_prep'].format(len(prep_events))}")
+            f.append(f"    Note right of Prep: {msg}")
+        
+        # 2. Phishing -> Exec
+        if phish_events:
+            msg = summarize(phish_events)
+            f.append(f"    Phishing->>Exec: {txt_map['msg_phish']}")
+            f.append(f"    Note right of Phishing: {msg}")
+
+        # 3. Exec -> Recon
+        if exec_events:
+            msg = summarize(exec_events)
+            f.append(f"    Exec->>Recon: {txt_map['msg_exec']}")
+            f.append(f"    Note right of Exec: {msg}")
+            
+        # 4. Recon -> Anti
+        if recon_events:
+            msg = summarize(recon_events)
+            f.append(f"    Recon->>Anti: {txt_map['msg_recon']}")
+            f.append(f"    Note right of Recon: {msg}")
+
+        # 5. Anti Note
+        if anti_events:
+            msg = summarize(anti_events)
+            f.append(f"    Note right of Anti: {txt_map['note_anti']}")
+            f.append(f"    Note right of Anti: {msg}")
+
         f.append("```\n")
-        f.append("> **Reading Guide:** Blue = Web, Orange = File, Red = Execution, Purple = C2, Gold = Lateral\n\n")
-        return "\n".join(f)
+        return "\n".join(f).replace("VOID_VISUALIZATION", "-") # Safety replace just in case
 
     def _render_plutos_section_text(self, dfs):
         f_mock = []
@@ -556,6 +987,10 @@ class LachesisRenderer:
             def write(self, s): f_mock.append(s)
         self._write_plutos_section(MockFile(), dfs)
         return "".join(f_mock)
+
+    def _render_plutos_section_text_OLD_UNUSED(self, dfs):
+        # Kept for reference if needed, but logic moved to _render_plutos_section_text
+        pass
 
     def _write_plutos_section(self, f, dfs):
         f.write("\n## 🌐 5. 重要ネットワークおよび持ち出し痕跡 (Critical Network & Exfiltration)\n")

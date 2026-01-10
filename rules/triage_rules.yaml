@@ -316,14 +316,14 @@ threat_signatures:
     score: 100
     target: "FileName"
     condition: "regex"
-    pattern: "(?i)^(c99|r57|b374k|wso|shell|cmd|uploader|minishell|phpspy)[^\\.]*\\.(php|jsp|asp|aspx|cer|pl|cgi)$"
+    pattern: "(?i)^(c99|r57|b374k|wso|shell|cmd|uploader|minishell|phpspy|phpshell)[^\\.]*\\.(php|jsp|asp|aspx|cer|pl|cgi)$"
 
   - name: "WebShell (Broad Match)"
     tag: "WEBSHELL"
     score: 80
     target: "FileName"
     condition: "regex"
-    pattern: "(?i)(c99|r57|wso|shell|cmd|uploader)[^\\\\]*\\.(php|jsp|asp|aspx)"
+    pattern: "(?i)(c99|r57|wso|shell|cmd|uploader|phpshell|weevely|alfa)[^\\\\]*\\.(php|jsp|asp|aspx)"
 
   - name: "Rootkit (Hacker Defender)"
     tag: "ROOTKIT"
@@ -338,6 +338,29 @@ threat_signatures:
     target: "FileName"
     condition: "regex"
     pattern: "(?i)(tmpudvfh|tmpbrjvl|^[a-z]{8})\\.(php|aspx)$"
+
+  # [NEW] Vulnerable Application Detection
+  - name: "Known Vulnerable Application (DVWA)"
+    tag: "VULN_APP_DETECTED"
+    score: 100
+    target: "ParentPath"
+    condition: "regex"
+    pattern: "(?i)(\\\\dvwa\\\\|/dvwa/|damn.*vulnerable)"
+
+  - name: "Known Vulnerable Application (WebGoat/Mutillidae)"
+    tag: "VULN_APP_DETECTED"
+    score: 100
+    target: "ParentPath"
+    condition: "regex"
+    pattern: "(?i)(webgoat|mutillidae|juiceshop|bwapp|hackazon)"
+
+  # [NEW] PHP in Web Directory (Suspicious Upload)
+  - name: "PHP Created in Web Directory"
+    tag: "WEB_PHP_UPLOAD"
+    score: 150
+    target: "ParentPath"
+    condition: "regex"
+    pattern: "(?i)(htdocs|wwwroot|inetpub|public_html).*\\.php$"
 
   - name: "Suspicious IP Trace"
     tag: "IP_TRACE"

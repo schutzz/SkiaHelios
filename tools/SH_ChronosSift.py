@@ -168,7 +168,7 @@ class ChronosEngine:
             sysinternals_score = self._get_sysinternals_score(filename)
             if sysinternals_score is not None:
                 tag = "SYSINTERNALS_TIMESTOMP" if not self.is_forensic_host else "INFO_FORENSIC_TOOL"
-                results.append({"score": sysinternals_score, "tag": tag, "anomaly": "VOID_VISUALIZATION"})
+                results.append({"score": sysinternals_score, "tag": tag, "anomaly": "-"})
                 continue
             
             # Check target extensions
@@ -180,9 +180,9 @@ class ChronosEngine:
             has_double_ext = bool(re.search(r"\.(jpg|png|pdf|docx|xlsx|txt|zip|rar)\.lnk$", filename_lower))
             
             if is_target_ext:
-                results.append({"score": 300, "tag": "CRITICAL_NULL_TIMESTOMP", "anomaly": "VOID_VISUALIZATION"})
+                results.append({"score": 300, "tag": "CRITICAL_NULL_TIMESTOMP", "anomaly": "-"})
             elif is_lnk and has_double_ext:
-                results.append({"score": 250, "tag": "CRITICAL_PHISHING_LNK", "anomaly": "VOID_VISUALIZATION"})
+                results.append({"score": 250, "tag": "CRITICAL_PHISHING_LNK", "anomaly": "-"})
             elif is_lnk:
                 results.append({"score": 0, "tag": "INFO_NULL_TIMESTAMP", "anomaly": ""})
             else:

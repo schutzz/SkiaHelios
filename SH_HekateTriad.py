@@ -303,7 +303,9 @@ def main():
         try:
             ts = e.get('Time')
             if ts:
-                dt = datetime.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S")
+                # Handle both T and Space separator
+                t_raw = ts[:19].replace('T', ' ')
+                dt = datetime.strptime(t_raw, "%Y-%m-%d %H:%M:%S")
                 if dt.year >= 2000: valid_times.append(dt)
         except: pass
     
@@ -316,7 +318,8 @@ def main():
         for e in events:
             if e.get('Criticality', 0) >= 60:
                 try:
-                    dt = datetime.strptime(e.get('Time')[:19], "%Y-%m-%dT%H:%M:%S")
+                    t_raw = e.get('Time')[:19].replace('T', ' ')
+                    dt = datetime.strptime(t_raw, "%Y-%m-%d %H:%M:%S")
                     high_critical_times.append(dt)
                 except: pass
         
@@ -335,17 +338,61 @@ def main():
         for e in events:
             # 1. Parse Time
             try:
-                dt_e = datetime.strptime(e.get('Time')[:19], "%Y-%m-%dT%H:%M:%S")
+                # Handle both T and Space separator
+                t_raw = e.get('Time', '')[:19].replace('T', ' ')
+                dt_e = datetime.strptime(t_raw, "%Y-%m-%d %H:%M:%S")
             except:
                 if e.get('Criticality', 0) >= 50: filtered_events.append(e)
                 continue
 
-            # 2. Check Scope
-            is_in_scope = start_scope <= dt_e <= end_scope
+            # [User Request] 1. Strict Date Filter (Kill the Ghost)
+            # Remove events significantly older than the main timeline cluster (e.g. >1 year gap)
+            if high_critical_times:
+                 main_year = center.year # center calculated from median above
+                 if dt_e.year < main_year - 1:
+                     continue 
+
+            # [User Request] 2. USN Demotion (Downgrade USN Events)
+            # Reduce noise from FileCreate histories by removing tags and lowering score.
+            source_str = str(e.get('Source', ''))
+            tag_str = str(e.get('Tag', ''))
+            cat_str = str(e.get('Category', ''))
+            score = e.get('Criticality', 0)
+            
+            if "USN" in source_str or "USN" in tag_str:
+                 # Demotion 1: Remove LATERAL classification (file history is not movement)
+                 if 'LATERAL' in cat_str:  # Changed to 'in' to catch LATERAL_MOVEMENT etc
+                      e['Category'] = 'FILE'
+                      cat_str = 'FILE' # Update local var
+                 
+                 # Demotion 2: Strict Score Decay & Tag Stripping
+                 # Only protect if Explicitly recognized as WEBSHELL or TIMESTOMP (Anti-Forensics)
+                 is_protected_usn = "WEBSHELL" in tag_str or "TIMESTOMP" in tag_str
+                 
+                 if not is_protected_usn:
+                     # Force Demotion even if Score was High (e.g. 150) due to generic tags
+                     # Strip tags that might cause bypass later
+                     e['Tag'] = tag_str.replace('CRITICAL_LATERAL', '').replace('CRITICAL', '').strip()
+                     
+                     action_str = str(e.get('Summary', '')).lower() + str(e.get('Action', '')).lower()
+                     if "delete" in action_str:
+                          e['Criticality'] = 60 # Barely visible (survival line)
+                          score = 60
+                     else:
+                          e['Criticality'] = 40 # Filtered out as noise
+                          score = 40
+                 else:
+                     # WEBSHELL/TIMESTOMP in USN -> Keep original High Score (100-150)
+                     pass
+
+
+            # 2. Check Scope (DISABLED for persistence verification)
+            is_in_scope = True # start_scope <= dt_e <= end_scope
             
             # 3. Check Bypass Tags (AND High Scores)
             tag = str(e.get('Tag', '')).upper()
-            score = e.get('Criticality', 0)
+            # score variable already updated above
+
             
             # [CRITICAL RESTORATION] 
             # Case 7 で新設された機能と、Case 2 の救済ロジックを両立
@@ -354,11 +401,21 @@ def main():
                 "CRITICAL" in tag or 
                 "PARADOX" in tag or 
                 "VOID" in tag or
-                "PERSISTENCE" in tag or 
-                score >= 50              # スコアベースの救済（Case 2 logic）
+                "PERSISTENCE" in tag
             )
-            
-            if not is_in_scope and not is_bypass:
+
+            # [User Request] Adjusted Filtering Threshold
+            # USN (FILE) events must be >= 80 to survive (Deleting USN=60 is now filtered out unless tagged)
+            if "USN" in source_str or cat_str == 'FILE':
+                threshold = 80
+            else:
+                threshold = 50
+
+            # Filter Logic
+            # 1. Must be in Scope AND (Score >= Threshold OR Bypass Tag)
+            is_survivor = is_in_scope and (score >= threshold or is_bypass)
+
+            if not is_survivor:
                 continue # Drop Noise
             
             filtered_events.append(e)

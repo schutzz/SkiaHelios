@@ -524,29 +524,51 @@ class LachesisAnalyzer:
             tag = str(ev.get('Tag', '')).upper()
             # [FIX] Match both ANTI_FORENSICS and ANTIFORENSICS patterns
             is_af = "ANTI_FORENSICS" in tag or "ANTIFORENSICS" in tag
+            is_webshell = "WEBSHELL" in tag or "OBFUSCATION" in tag
             score = ev.get('Criticality', 0)
 
-            if (ev['Criticality'] >= 90 or is_dual or is_af) and (ev['Category'] == 'EXEC' or ev['Category'] == 'ANTI'):
+            # [FIX] Expanded Category Acceptance for File/Lateral/Persist
+            allowed_cats = ['EXEC', 'ANTI', 'FILE', 'LATERAL', 'PERSIST']
+            
+            if (score >= 90 or is_dual or is_af or is_webshell) and (ev['Category'] in allowed_cats or "CRITICAL" in tag):
                 kws = ev.get('Keywords', [])
+                # Keyword fallback to Summary/Filename if empty
+                if not kws:
+                     tgt = ev.get('Target_Path') or ev.get('FileName') or ev.get('Summary')
+                     if tgt: kws = [tgt]
+
                 if kws:
                     kw = str(kws[0]).lower()
                     if not self.intel.is_noise(kw):
                         if is_af:
                             type_label = "ANTI_FORENSICS"
                             reason_label = "Evidence Destruction"
+                        elif is_webshell:
+                            type_label = "WEBSHELL"
+                            reason_label = "WebShell / Obfuscation"
                         elif is_dual:
                             type_label = "DUAL_USE_TOOL"
                             reason_label = "Dual-Use Tool [DROP]"
+                        elif "LATERAL" in tag or ev['Category'] == "LATERAL":
+                            type_label = "LATERAL_MOVEMENT"
+                            reason_label = "Lateral Movement"
+                        elif "PERSIST" in tag or ev['Category'] == "PERSIST":
+                            type_label = "PERSISTENCE"
+                            reason_label = "Persistence Mechanism"
+                        elif "VULN" in tag:
+                            type_label = "VULNERABLE_APP"
+                            reason_label = "Vulnerable Application"
                         else:
                             type_label = "EXECUTION"
                             reason_label = "Execution"
 
                         self._add_unique_visual_ioc({
-                            "Type": type_label, "Value": kws[0], "Path": "Process", "Note": f"Execution ({ev['Source']})",
+                            "Type": type_label, "Value": kws[0], "Path": "Process" if type_label=="EXECUTION" else "File", 
+                            "Note": f"{reason_label} ({ev['Source']})",
                             "Reason": reason_label,
                             "Time": ev.get('Time'),
                             "Score": score,
-                            "Score": score,
+                            "Tag": tag,
                             "Summary": ev.get('Summary', ''),
                             # [Fix] Preserve fields for Smart Formatting
                             "FileName": ev.get('FileName'),

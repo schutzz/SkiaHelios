@@ -237,6 +237,15 @@ web_intrusion:
     - "(?i)backdoor"
     - "(?i)pwn"
     - "(?i)hack"
+    # [NEW] Additional webshell variants
+    - "(?i)phpshell"
+    - "(?i)php-?cmd"
+    - "(?i)phpspy"
+    - "(?i)weevely"
+    - "(?i)alfa.*shell"
+    - "(?i)mini.*shell"
+    - "(?i)p0wny"
+    - "(?i)priv8"
     
   indicators:
     - "(?i)w3wp\\.exe"
@@ -247,6 +256,17 @@ web_intrusion:
     - "(?i)webshell"
     - "(?i)china.*chopper"
     - "(?i)b374k"
+    
+  # [NEW] Known Vulnerable Applications (Red Flag in Production)
+  vulnerable_apps:
+    - "(?i)\\\\dvwa\\\\|/dvwa/"
+    - "(?i)mutillidae"
+    - "(?i)webgoat"
+    - "(?i)hackazon"
+    - "(?i)juiceshop"
+    - "(?i)bwapp"
+    - "(?i)damn.*vulnerable"
+
 
 # [Section 2] Anti-Forensics Tool Detection
 anti_forensics:
