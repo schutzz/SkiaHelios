@@ -712,12 +712,30 @@ class LachesisAnalyzer:
                 if match: rb_sec = match.group(1)
             return f"USNジャーナルの整合性分析により、システム時刻の巻き戻し(約{rb_sec}秒)を検知しました。これは高度なアンチフォレンジック活動を示唆します。"
         
-        elif "MASQUERADE" in ioc_type or ".crx" in val_lower:
-            masq_app = "正規アプリケーション"
-            if "adobe" in path.lower(): masq_app = "Adobe Reader"
-            elif "microsoft" in path.lower(): masq_app = "Microsoft Office"
-            elif "google" in path.lower(): masq_app = "Google Chrome"
-            return f"{masq_app}のフォルダに、無関係なChrome拡張機能(.crx)が配置されています。これは典型的なPersistence（永続化）手法です。"
+        elif "MASQUERADE" in ioc_type:
+            # [v6.1] SysInternals / User Path Tool Detection
+            is_sysinternals = "sysinternals" in val_lower or "procexp" in val_lower or "autoruns" in val_lower or "psexec" in val_lower or "procmon" in val_lower
+            is_user_path = any(p in path.lower() for p in ["downloads", "public", "temp", "appdata"])
+            
+            if is_sysinternals or is_user_path:
+                insights = ["🔧 **攻撃ツールセットの展開を検知**"]
+                if is_sysinternals:
+                    insights.append(f"- **Tool**: `{val}` は Sysinternalsツール群（または類似ツール）と推定されます。")
+                if is_user_path:
+                    insights.append(f"- **Location**: ユーザーパス (`{path}`) から実行 - 典型的な攻撃者の手法です。")
+                insights.append("- **Intent**: 🎯 **Possible Hands-on-Keyboard Intrusion** (Short Burst Activity)")
+                insights.append("- **Note**: 管理者のメンテナンス作業ではなく、攻撃者による手動探索の可能性が高いです。")
+                return "<br/>".join(insights)
+            
+            # Standard Masquerade (e.g., .crx in Adobe folder)
+            elif ".crx" in val_lower:
+                masq_app = "正規アプリケーション"
+                if "adobe" in path.lower(): masq_app = "Adobe Reader"
+                elif "microsoft" in path.lower(): masq_app = "Microsoft Office"
+                elif "google" in path.lower(): masq_app = "Google Chrome"
+                return f"{masq_app}のフォルダに、無関係なChrome拡張機能(.crx)が配置されています。これは典型的なPersistence（永続化）手法です。"
+            else:
+                return f"正規ファイル名を偽装した不審なファイル (`{val}`) を検知しました。マルウェアの可能性があります。"
         
         elif ".lnk" in val_lower and ("SUSPICIOUS" in ioc_type or "PHISHING" in ioc_type or "PS_" in ioc_type or "CMD_" in ioc_type or "MSHTA" in ioc_type):
             insights = []

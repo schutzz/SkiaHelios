@@ -105,6 +105,14 @@ def main():
             print("\n[?] Input Path to Pivot_Config.json:")
             args.deep = input("    > ").strip().strip('"')
 
+    # --- [v2.5] Docx Generation Prompt ---
+    if not args.docx:
+        print("\n[?] Generate Docx Report? (Requires Pandoc) [y/N]:")
+        docx_in = input("    > ").strip().lower()
+        if docx_in == 'y' or docx_in == 'yes':
+            args.docx = True
+            print("    [+] Docx Generation ENABLED")
+
     out_dir = Path("Helios_Output") / f"{args.case}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     out_dir.mkdir(parents=True, exist_ok=True)
     

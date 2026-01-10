@@ -449,7 +449,8 @@ def main():
     if args.docx:
         try:
             import subprocess
-            subprocess.run(["python", "tools/SH_MidasTouch.py", "-f", str(output_md)], check=False)
+            print(f"    [*] Attempting to generate Docx report via SH_MidasTouch...")
+            subprocess.run(["python", "tools/SH_MidasTouch.py", str(output_md)], check=False)
         except: pass
 
 if __name__ == "__main__":

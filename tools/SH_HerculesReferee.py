@@ -16,6 +16,7 @@ from tools.detectors.lnk_detector import LnkDetector
 from tools.detectors.network_detector import NetworkDetector
 from tools.detectors.user_activity_detector import UserActivityDetector
 from tools.detectors.noise_filter import NoiseFilter
+from tools.detectors.activity_timeline_detector import ActivityTimelineDetector, LotLClusterDetector
 
 # ============================================================
 #  SH_HerculesReferee v5.0 [HERCULES UNBOUND]
@@ -98,6 +99,8 @@ class HerculesReferee:
             LnkDetector(self.config),
             NetworkDetector(self.config),
             UserActivityDetector(self.config),
+            ActivityTimelineDetector(self.config),   # NEW: InFocus analysis
+            LotLClusterDetector(self.config),        # NEW: LotL cluster detection
             NoiseFilter(self.config) # Last to filter/silence
         ]
         

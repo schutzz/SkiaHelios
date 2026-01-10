@@ -59,13 +59,32 @@ class NoiseFilter(BaseDetector):
             pl.when(is_time_event & is_legit_agent).then(pl.lit("INFO_VM_TIME_SYNC")).otherwise(pl.col("Tag")).alias("Tag")
         ])
         
-        # (B) System File Whitelisting
+        # (B) System File Whitelisting [v6.0 - Enhanced for Case7]
         # (Timestomp/AF判定) AND (システムパス OR システムファイル) -> Demote
         is_timestomp_or_af = pl.col("Tag").str.contains("TIMESTOMP") | pl.col("Tag").str.contains("ANTI_FORENSICS")
         
         is_system_item = pl.lit(False)
         target_col = "Target_Path" if "Target_Path" in cols else None
         fname_col = "FileName" if "FileName" in cols else None
+        
+        # [NEW v6.0] Trusted System Paths (Score -> 0 if no execution evidence)
+        trusted_system_pattern = r"(?i)\\\\windows\\\\(system32|syswow64|winsxs)\\\\"
+        is_trusted_system = pl.lit(False)
+        if target_col:
+            is_trusted_system = pl.col(target_col).str.contains(trusted_system_pattern)
+        
+        # [NEW v6.1] User/Suspicious Paths (Score BOOST for Timestomp)
+        user_path_pattern = r"(?i)(\\\\users\\\\public\\\\|\\\\downloads\\\\|\\\\temp\\\\|\\\\appdata\\\\local\\\\temp\\\\|\\\\programdata\\\\)"
+        is_user_path = pl.lit(False)
+        if target_col:
+            is_user_path = pl.col(target_col).str.contains(user_path_pattern)
+        
+        # [NEW v6.0] Execution Evidence Check
+        execution_artifacts = ["UserAssist", "Amcache", "Prefetch", "Shimcache", "AppCompatCache", "Process"]
+        has_execution_evidence = pl.lit(False)
+        if "Artifact_Type" in cols:
+            exec_pattern = "(?i)(" + "|".join(execution_artifacts) + ")"
+            has_execution_evidence = pl.col("Artifact_Type").str.contains(exec_pattern)
         
         if target_col and sys_paths:
             for pat in sys_paths:
@@ -79,16 +98,34 @@ class NoiseFilter(BaseDetector):
         # Even if it is a system file (e.g. vssadmin), if it has a CRITICAL tag or Score > 200, do NOT demote.
         is_critical = pl.col("Tag").str.contains("CRITICAL") | (pl.col("Threat_Score") >= 200)
         
-        # Demote ONLY if it's (Timestomp/AF) AND (System Item) AND (NOT Critical)
-        should_demote = is_timestomp_or_af & is_system_item & (~is_critical)
+        # [NEW v6.0] COMPLETE ZERO for trusted system files without execution
+        # If Timestomp + Trusted System Path + NO Execution Evidence -> Score = 0
+        should_zero = is_timestomp_or_af & is_trusted_system & (~has_execution_evidence) & (~is_critical)
+        
+        # Standard demotion for other system items
+        should_demote = is_timestomp_or_af & is_system_item & (~is_critical) & (~should_zero)
+        
+        # [NEW v6.1] BOOST for User Path Timestomp - これは偽装ファイルの可能性が高い
+        # If Timestomp + User Path -> Score BOOST +150
+        should_boost = is_timestomp_or_af & is_user_path & (~is_trusted_system)
         
         df = df.with_columns([
-            pl.when(should_demote)
+            # Score adjustments: Boost user path timestomps, Zero trusted system, Demote others
+            pl.when(should_boost)
+              .then(pl.col("Threat_Score") + 150)
+              .when(should_zero)
+              .then(0)
+              .when(should_demote)
               .then((pl.col("Threat_Score") / 4).cast(pl.Int64))
               .otherwise(pl.col("Threat_Score"))
               .alias("Threat_Score"),
               
-            pl.when(should_demote)
+            # Tag update
+            pl.when(should_boost)
+              .then(pl.format("{},CRITICAL_USER_PATH_TIMESTOMP", pl.col("Tag")))
+              .when(should_zero)
+              .then(pl.lit("TIMESTOMP_BENIGN"))
+              .when(should_demote)
               .then(pl.format("{},LOW_CONFIDENCE_SYSTEM_FILE", pl.col("Tag")))
               .otherwise(pl.col("Tag"))
               .alias("Tag")

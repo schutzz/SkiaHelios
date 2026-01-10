@@ -20,6 +20,31 @@ persistence_targets:
     pattern: "ScheduledTasks"
 
 # ==========================================
+# 🦁 Living off the Land (LotL) Detection
+# ==========================================
+living_off_the_land:
+  description: "Native OS tools commonly abused by attackers for reconnaissance/discovery"
+  score_single: 30
+  score_cluster_threshold: 2   # 2つ以上でクラスタ判定
+  score_cluster_bonus: 120     # クラスタ時のボーナススコア
+  tools:
+    - whoami.exe
+    - ipconfig.exe
+    - net.exe
+    - net1.exe
+    - netstat.exe
+    - systeminfo.exe
+    - tasklist.exe
+    - query.exe
+    - nltest.exe
+    - dsquery.exe
+    - cmdkey.exe
+    - nslookup.exe
+    - arp.exe
+    - route.exe
+    - hostname.exe
+
+# ==========================================
 # 🛠️ Dual-Use / Admin Tools Configuration
 # ==========================================
 dual_use_tools:
@@ -405,12 +430,20 @@ threat_signatures:
     condition: "regex"
     pattern: "(?i)(\\.(jpg|pdf|doc|docx|png|xlsx)\\.lnk|.*(adorable|cute|kitten|cats|invoice|payment|receipt).*\\.lnk)$"
 
-  - name: "Suspicious CRX (Adobe Masquerade)"
+  # [MODIFIED v6.0] Context-based CRX scoring
+  - name: "CRX in Suspicious Path (Temp/Public/Downloads)"
+    tag: "SUSPICIOUS_CRX_DROPPED"
+    score: 150
+    target: "Target_Path"
+    condition: "regex"
+    pattern: "(?i)(\\\\Temp\\\\|\\\\Public\\\\|\\\\Downloads\\\\).*\\.crx$"
+
+  - name: "CRX Adobe Masquerade"
     tag: "CRITICAL_MASQUERADE"
-    score: 300
+    score: 200
     target: "ParentPath"
     condition: "regex"
-    pattern: "(?i)(Adobe|Acrobat|Program Files.*Adobe).*(extensions|plugins|js).*\\.crx$"
+    pattern: "(?i)(Adobe|Acrobat|Program Files.*Adobe).*(extensions|plugins).*\\.crx$"
 
   - name: "Suspicious Notification Asset (Timestomp)"
     tag: "SUSP_TIMESTOMP_NOTIF"

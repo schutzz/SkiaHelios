@@ -61,6 +61,7 @@ class ChaosGrasp:
         if "amcache" in fname: return "AMCACHE"
         if "recentdocs" in fname: return "RECENT_DOCS"
         if "evtxecmd" in fname or "eventlog" in fname: return "EVENT_LOG"
+        if "activity" in fname and ".csv" in fname: return "ACTIVITY_TIMELINE"  # NEW: Windows Activity Timeline
         if "registry" in fname or "system" in fname or "ntuser" in fname: return "REGISTRY_GENERIC"
         return None
 
@@ -101,6 +102,7 @@ class ChaosGrasp:
                 elif artifact_type == "REG_RUNMRU": self._add_registry_mru(lf, csv_path, "RunMRU", "Execution_Intent")
                 elif artifact_type == "REG_OPENSAVEMRU": self._add_registry_mru(lf, csv_path, "OpenSaveMRU", "File_Access_Dialog")
                 elif artifact_type == "REG_LASTVISITEDMRU": self._add_registry_mru(lf, csv_path, "LastVisitedMRU", "Folder_Access_Dialog")
+                elif artifact_type == "ACTIVITY_TIMELINE": self._add_activity_timeline(lf, csv_path)  # NEW
             except Exception: pass
 
     def _get_col(self, lf, candidates, default=None):
@@ -247,6 +249,45 @@ class ChaosGrasp:
         name_col = self._get_col(lf, ["Name", "FileName"], "Unknown_App")
         plan = self._common_transform(lf, t_name, "System", "Amcache", name_col, name_col, "Artifact_Write")
         if plan is not None: self.lazy_plans.append(plan.with_columns(pl.lit(str(path)).alias("Source_File")))
+
+    def _add_activity_timeline(self, lf, path):
+        """Parse Windows Activity Timeline (ActivitiesCache.db) CSV - v6.0 SysInternals Hunter"""
+        schema = lf.collect_schema().names()
+        
+        # User extraction from filename (e.g., IEUser_Activity.csv)
+        m = re.search(r'([^_\\/]+)_Activity', str(path), re.IGNORECASE)
+        user = m.group(1) if m else "Unknown"
+        
+        # Required columns check
+        if "StartTime" not in schema or "Executable" not in schema:
+            return
+        
+        # Activity Type: ExecuteOpen (5) or InFocus (6)
+        activity_type_col = self._get_col(lf, ["ActivityType", "ActivityTypeOrg"], "Unknown")
+        exe_col = self._get_col(lf, ["Executable", "AppId"], "Unknown")
+        display_col = self._get_col(lf, ["DisplayText"], "")
+        payload_col = self._get_col(lf, ["Payload"], "")
+        duration_col = self._get_col(lf, ["Duration"], "")
+        
+        # Build Action: "[ActivityType] Executable - DisplayText (Duration)"
+        action_expr = (
+            pl.lit("[") + activity_type_col + pl.lit("] ") + 
+            exe_col + pl.lit(" - ") + display_col +
+            pl.when(duration_col != "").then(pl.lit(" (") + duration_col + pl.lit(")")).otherwise(pl.lit(""))
+        )
+        
+        plan = self._common_transform(
+            lf, "StartTime", user, "Activity_Timeline", 
+            action_expr, exe_col, "User_Activity"
+        )
+        
+        if plan is not None:
+            # Add Payload for InFocus detection
+            self.lazy_plans.append(plan.with_columns([
+                pl.lit(str(path)).alias("Source_File"),
+                pl.lit("[ACTIVITY]").alias("Tag")
+            ]))
+            print(f"    [+] Activity Timeline loaded: {path.name}")
 
     def _enforce_schema(self, lf):
         exprs = []

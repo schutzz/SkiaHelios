@@ -15,7 +15,7 @@
 
 Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** orchestrated by **"Hekate"**, supported by **"Chronos" (The Time Lord feat. Icarus Paradox)**, **"Hercules" (The Referee)**, the **"PlutosGate" (Network & Recon Hunter)**, and the **"YARA WebShell Scanner"** to detect advanced threats including **Account Takeover**, **Privilege Escalation**, **Evidence Wiping**, **Web Intrusion Chains**, and **Cross-Artifact Tampering**.
 
-**Current Version:** v5.9 (The Ghost Hunter: Noise Eradication & Timeline Purity)
+**Current Version:** v6.1 (The Hunter: SysInternals & LotL Detection)
 
 ---
 
@@ -43,7 +43,7 @@ graph TD
     %% Specialized Modules
     Atropos --> Chronos["⏳ Chronos\n(Time Lord)\nfeat. Icarus Paradox"]:::judge
     Atropos --> Pandora["📦 Pandora\n(File & Masquerade)"]:::engine
-    Atropos --> Hercules["⚖️ Hercules\n(Justice V3 Engine)\nLNK & CRX Hunter"]:::judge
+    Atropos --> Hercules["⚖️ Hercules\n(Justice V3 Engine)\nSysInternals Hunter"]:::judge
     Atropos --> Aion["👁️ AION\n(Persistence)"]:::engine
     Atropos --> Plutos["⚡ PlutosGate\n(Network & Exfil)\nReconnaissance Hunter"]:::judge
     
@@ -51,6 +51,7 @@ graph TD
     LNKs["Phishing LNKs"] -.-> Tartaros["⛓️ Tartaros v4.1\n(Adaptive Origin Tracing)"]:::engine
     History["Browser History"] -.-> Tartaros
     History -.-> Plutos
+    Timeline["Windows Activity"] -.-> Hercules
     
     %% Plutos Sub-Flow
     subgraph Plutos_Engine ["PlutosGate Core"]
@@ -65,18 +66,20 @@ graph TD
     Plutos --- Plutos_Engine
 
     %% Reporting Stage (Modular Lachesis)
-    subgraph Lachesis_Module ["🕸️ Lachesis v5.8 (The Weaver)"]
+    subgraph Lachesis_Module ["🕸️ Lachesis v6.1 (The Weaver)"]
         direction TB
         L_Core[("Core Controller")]:::report
         L_Intel["Intel (YAML Rules)"]:::submod
         L_Enrich["Enricher (Data Fusion)"]:::submod
         L_Analyzer["Analyzer (Event Scoring)"]:::submod
         L_Render["Renderer (Jinja2 Engine)"]:::submod
+        L_Midas["MidasTouch (Docx/PDF)"]:::submod
         
         L_Core --> L_Intel
         L_Core --> L_Enrich
         L_Core --> L_Analyzer
         L_Analyzer --> L_Render
+        L_Render --> L_Midas
     end
 
     Chronos --> L_Core
@@ -89,7 +92,8 @@ graph TD
     %% Output
     L_Render --> Report[("📜 Grimoire.md\n(Narrative Report)")]:::report
     L_Render --> Pivot[("🎯 Pivot_Config.json\n(Deep Dive)")]:::report
-    L_Render --> Mermaid[("📊 Attack Flow\n(Visual Graph)")]:::report
+    L_Render --> Mermaid[("📊 Attack Flow\n(Verb Sequence)")]:::report
+    L_Midas --> Docx[("📄 Final Report\n(DOCX)")]:::report
 ```
 
 ---
@@ -102,38 +106,32 @@ graph TD
 ### 1. The Triad Architecture (Time, Space, Narrative)
 * **Clotho (Parser):** High-speed ingestion of KAPE artifacts (MFT, USN, EventLogs, Registry, SRUM) using Rust-based Polars. Optimized for large datasets (millions of rows).
 * **Atropos (Analyzer):** "Themis" rule-based logic to cut the thread of life (separate Signal from Noise). Uses a dual-pass scoring system.
-* **Lachesis (The Weaver - Modular v5.3):** The reporting engine has been refactored into a modular architecture for scalability:
-    * **Smart Grouping (v5.2):** Automatically differentiates "High Interest" LNKs (e.g., Confirmed Downloads) from generic noise-like artifacts.
-    * **Remediation Engine:** Generates a prioritized "Recommended Actions" table (P0/P1) compliant with NIST SP 800-61.
-    * **Enricher:** Fuses data from multiple sources (e.g., matching LNK targets with Process execution).
-    * **Renderer (Jinja2):** Uses **Jinja2 Templates** to generate high-fidelity Markdown reports, separating logic from presentation.
-    * **Config Sovereign:** All intelligence rules and whitelists are now externalized in `rules/intel_signatures.yaml`.
+* **Lachesis (The Weaver - Modular v6.1):** The reporting engine has been refactored into a modular architecture for scalability:
+    * **Verb-Based Visualization (v6.1):** Replaced legacy Mermaid graphs with a **Verb-Based Sequence Diagram** (Download → Execute → Discover → Cleanup), visualizing the attack flow with precise timestamps and artifact sources (`[UA]`, `[AC]`).
+    * **Intent-Based Analysis:** Analyst Notes now explain the *likely intent* of tools (e.g., "Possible Hands-on-Keyboard Intrusion") rather than just describing the artifact.
+    * **MidasTouch (Docs Engine):** Reintegrated **SH_MidasTouch.py** to auto-generate formatted DOCX reports and "Team Sync Packages" (Evidence Zips).
 
 ### 2. The Judges (Chronos, Hercules & Plutos) - **[UPDATED]**
 * **Chronos (The Time Lord) feat. Icarus Paradox v1.4:**
     * **Time Paradox Detection:** Detects system clock rollbacks (Timestomping) by analyzing USN Journal physical offsets versus timestamps.
     * **Rollback Calculation:** Precise calculation of the time delta (e.g., `-35997 seconds`).
-* **[NEW] Icarus Paradox Engine Integration:**
-    * **Cross-Artifact Correlation:** Goes beyond single MFT analysis to cross-check consistency with Prefetch, ShimCache ($AppCompatCache$), and USN Journal.
-    * **Sun & Wax Logic:** Defines MFT as the "Immutable Sun" and other artifacts as the "Wax Wings", identifying execution records (paradoxes) that exist before the MFT creation timestamp.
-    * **Robust Column Mapping:** Implements aliasing to auto-detect and normalize column name variations (`FileName` vs `Name`, `Created0x10` vs `Timestamp_UTC`) across different parsing tools.
-    * **Match Quality Scoring:** Implements confidence-based deduction scoring for matches with missing path information.
-* **Hercules (The Referee - Justice V3):**
-    * **The Linker (Phase 4):** Correlates file artifacts (LNK, Prefetch) with **Browser History** to confirm "Execution Success" vs "Attempt".
-    * **Deep LNK Analysis:** Extracts Target Paths and Arguments to detect **PowerShell encoding**, **Hidden Windows**, and **Script Chaining**.
-    * **Anti-Forensics Detection:** Detects usage of wiping tools (e.g., `BCWipe`, `CCleaner`) and flags missing artifacts as "Deleted Evidence".
-    * **Masquerade Killer:** Instantly identifies `.crx` backdoors hiding in non-browser directories.
+* **[NEW] SysInternals Hunter (Hercules v6.1):**
+    * **Tool Suite Detection:** Identifies execution of SysInternals tools (`PsExec`, `ProcDump`, `SysInternal.exe`) and dual-use binaries often used by attackers.
+    * **LotL Detection v2.0:** Detects "Hands-on-Keyboard" activity by analyzing clusters of Native OS commands (`whoami`, `ipconfig`, `net`) executed within short time windows (10 mins).
+    * **Context-Aware Scoring:**
+        * **User Path Boost:** Significantly boosts scores for tools executed from `Downloads`, `Public`, or `Temp` folders.
+        * **Timestomp Triage:** Differentiates between benign timestamp changes in `System32` (Score 0) and malicious timestomping in User Paths (Score +150).
+    * **Activity Timeline Integration:** Ingests Windows Activity Timeline (`ActivitiesCache.db`) to track user focus (`InFocus`) and GUI interactions.
 * **PlutosGate (The Network & Recon Hunter - v3.5):**
     * **Network Thermodynamics:** Uses **SRUM** to calculate "Heat Scores" based on data burst volume (BytesSent/Received).
     * **Exfil Correlation (The Trinity):** Correlates **SRUM (Heat)**, **Browser History (URL)**, and **MFT (File Creation)** to prove data theft intent.
-    * **[NEW] Reconnaissance Analysis:** Scans browser history for suspicious search terms ("exfiltration", "exploit"), known hacking domains (Kali, Metasploit), and security conference downloads (DEFCON).
+    * **Reconnaissance Analysis:** Scans browser history for suspicious search terms ("exfiltration", "exploit"), known hacking domains (Kali, Metasploit), and security conference downloads (DEFCON).
     * **Email Hunter:** Detects `.pst/.ost` theft (Local MFT scan) and "Sent" actions in Webmail (History scan).
-    * **Safe-Mode Map:** Generates Mermaid network topology without encoding errors.
 
 ### 3. Intelligent Noise Filtering (Hestia)
 * **Hestia (Gatekeeper):** Aggressive whitelisting of OS noise.
 * **Robust Noise Filter (v4.50):** Regex-based sanitization of `Windows\Notifications`, `INetCache`, and `Temp` folders to remove 99% of false positives.
-* **Inverted Tool Filter:** Whitelists known binaries inside tool folders (e.g., `C:\Program Files\`). Anything else is flagged.
+* **System File Whitelisting (v6.0):** Dynamically reduces scores for signed binaries in `System32` unless execution evidence (`UserAssist`) is present.
 
 ### 4. Origin Tracing (Tartaros v4.1) - **[UPDATED]**
 * **Tartaros (The Adaptive Origin Tracer):** Connects isolated artifacts back to their source using advanced heuristics.
@@ -156,6 +154,8 @@ graph TD
 * Jinja2 (`pip install jinja2`)
 * Pandas (`pip install pandas`) - *Legacy support*
 * Colorama (`pip install colorama`)
+* **Pandoc** (Required for Docx generation)
+* **Mermaid-CLI** (Optional, for high-res PNG generation in reports)
 
 ### Configuration (`triage_rules.yaml`)
 SkiaHelios uses an external configuration file for "Themis" rules.
@@ -166,6 +166,13 @@ dual_use_tools:
   - anydesk
   - mimikatz
   # Add tools here to prevent them from being filtered
+living_off_the_land:
+  score_single: 30
+  score_cluster_bonus: 120
+  tools:
+    - whoami.exe
+    - ipconfig.exe
+    - net.exe
 ```
 
 ### Standard Triage Execution
@@ -178,6 +185,15 @@ python SH_HekateTriad.py \
   --timeline "C:\Work\Case2\KAPE\Timeline.csv" \
   --kape "C:\Work\Case2\KAPE\Registry_Dump"
 ```
+To run the full pipeline including **Docx Generation**:
+
+```bash
+python SH_HeliosConsole.py \
+  --dir "C:\CaseData\Case7\CSV" \
+  --case "Case7_Investigation" \
+  --lang jp
+```
+*Follow the interactive prompt to enable Docx report generation.*
 
 ### Deep Dive (Pivot)
 After Triage, use the generated `Pivot_Config.json` to investigate specific targets:
@@ -189,6 +205,14 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
 ---
 
 ## 📜 Complete Changelog
+
+### v6.1 - The Hunter (SysInternals & LotL) 🦸
+* **[Hercules]** **SysInternals Hunter:** Implemented specific detection logic for the entire SysInternals suite (`PsExec`, `ProcDump`, etc.) with dedicated Analyst Notes explaining likely attacker intent (`[Possible Hands-on-Keyboard]`).
+* **[Hercules]** **LotL Detection v2.0:** Added support for **Living off the Land (LotL)** clusters. Detects when users execute multiple discovery commands (`whoami`, `net`, `ipconfig`) within a 10-minute window, tagging the activity as `HANDS_ON_KEYBOARD`.
+* **[Visualization]** **Verb-Based Sequence:** Replaced the generic flow diagram with a Dynamic Verb-Based Sequence Diagram (`Download` → `Execute` → `Discover` → `Cleanup`), featuring precise timestamps and source attribution (`[UA]`, `[PF]`).
+* **[Judgement]** **Context-Aware Timestomp:** Refined Timestomp scoring. Timestamps anomalies in `System32` (without execution) are now silenced (Score 0), while User Path (`Downloads`, `Public`) anomalies are boosted (+150 Score) as `CRITICAL_USER_PATH_TIMESTOMP`.
+* **[Reporting]** **MidasTouch Resurrection:** Restored **SH_MidasTouch.py** integration. Users can now generate professional DOCX reports and Evidence Packages directly from the console prompt.
+* **[Fix]** **CRX Masquerade:** Fixed a logic bug where benign files were flagged as `.crx` masquerades. Detection now strictly targets Adobe/Microsoft/Google folders.
 
 ### v5.9 - The Ghost Hunter (Noise Eradication & Timeline Purity) 👻
 * **[Vis]** **Attack Flow Sequence:** Replaced the legacy Mermaid graph with a **Sequence Diagram** (`sequenceDiagram`) to clearly visualize the causality chain (Prep → Phishing → Exec → Recon → Anti) with precise timestamps and confidence indicators.

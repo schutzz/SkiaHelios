@@ -892,94 +892,127 @@ class LachesisRenderer:
         anti_events = []
         
         for ioc in visual_iocs:
-            tag = str(ioc.get('Tag', ''))
-            val = str(ioc.get('Value', ''))
+            tag = str(ioc.get('Tag', '')).upper()
+            val = str(ioc.get('Value', '')).upper()
+            typ = str(ioc.get('Type', '')).upper()
             
-            # Classification Logic
-            if "SYSINTERNALS" in tag or "ADMIN_TOOL" in tag or "Uncommon" in tag:
-                prep_events.append(ioc)
-            elif "PHISHING" in tag or "Visual_IOC" in tag:
-                phish_events.append(ioc)
-            elif "RECON" in tag or "EXFIL" in tag or "Network" in tag:
-                recon_events.append(ioc)
-            elif "TIMESTOMP" in tag or "WIPE" in tag or "ANTIFORENSIC" in tag or "CCleaner" in val:
+            # Classification Logic [v6.0 - Enhanced for Case7]
+            # Anti-Forensics: Timestomp, Wipe, CCleaner
+            if "TIMESTOMP" in tag or "WIPE" in tag or "ANTIFORENSIC" in tag or "CCLEANER" in val:
                 anti_events.append(ioc)
-            elif "EXEC" in tag or "Process" in tag or "Run" in val:
+            # Prep/Tools: SysInternals, Admin tools, Masquerade
+            elif "SYSINTERNALS" in tag or "MASQUERADE" in tag or "ADMIN_TOOL" in tag or "UNCOMMON" in tag or "SYSINTERNALS" in val:
+                prep_events.append(ioc)
+            # Initial Access: Phishing, LNK
+            elif "PHISHING" in tag or "LNK" in typ or "INIT_ACCESS" in tag:
+                phish_events.append(ioc)
+            # Recon: Discovery, Exfil, Network, LotL
+            elif "RECON" in tag or "EXFIL" in tag or "NETWORK" in tag or "LOTL" in tag or "DISCOVERY" in tag:
+                recon_events.append(ioc)
+            # Execution: Run, Process, Exec
+            elif "EXEC" in tag or "PROCESS" in tag or "RUN" in val or "EXECUTION" in typ or "EXEC" in typ:
+                exec_events.append(ioc)
+            # Fallback: High score items go to execution
+            elif int(ioc.get('Score', 0) or 0) >= 200:
                 exec_events.append(ioc)
                 
         if not (prep_events or phish_events or exec_events or recon_events or anti_events):
             return ""
 
         f = []
-        f.append("\n### 🏹 Attack Flow Visualization (Sequence Identity)\n")
+        f.append("\n### 🏹 Attack Flow Visualization (Verb-Based Timeline)\n")
         f.append("```mermaid")
         f.append("sequenceDiagram")
-        # Define Participants with Icons
-        f.append(f"    participant Prep as {txt_map['p_prep']}")
-        f.append(f"    participant Phishing as {txt_map['p_phish']}")
-        f.append(f"    participant Exec as {txt_map['p_exec']}")
-        f.append(f"    participant Recon as {txt_map['p_recon']}")
-        f.append(f"    participant Anti as {txt_map['p_anti']}")
+        
+        # [v6.1] Dynamic Participants based on actual events (Verb-Based)
+        # Define Participants with Action Verbs
+        txt_verb_map = {
+            "p_download": "📥 Download" if not is_jp else "📥 ダウンロード",
+            "p_execute": "⚡ Execute" if not is_jp else "⚡ 実行",
+            "p_discover": "🔍 Discover" if not is_jp else "🔍 偵察",
+            "p_cleanup": "🧹 Cleanup" if not is_jp else "🧹 隠滅"
+        }
+        
+        f.append(f"    participant Download as {txt_verb_map['p_download']}")
+        f.append(f"    participant Execute as {txt_verb_map['p_execute']}")
+        f.append(f"    participant Discover as {txt_verb_map['p_discover']}")
+        f.append(f"    participant Cleanup as {txt_verb_map['p_cleanup']}")
         
         # Note for Timeline
         dates = sorted([x.get('Time') for x in visual_iocs if x.get('Time')])
         if dates:
-            start_d = dates[0].split('T')[0]
-            end_d = dates[-1].split('T')[0]
+            start_d = dates[0].split('T')[0] if 'T' in str(dates[0]) else str(dates[0])[:10]
+            end_d = dates[-1].split('T')[0] if 'T' in str(dates[-1]) else str(dates[-1])[:10]
             date_label = start_d if start_d == end_d else f"{start_d} ~ {end_d}"
-            f.append(f"    Note over Prep,Anti: {txt_map['note_time']}{date_label}")
+            f.append(f"    Note over Download,Cleanup: 📅 {date_label}")
 
-        # Helper to summarize bucket
-        # [MODIFIED] Added Truncation and Newline Stack
-        def summarize(evs):
+        # Helper to summarize bucket with TIME and SOURCE
+        def summarize_with_time(evs, max_items=2):
             if not evs: return ""
-            vals = [str(e.get('Value', '')).split('\\')[-1] for e in evs]
-            uniq = sorted(list(set(vals)))
-            
             lines = []
-            for i, val in enumerate(uniq):
-                if i >= 2: # Max 2 lines
-                    lines.append(f"(+{len(uniq)-2} more..)")
-                    break
-                # Truncate to 25 chars
-                if len(val) > 25: val = val[:23] + ".."
-                lines.append(val)
+            for i, e in enumerate(evs[:max_items]):
+                val = str(e.get('Value', '')).split('\\')[-1]
+                if len(val) > 20: val = val[:18] + ".."
+                # Extract time (HH:MM)
+                time_str = str(e.get('Time', ''))
+                time_display = ""
+                if 'T' in time_str:
+                    time_display = time_str.split('T')[1][:5]
+                elif len(time_str) >= 16:
+                    time_display = time_str[11:16]
+                
+                # Extract source (Artifact Type)
+                source = ""
+                note = str(e.get('Note', ''))
+                if 'UserAssist' in note: source = "[UA]"
+                elif 'Amcache' in note: source = "[AC]"
+                elif 'Prefetch' in note: source = "[PF]"
+                elif 'Zone' in note or 'Zone.Identifier' in str(e.get('Tag', '')): source = "[ZI]"
+                
+                line = f"{time_display} {val}{source}" if time_display else f"{val}{source}"
+                lines.append(line)
+            
+            if len(evs) > max_items:
+                lines.append(f"(+{len(evs) - max_items} more)")
             
             return "<br/>".join(lines)
 
-        # Generate Connections (Story Flow)
-        # 1. Prep -> Phishing
-        if prep_events:
-            msg = summarize(prep_events)
-            f.append(f"    Prep->>Phishing: {txt_map['msg_prep'].format(len(prep_events))}")
-            f.append(f"    Note right of Prep: {msg}")
+        # Generate Connections (Verb-Based Story Flow)
+        # 1. Download Phase (Zone.Identifier, Prep tools)
+        download_events = [e for e in prep_events + phish_events if any(k in str(e.get('Tag', '')) for k in ['ZONE', 'DOWNLOAD', 'PHISH'])]
+        if not download_events:
+            download_events = prep_events[:2]  # Fallback to first prep items
         
-        # 2. Phishing -> Exec
-        if phish_events:
-            msg = summarize(phish_events)
-            f.append(f"    Phishing->>Exec: {txt_map['msg_phish']}")
-            f.append(f"    Note right of Phishing: {msg}")
-
-        # 3. Exec -> Recon
-        if exec_events:
-            msg = summarize(exec_events)
-            f.append(f"    Exec->>Recon: {txt_map['msg_exec']}")
-            f.append(f"    Note right of Exec: {msg}")
+        if download_events:
+            msg = summarize_with_time(download_events)
+            action_label = "ツール・ペイロード取得" if is_jp else "Payload Retrieved"
+            f.append(f"    Download->>Execute: {action_label}")
+            f.append(f"    Note right of Download: {msg}")
+        
+        # 2. Execute Phase (UserAssist, Amcache, Prefetch hits)
+        if exec_events or prep_events:
+            exec_combined = exec_events if exec_events else prep_events
+            msg = summarize_with_time(exec_combined)
+            action_label = "不正実行 / 侵害開始" if is_jp else "Malicious Process Started"
+            f.append(f"    Execute->>Discover: {action_label}")
+            f.append(f"    Note right of Execute: {msg}")
             
-        # 4. Recon -> Anti
+        # 3. Discover Phase (Recon, LotL)
         if recon_events:
-            msg = summarize(recon_events)
-            f.append(f"    Recon->>Anti: {txt_map['msg_recon']}")
-            f.append(f"    Note right of Recon: {msg}")
+            msg = summarize_with_time(recon_events)
+            action_label = "内部偵察 / 情報収集" if is_jp else "Internal Recon & Enum"
+            f.append(f"    Discover->>Cleanup: {action_label}")
+            f.append(f"    Note right of Discover: {msg}")
 
-        # 5. Anti Note
+        # 4. Cleanup Phase (Anti-Forensics, Timestomp)
         if anti_events:
-            msg = summarize(anti_events)
-            f.append(f"    Note right of Anti: {txt_map['note_anti']}")
-            f.append(f"    Note right of Anti: {msg}")
+            msg = summarize_with_time(anti_events)
+            action_label = "⚠️ 証拠隠滅" if is_jp else "⚠️ Evidence Destruction"
+            f.append(f"    Note right of Cleanup: {action_label}")
+            f.append(f"    Note right of Cleanup: {msg}")
 
         f.append("```\n")
-        return "\n".join(f).replace("VOID_VISUALIZATION", "-") # Safety replace just in case
+        return "\n".join(f).replace("VOID_VISUALIZATION", "-")  # Safety replace just in case
 
     def _render_plutos_section_text(self, dfs):
         f_mock = []
