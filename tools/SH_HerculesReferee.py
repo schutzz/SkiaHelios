@@ -196,8 +196,78 @@ class HerculesReferee:
         self._hunt_targets = targets
         return None
 
+    def _detect_brute_force(self, df):
+        """
+        [Brute Force Detection]
+        Detects spikes in AUTH_FAILURE events (>10 in 1 minute).
+        Adds 'BRUTE_FORCE_DETECTED' tag to the burst.
+        """
+        if "FileName" not in df.columns or df.height == 0:
+            return df
+
+        # Ensure Timestamp is datetime for rolling window
+        df = df.with_columns(pl.col("Timestamp_UTC").str.to_datetime(strict=False))
+
+        # Check for any AUTH_FAILURE events first to avoid expensive ops
+        auth_failures = df.filter(pl.col("FileName").str.contains("AUTH_FAILURE"))
+        if auth_failures.height < 10:
+            return df
+            
+        print("    -> [Hercules] Analyzing for Brute Force patterns...")
+
+        # We need to maintain original order/association, usually join by index or timestamp+uniqueness
+        # Adding a temporary index for mapping
+        df = df.with_row_index("__bf_idx")
+        
+        # Re-filter with index
+        auth_failures = df.filter(pl.col("FileName").str.contains("AUTH_FAILURE")).sort("Timestamp_UTC")
+        
+        # Rolling count: backward looking 1m window (count includes current row)
+        # Threshold > 10 means 11th event triggers it (or should we flag the whole group?)
+        # User request: "Detect >10 in 1min, tag that chunk"
+        # Backward rolling marks the 'tail' of the burst. To mark the whole burst, we'd need forward or grouping.
+        # "11回目から" (from the 11th time) implies sequential detection effectively.
+        
+        counts = auth_failures.rolling(
+            index_column="Timestamp_UTC",
+            period="1m",
+            closed="right" 
+        ).agg(
+            pl.len().alias("__rolling_count")
+        )
+        
+        # 'auth_failures' and 'counts' align by row order because rolling preserves size/order of input
+        # We can hstack them safely as long as we haven't filtered/sorted 'counts' separately (we haven't)
+        
+        auth_failures_with_counts = auth_failures.with_columns(counts["__rolling_count"])
+        
+        # Get IDs of events to tag (Threshold > 10)
+        bf_indices = auth_failures_with_counts.filter(pl.col("__rolling_count") > 10).select("__bf_idx")
+        
+        if bf_indices.height > 0:
+            bf_idx_list = bf_indices["__bf_idx"].to_list()
+            print(f"       >> [ALERT] Brute Force Detected! Tagging {len(bf_idx_list)} events.")
+            
+            df = df.with_columns(
+                pl.when(pl.col("__bf_idx").is_in(bf_idx_list))
+                .then(
+                    pl.when((pl.col("Tag").is_null()) | (pl.col("Tag") == ""))
+                    .then(pl.lit("BRUTE_FORCE_DETECTED"))
+                    .otherwise(pl.format("{},BRUTE_FORCE_DETECTED", pl.col("Tag")))
+                )
+                .otherwise(pl.col("Tag"))
+                .alias("Tag")
+            )
+            
+        return df.drop("__bf_idx")
+
     def judge(self, timeline_df):
         print("    -> [Hercules] Judging events with Modular Detectors...")
+        
+        # [Fix] Standardize FileName column if missing (ChaosGrasp uses Target_Path)
+        if "FileName" not in timeline_df.columns and "Target_Path" in timeline_df.columns:
+            timeline_df = timeline_df.with_columns(pl.col("Target_Path").alias("FileName"))
+
         
         # Initialize Required Columns
         for c in ["Threat_Score", "Tag", "Judge_Verdict"]:
@@ -211,8 +281,70 @@ class HerculesReferee:
         if text_cols:
             timeline_df = timeline_df.with_columns([pl.col(c).fill_null("") for c in text_cols])
 
+        # [Debug] Check columns
+        # print(f"    [Debug] Columns before replacement: {timeline_df.columns}")
+        
+        # [Fix] Ensure Source column exists
+        if "Source" not in timeline_df.columns:
+            timeline_df = timeline_df.with_columns(pl.lit("Unknown").alias("Source"))
+
+        # [Fix] Rename generic 'system' artifact to descriptive EID if available
+        # [Fix] Rename generic 'system' artifact to descriptive EID if available
+        # Check source columns for replacement text
+        src_col = "Event_Summary" if "Event_Summary" in timeline_df.columns else ("Action" if "Action" in timeline_df.columns else "Message")
+        
+        if "FileName" in timeline_df.columns and src_col in timeline_df.columns:
+            # Define EID Mapping
+            eid_map = {
+                "4624": "Logon Success",
+                "4625": "AUTH_FAILURE",
+                "4648": "Explicit Creds Logon",
+                "4720": "User Created",
+                "4726": "User Deleted",
+                "4728": "Member Added (Global)",
+                "4732": "Member Added (Local)",
+                "4756": "Member Added (Universal)",
+                "7045": "Service Installed",
+                "4104": "PowerShell Script",
+                "2004": "Rule Match"
+            }
+
+            # Create an expression for EID extraction
+            eid_expr = pl.col(src_col).str.extract(r"(?i)EID:(\d+)", 1)
+            
+            # Create the replacement logic
+            base_replacement = pl.col(src_col).str.split("|").list.get(0).str.strip_chars() + " (EventLog)"
+            
+            # Start with base replacement
+            refined_replacement = base_replacement
+            
+            # Apply EID mappings dynamically
+            for eid, name in eid_map.items():
+                refined_replacement = (
+                    pl.when(eid_expr == eid)
+                    .then(pl.lit(f"{name} (EID:{eid})"))
+                    .otherwise(refined_replacement)
+                )
+            
+            # specific handling for Time Rollback
+            refined_replacement = (
+                    pl.when(pl.col(src_col).str.contains(r"(?i)Rollback:"))
+                    .then(pl.lit("System Time Change"))
+                    .otherwise(refined_replacement)
+            )
+
+            timeline_df = timeline_df.with_columns(
+                pl.when(pl.col("FileName").str.to_lowercase().str.strip_chars() == "system")
+                  .then(refined_replacement)
+                  .otherwise(pl.col("FileName"))
+                  .alias("FileName")
+            )
+
         # ▼▼▼【追加1】Hunterによる事前スキャン ▼▼▼
         hunter_hits = self._hunt_specific_execution(timeline_df)
+
+        # ▼▼▼【追加1.5】Brute Force Detection ▼▼▼
+        timeline_df = self._detect_brute_force(timeline_df)
 
         # Run Detectors Pipeline
         for detector in self.detectors:
@@ -329,18 +461,128 @@ class HerculesReferee:
         except Exception as e: print(f"[-] Error loading inputs: {e}"); return
 
         # Merge Logic (Simplified)
+        if "Action" in df_timeline.columns:
+            # 1. EID 2004 Filter (Existing)
+            df_timeline = df_timeline.filter(~pl.col("Action").str.contains("EID:2004", strict=False))
+            
+            # 2. System Account Noise Filter (Noise Killer v2)
+            # Filter checks Action (Target: ...) and User columns
+            noise_accounts = r"(?i)(WDAGUtilityAccount|defaultuser0|IIS_IUSRS|Window Manager|DWM-)"
+            df_timeline = df_timeline.filter(
+                ~pl.col("Action").str.contains(noise_accounts)
+            )
+            # If User column exists, check it too
+            if "User" in df_timeline.columns:
+                df_timeline = df_timeline.filter(~pl.col("User").str.contains(noise_accounts))
+
+        # 3. EID 4104 'system' Noise Filter
+        if "Action" in df_timeline.columns and "Target_Path" in df_timeline.columns:
+             df_timeline = df_timeline.filter(
+                ~(
+                    pl.col("Action").str.contains("EID:4104") & 
+                    (pl.col("Target_Path") == "system")
+                )
+             )
+        
+        # 4. AppX / System Artifact Noise Filter (Initial Access Noise)
+        # Filter out known system components often mistaken for dropped files
+        noise_files = r"(?i)(Microsoft_PPIProjection|WindowsPowerShell_v1_0_PowerShell_ISE|AppXDeploymentServer)"
+        if "Target_Path" in df_timeline.columns:
+             df_timeline = df_timeline.filter(~pl.col("Target_Path").str.contains(noise_files))
+        if "FileName" in df_timeline.columns:
+             df_timeline = df_timeline.filter(~pl.col("FileName").str.contains(noise_files))
+
         df_combined = df_timeline 
         # (EventLog merging and Sigma logic would typically happen here or in Themis)
         # Assuming df_timeline already contains merged data or we just process timeline for this refactor scope
         
+        # ▼▼▼【NEW】MFT ADS Detection (Option B) ▼▼▼
+        df_ads_threats = self._process_mft_ads()
+        
         # Apply Judgment
         df_judged = self.judge(df_combined)
+        
+        # ▼▼▼【NEW】Merge ADS Threats into Judged Timeline ▼▼▼
+        if df_ads_threats is not None and df_ads_threats.height > 0:
+            print(f"    [+] ADS Threats Detected: {df_ads_threats.height} entries added to timeline")
+            # Align columns and concatenate
+            common_cols = [c for c in df_judged.columns if c in df_ads_threats.columns]
+            if common_cols:
+                df_ads_aligned = df_ads_threats.select(common_cols)
+                for c in df_judged.columns:
+                    if c not in df_ads_aligned.columns:
+                        df_ads_aligned = df_ads_aligned.with_columns(pl.lit("" if c != "Threat_Score" else 0).alias(c))
+                df_judged = pl.concat([df_judged, df_ads_aligned.select(df_judged.columns)], how="vertical_relaxed")
         
         # Verdict Gate & Export
         if df_judged.height > 0:
             df_judged.write_csv(output_csv)
             self._export_metadata(output_csv)
             print(f"[+] Judgment Materialized: {output_csv}")
+    
+    def _process_mft_ads(self):
+        """
+        [NEW] MFT ADS Detection (Option B)
+        Directly load MFT CSV and run ADSDetector to find ADS threats.
+        Returns DataFrame of detected ADS threats.
+        """
+        # Try standard recursive search
+        mft_files = list(self.kape_dir.rglob("*MFT_Output.csv"))
+        
+        # Fallback: Check explicitly in 'out/FileSystem' if structure differs or recursion fails
+        if not mft_files:
+            fallback_path = self.kape_dir / "out" / "FileSystem"
+            if fallback_path.exists():
+                mft_files = list(fallback_path.glob("*MFT_Output.csv"))
+        
+        if not mft_files:
+            print(f"    [i] No MFT CSV found in {self.kape_dir} (or fallback locations), skipping ADS detection")
+            return None
+        
+        mft_path = mft_files[0]
+        print(f"    -> [ADS] Processing MFT: {mft_path} (Size: {mft_path.stat().st_size} bytes)")
+        
+        try:
+            df_mft = pl.read_csv(mft_path, ignore_errors=True, infer_schema_length=0)
+            
+            # Initialize required columns
+            if "Threat_Score" not in df_mft.columns:
+                df_mft = df_mft.with_columns(pl.lit(0).alias("Threat_Score"))
+            if "Tag" not in df_mft.columns:
+                df_mft = df_mft.with_columns(pl.lit("").alias("Tag"))
+            
+            # Run ADSDetector directly
+            from tools.detectors.ads_detector import ADSDetector
+            ads_detector = ADSDetector(self.config)
+            df_analyzed = ads_detector.analyze(df_mft)
+            
+            # Filter to only ADS threats
+            df_threats = df_analyzed.filter(
+                pl.col("Tag").str.contains("ADS|RESERVED")
+            )
+            
+            if df_threats.height > 0:
+                # Add metadata for timeline integration & Map columns
+                df_threats = df_threats.with_columns([
+                    pl.lit("MFT (ADS)").alias("Source"),
+                    pl.lit("FILE").alias("Category"),
+                    # Map Created0x10 (SI Creation) to Timestamp_UTC
+                    (pl.col("Created0x10").alias("Timestamp_UTC") if "Created0x10" in df_threats.columns else pl.lit("").alias("Timestamp_UTC")),
+                    # Map FileName to Target_Path and populate Action/Summary for Timeline
+                    pl.col("FileName").alias("Target_Path"),
+                    
+                    # [Fix] Populate Action and Summary to prevent empty columns in Report
+                    pl.lit("ADS Detected").alias("Action"),
+                    pl.format("ADS Masquerading: {}", pl.col("FileName")).alias("Event_Summary")
+                ])
+                
+                print(f"       >> [ADS] Mapped {df_threats.height} entries to timeline format.")
+            
+            return df_threats
+            
+        except Exception as e:
+            print(f"    [!] ADS Detection Error: {e}")
+            return None
 
 def main():
     print_logo()

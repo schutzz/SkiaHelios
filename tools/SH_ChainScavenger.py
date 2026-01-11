@@ -643,25 +643,26 @@ class ChainScavenger:
         Returns:
             List of dict with extracted user information
         """
-        print("[*] Chain Scavenger: Initiating Dirty Hive Analysis...")
+
+        # print("[*] Chain Scavenger: Initiating Dirty Hive Analysis...")
         
         if not self.sam_files and not self.log_files:
-            print("    [-] No SAM hive files found.")
-            return []
+             pass # print("    [-] No SAM hive files found.")
+             return []
         
         all_files = self.sam_files + self.log_files
-        print(f"    [*] Scanning {len(all_files)} hive/log files...")
+        # print(f"    [*] Scanning {len(all_files)} hive/log files...")
         
         for hive_file in all_files:
             try:
-                print(f"    -> Scavenging: {hive_file.name}")
+                # print(f"    -> Scavenging: {hive_file.name}")
                 
                 with open(hive_file, 'rb') as f:
                     data = f.read()
                 
                 # Step A: Anchor Search
                 offsets = self.anchor_search(data)
-                print(f"       Found {len(offsets)} 'Names' anchors")
+                # print(f"       Found {len(offsets)} 'Names' anchors")
                 
                 for offset in offsets:
                     # Step B: Context Carving
@@ -756,7 +757,7 @@ class ChainScavenger:
                             "Threat_Tag": tags
                         })
             except Exception as e:
-                print(f"    [-] Error scavenging {hive_file.name}: {e}")
+                pass # print(f"    [-] Error scavenging {hive_file.name}: {e}")
         
         # Deduplicate Logic
         # 1. Group by RID (if present) -> Keep Longest Name
@@ -796,8 +797,8 @@ class ChainScavenger:
         
         if self.results:
             print(f"    [!] SCAVENGE SUCCESS: {len(self.results)} unique usernames extracted!")
-            for r in self.results:
-                print(f"        ⚠️ {r['Username']} (from {r['Source']})")
+            # for r in self.results:
+            #     print(f"        ⚠️ {r['Username']} (from {r['Source']})")
         else:
             print("    [-] No suspicious usernames found.")
         
@@ -808,12 +809,7 @@ def main():
     """Standalone test entry point."""
     import argparse
     
-    print("""
-    ╔═══════════════════════════════════════════╗
-    ║   Chain Scavenger v1.0 - Dirty Hive Hunter ║
-    ║   "When RECmd fails, we dig deeper."      ║
-    ╚═══════════════════════════════════════════╝
-    """)
+    print("    [Chain Scavenger v1.0 - Dirty Hive Hunter]")
     
     parser = argparse.ArgumentParser(description="Chain Scavenger: Dirty SAM Hive Analyzer")
     parser.add_argument("--raw", required=True, help="Path to raw artifacts directory")

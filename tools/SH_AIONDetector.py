@@ -33,7 +33,7 @@ class AIONEngine:
         self.raw_dir = Path(raw_dir) if raw_dir else None  # [v5.6] For ChainScavenger
         
         # ⚖️ Themis Initialization
-        print("[*] Initializing AION with Themis Rules...")
+        # print("[*] Initializing AION with Themis Rules...")
         self.loader = ThemisLoader()
         
         # Load Scan Targets from YAML
@@ -58,9 +58,9 @@ class AIONEngine:
                 with open("rules/intel_signatures.yaml", "r", encoding="utf-8") as f:
                     config = yaml.safe_load(f)
                     self.scavenger_keywords = config.get("aion_tuning", {}).get("scavenger_keywords", [])
-                    print(f"    [+] Loaded {len(self.scavenger_keywords)} Scavenger Keywords (Selective Mode).")
+                    # print(f"    [+] Loaded {len(self.scavenger_keywords)} Scavenger Keywords (Selective Mode).")
         except Exception as e:
-            print(f"    [!] Failed to load Scavenger Keywords: {e}")
+            pass # print(f"    [!] Failed to load Scavenger Keywords: {e}")
 
     def _calculate_file_hash(self, relative_path):
         if not self.mount_point or not relative_path: return "N/A", "N/A"
@@ -81,7 +81,7 @@ class AIONEngine:
         except: return "HASH_ERROR", "HASH_ERROR"
 
     def hunt_registry_persistence(self):
-        print("[*] Phase 1: Scanning Registry Hives (Themis Scope)...")
+        # print("[*] Phase 1: Scanning Registry Hives (Themis Scope)...")
         detected = []
         reg_files = list(self.target_dir.rglob("*Registry*.csv")) + list(self.target_dir.rglob("*RECmd*.csv"))
         autoruns = list(self.target_dir.rglob("Autoruns.csv"))
@@ -174,7 +174,7 @@ class AIONEngine:
         Detect user creation from SAM registry and ProfileList.
         Suspicious usernames: hacker, user1, admin, test, etc.
         """
-        print("[*] Phase 1.5: Scanning SAM/ProfileList for User Creation...")
+        # print("[*] Phase 1.5: Scanning SAM/ProfileList for User Creation...")
         detected = []
         
         # Suspicious username patterns
@@ -285,12 +285,12 @@ class AIONEngine:
             except Exception as e: pass
         
         if detected:
-            print(f"    [!] CRITICAL: {len(detected)} user accounts detected from SAM/ProfileList!")
+             pass # print(f"    [!] CRITICAL: {len(detected)} user accounts detected from SAM/ProfileList!")
         
         return detected
 
     def hunt_mft_persistence(self, mft_df):
-        print("[*] Phase 2: Scanning MFT for Hotspots...")
+        # print("[*] Phase 2: Scanning MFT for Hotspots...")
         # Note: MFT Hotspots could also be moved to YAML, but for now we keep structural logic here
         PERSISTENCE_HOTSPOTS = [r"(?i)Tasks", r"(?i)Startup"]
         RISKY_EXTENSIONS = r"(?i)\.(exe|lnk|bat|ps1|vbs|xml|dll|jar|hta)$"
@@ -327,7 +327,7 @@ class AIONEngine:
         # [v14.4] Selective ChainScavenger (Limited Release)
         scavenge_hits = []
         if self.raw_dir and self.scavenger_keywords:
-            print(f"    -> [AION] Activating Selective Chain Scavenger (Keywords: {len(self.scavenger_keywords)})...")
+            # print(f"    -> [AION] Activating Selective Chain Scavenger (Keywords: {len(self.scavenger_keywords)})...")
             try:
                 scavenger = ChainScavenger(self.raw_dir)
                 # We use the existing scavenge method but filter strictly
@@ -369,10 +369,10 @@ class AIONEngine:
                         })
                         resurrected_count += 1
                 
-                print(f"    [+] Scavenger Resurrected {resurrected_count} artifacts matching keywords!")
+                # print(f"    [+] Scavenger Resurrected {resurrected_count} artifacts matching keywords!")
 
             except Exception as e:
-                print(f"    [-] Scavenger error: {e}")
+                pass # print(f"    [-] Scavenger error: {e}")
         
         mft_hits = []
         if self.mft_csv and Path(self.mft_csv).exists():
@@ -389,8 +389,10 @@ class AIONEngine:
         raw_list = reg_hits + sam_hits + scavenge_hits + mft_hits  # Include scavenge hits
         if not raw_list: return None
         
+        if not raw_list: return None
+        
         # --- ⚖️ THEMIS JUDGMENT DAY ---
-        print("    -> Applying Themis Laws (Noise Filter & Threat Scoring)...")
+        # print("    -> Applying Themis Laws (Noise Filter & Threat Scoring)...")
         lf = pl.DataFrame(raw_list).lazy()
         cols = lf.collect_schema().names()
         
@@ -434,8 +436,9 @@ class AIONEngine:
         # 5. Meddlesome Suggestion (Osekkay)
         suggestions = self.loader.suggest_new_noise_rules(df_result)
         if suggestions:
-            print("\n[?] Themis Suggestions to reduce noise:")
-            for s in suggestions: print(s)
+            pass
+            # print("\n[?] Themis Suggestions to reduce noise:")
+            # for s in suggestions: print(s)
 
         return df_result
 

@@ -219,8 +219,15 @@ class PandoraEngine:
             file_kill_list.extend([
                 ".ldb", "-journal", ".sys", ".lst", ".cab", ".pyd", 
                 "0000", ".lock", ".log",
-                ".aux", ".bmp", ".gif", ".rbf", ".ni.dll", "mcafee.truekey" # [Added]
+                ".aux", ".bmp", ".gif", ".rbf", ".ni.dll", "mcafee.truekey"
             ])
+        
+        # [Fix] AppX Noise Filter (Global) - Moved from Triage block
+        file_kill_list.extend([
+            "microsoft_ppiprojection", "appup.intelgraphicsexperience", "microsoft.windows.cortana",
+             "{1ac14e77-02e7-4e5d-b744-2eb1ae5198b7}_windowspowershell_v1_0_powershell_ise_exe",
+             "{d65231b0-b2f1-4857-a4ce-a8e7c6ea7d27}_windowspowershell_v1_0_powershell_ise_exe"
+        ])
         
         path_kill_list = [
             "dropbox", "onedrive", "assembly", "servicing",

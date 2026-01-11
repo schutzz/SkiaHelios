@@ -6,6 +6,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from tools.lachesis.intel import TEXT_RES
 
+from tools.lachesis.narrator import NarrativeGenerator
+
 # [NEW] Jinja2 Integration
 try:
     from jinja2 import Environment, FileSystemLoader
@@ -25,13 +27,56 @@ class LachesisRenderer:
         if Environment:
             try:
                 # Use resolve() to get absolute path regardless of execution context
-                template_dir = Path(__file__).resolve().parent / "templates"
+                base_dir = Path(__file__).resolve().parent
+                template_dir = base_dir / "templates"
                 if not template_dir.exists():
                     print(f"    [!] Template directory not found: {template_dir}")
                 else:
                     self.template_env = Environment(loader=FileSystemLoader(str(template_dir)))
             except Exception as e:
                 print(f"    [!] Jinja2 Setup Failed: {e}")
+
+        # Setup Narrative Engine
+        try:
+            # Path: tools/lachesis/renderer.py -> tools/lachesis/ -> SkiaHelios/rules/narrative_templates.yaml
+            root_dir = Path(__file__).resolve().parent.parent.parent
+            narrative_path = root_dir / "rules" / "narrative_templates.yaml"
+            self.narrator = NarrativeGenerator(str(narrative_path))
+        except Exception as e:
+            print(f"    [!] Narrative Engine Setup Failed: {e}")
+            self.narrator = None
+
+    # ... (render_report method remains same until _generate_tech_narrative)
+
+    def _generate_tech_narrative(self, ioc, all_iocs):
+        """
+        [Narrator] Generates human-readable explanation using Hybrid approach:
+        1. NarrativeGenerator (YAML Templates) for static definitions.
+        2. Dynamic logic for context correlation (e.g. PowerShell ISE).
+        """
+        narrative = ""
+        
+        # 1. Try Template Engine First
+        if self.narrator:
+            narrative = self.narrator.resolve(ioc)
+        
+        # 2. Dynamic Correlation Logic (Enhancements)
+        tag = str(ioc.get("Tag", ""))
+        val = str(ioc.get("Value", "") or ioc.get("Target_Path", "") or ioc.get("FileName", ""))
+        
+        # Fallback if Template didn't match ADS but we know it is ADS (Safety Net / Hybrid)
+        if not narrative and ("ADS" in tag or "MASQUERADE" in tag):
+             # Basic Manual Fallback (if YAML missing)
+             narrative = f"### 🛡️ 隠蔽工作 (Defense Evasion: ADS)\nDetected ADS Masquerading: `{val}`"
+
+        # ADS Correlation: PowerShell ISE
+        if "ADS" in tag or "MASQUERADE" in tag:
+            has_ise = any("PowerShell_ISE" in str(i.get("Value", "")) or "PowerShell_ISE" in str(i.get("Target_Path", "")) for i in all_iocs)
+            if has_ise:
+                ise_note = "\n\n⚠️ **Context**: 直近で `PowerShell_ISE.exe` の実行痕跡が確認されており、このツールを用いてADSが作成された可能性があります。"
+                if narrative: narrative += ise_note
+
+        return narrative
 
     def render_report(self, analysis_data, analyzer, enricher, origin_stories, dfs_for_ioc, metadata):
         """
@@ -104,7 +149,7 @@ class LachesisRenderer:
                 "technical_findings": tech_findings,
                 "high_interest_lnks": high_lnks,
                 "generic_lnks": gen_lnks,
-                "attack_chain_mermaid": self._render_attack_chain_mermaid(refined_iocs), # Keep for backup/template compat
+                "attack_chain_mermaid": "",  # [FIX] Removed duplicate - mermaid_timeline already shows in Executive Summary
                 "plutos_section": self._render_plutos_section_text(dfs_for_ioc),
                 "stats": self._prepare_stats(analyzer, analysis_data, dfs_for_ioc, refined_iocs),
                 "recommendations": self._prepare_recommendations(analyzer),
@@ -483,10 +528,16 @@ class LachesisRenderer:
 
     def _prepare_origin_seeds(self, seeds, include_keyword, origin_stories, exclude=None):
         results = []
+        seen_targets = set()
         for seed in seeds:
             reason = seed.get("Reason", "")
+            target = seed.get('Target_File', '')
+            
             if include_keyword in reason and (not exclude or exclude not in reason):
-                name = seed['Target_File']
+                if target in seen_targets: continue
+                seen_targets.add(target)
+                
+                name = target
                 origin_desc = "❓ No Trace Found (Low Confidence)"
                 story = next((s for s in origin_stories if s["Target"] == name), None)
                 if story:
@@ -532,7 +583,8 @@ class LachesisRenderer:
         return processed
 
     def _prepare_technical_findings_from_list(self, ioc_list, analyzer, origin_stories):
-        high_conf_events = [ioc for ioc in ioc_list if analyzer.is_force_include_ioc(ioc) or "ANTI" in str(ioc.get("Type", ""))]
+        # [Fix] Ensure ADS/Masquerade items are included even if Score logic misses them
+        high_conf_events = [ioc for ioc in ioc_list if analyzer.is_force_include_ioc(ioc) or "ANTI" in str(ioc.get("Type", "")) or "ADS" in str(ioc.get("Tag", "")) or "MASQUERADE" in str(ioc.get("Tag", ""))]
         groups = {}
         
         for ioc in high_conf_events:
@@ -548,7 +600,12 @@ class LachesisRenderer:
                  web_note = self.txt.get('web_download_confirmed', "Web Download").format(gap=gap)
                  insight = web_note + (insight if insight else "")
             
-            ioc['Insight'] = insight
+            # [New] Narrator Logic: Generate rich description text
+            narrative = self._generate_tech_narrative(ioc, ioc_list)
+            if narrative:
+                # Append to existing insight or replace
+                insight = (insight + "\n\n" + narrative) if insight else narrative
+            
             ioc['Insight'] = insight
             groups[cat].append(ioc)
         
@@ -566,7 +623,7 @@ class LachesisRenderer:
              
         return groups
 
-        return groups
+
 
     def _condense_usn_events(self, events):
         """
@@ -726,6 +783,7 @@ class LachesisRenderer:
     def _get_event_category(self, ev):
         typ = str(ev.get('Type', '')).upper()
         tag = str(ev.get('Tag', '')).upper()
+        if "ADS" in tag or "MASQUERADE" in tag: return "EXECUTION" # Classify ADS features as Execution
         if "SYSTEM_TIME" in tag or "TIME_CHANGE" in tag or "4616" in tag or "ROLLBACK" in tag: return "SYSTEM MANIPULATION"
         if "PHISH" in typ or "LNK" in typ: return "INITIAL ACCESS"
         if "WIPE" in typ or "ANTI" in typ or "ANTIFORENSICS" in tag: return "ANTI-FORENSICS"
@@ -912,6 +970,12 @@ class LachesisRenderer:
             # Execution: Run, Process, Exec
             elif "EXEC" in tag or "PROCESS" in tag or "RUN" in val or "EXECUTION" in typ or "EXEC" in typ:
                 exec_events.append(ioc)
+            # [Fix] Include Auth Failures / Brute Force in Execution
+            elif "AUTH_FAILURE" in tag or "BRUTE_FORCE" in tag or "4625" in str(ioc.get('Note','')):
+                exec_events.append(ioc)
+            # [Fix] Include Persistence in Execution
+            elif "PERSIST" in tag or "PERSISTENCE" in typ:
+                exec_events.append(ioc)
             # Fallback: High score items go to execution
             elif int(ioc.get('Score', 0) or 0) >= 200:
                 exec_events.append(ioc)
@@ -946,73 +1010,138 @@ class LachesisRenderer:
             date_label = start_d if start_d == end_d else f"{start_d} ~ {end_d}"
             f.append(f"    Note over Download,Cleanup: 📅 {date_label}")
 
-        # Helper to summarize bucket with TIME and SOURCE
-        def summarize_with_time(evs, max_items=2):
-            if not evs: return ""
-            lines = []
-            for i, e in enumerate(evs[:max_items]):
-                val = str(e.get('Value', '')).split('\\')[-1]
-                if len(val) > 20: val = val[:18] + ".."
-                # Extract time (HH:MM)
-                time_str = str(e.get('Time', ''))
-                time_display = ""
-                if 'T' in time_str:
-                    time_display = time_str.split('T')[1][:5]
-                elif len(time_str) >= 16:
-                    time_display = time_str[11:16]
-                
-                # Extract source (Artifact Type)
-                source = ""
-                note = str(e.get('Note', ''))
-                if 'UserAssist' in note: source = "[UA]"
-                elif 'Amcache' in note: source = "[AC]"
-                elif 'Prefetch' in note: source = "[PF]"
-                elif 'Zone' in note or 'Zone.Identifier' in str(e.get('Tag', '')): source = "[ZI]"
-                
-                line = f"{time_display} {val}{source}" if time_display else f"{val}{source}"
-                lines.append(line)
-            
-            if len(evs) > max_items:
-                lines.append(f"(+{len(evs) - max_items} more)")
-            
-            return "<br/>".join(lines)
+
 
         # Generate Connections (Verb-Based Story Flow)
         # 1. Download Phase (Zone.Identifier, Prep tools)
         download_events = [e for e in prep_events + phish_events if any(k in str(e.get('Tag', '')) for k in ['ZONE', 'DOWNLOAD', 'PHISH'])]
         if not download_events:
-            download_events = prep_events[:2]  # Fallback to first prep items
+            download_events = prep_events[:2]  # Fallback
         
         if download_events:
-            msg = summarize_with_time(download_events)
-            action_label = "ツール・ペイロード取得" if is_jp else "Payload Retrieved"
-            f.append(f"    Download->>Execute: {action_label}")
-            f.append(f"    Note right of Download: {msg}")
+            sorted_dl = sorted(download_events, key=lambda x: str(x.get('Time', '')))
+            f.append(f"    Download->>Execute: {'ツール・ペイロード取得' if is_jp else 'Payload Retrieved'}")
+            self._render_group_with_date_split(f, "Download", sorted_dl, is_jp, "")
         
         # 2. Execute Phase (UserAssist, Amcache, Prefetch hits)
         if exec_events or prep_events:
             exec_combined = exec_events if exec_events else prep_events
-            msg = summarize_with_time(exec_combined)
-            action_label = "不正実行 / 侵害開始" if is_jp else "Malicious Process Started"
-            f.append(f"    Execute->>Discover: {action_label}")
-            f.append(f"    Note right of Execute: {msg}")
+            f.append(f"    Execute->>Discover: {'不正実行 / 侵害開始' if is_jp else 'Malicious Process Started'}")
+            self._render_group_with_date_split(f, "Execute", exec_combined, is_jp, "")
             
         # 3. Discover Phase (Recon, LotL)
         if recon_events:
-            msg = summarize_with_time(recon_events)
-            action_label = "内部偵察 / 情報収集" if is_jp else "Internal Recon & Enum"
-            f.append(f"    Discover->>Cleanup: {action_label}")
-            f.append(f"    Note right of Discover: {msg}")
+            f.append(f"    Discover->>Cleanup: {'内部偵察 / 情報収集' if is_jp else 'Internal Recon & Enum'}")
+            self._render_group_with_date_split(f, "Discover", recon_events, is_jp, "")
 
         # 4. Cleanup Phase (Anti-Forensics, Timestomp)
         if anti_events:
-            msg = summarize_with_time(anti_events)
-            action_label = "⚠️ 証拠隠滅" if is_jp else "⚠️ Evidence Destruction"
-            f.append(f"    Note right of Cleanup: {action_label}")
-            f.append(f"    Note right of Cleanup: {msg}")
+            # For cleanup, we want to emphasize the gap if any
+            f.append(f"    Cleanup-->>Cleanup: {'⚠️ 証拠隠滅' if is_jp else 'Evidence Destruction'}")
+            self._render_group_with_date_split(f, "Cleanup", anti_events, is_jp, "")
 
         f.append("```\n")
-        return "\n".join(f).replace("VOID_VISUALIZATION", "-")  # Safety replace just in case
+        return "\n".join(f).replace("VOID_VISUALIZATION", "-")
+
+    def _render_group_with_date_split(self, f, target_participant, events, is_jp, action_label_base):
+        """
+        Helper to invoke render notes, splitting by date if multiple dates exist.
+        """
+        if not events: return
+
+        # Sort by time first
+        events = sorted(events, key=lambda x: str(x.get('Time', '')))
+        
+        # Group by Date (YYYY-MM-DD)
+        from collections import defaultdict
+        date_groups = defaultdict(list)
+        for e in events:
+            t = str(e.get('Time', ''))
+            # Robust date extraction
+            if 'T' in t: d = t.split('T')[0]
+            elif len(t) >= 10: d = t[:10]
+            else: d = "Unknown_Date"
+            date_groups[d].append(e)
+        
+        sorted_dates = sorted(date_groups.keys())
+        
+        # Render each date group
+        last_dt_obj = None
+        
+        for d in sorted_dates:
+            group_evs = date_groups[d]
+            
+            # [Feature] Timeline Gap Visualization
+            try:
+                curr_dt_obj = datetime.strptime(d, "%Y-%m-%d")
+                if last_dt_obj:
+                    delta = (curr_dt_obj - last_dt_obj).days
+                    if delta > 1:
+                        # Insert Gap Note
+                        f.append(f"    Note over Download,Cleanup: ⏳ ... {delta} Days Gap ...")
+                last_dt_obj = curr_dt_obj
+            except: pass
+
+            # Create a summary for this date group
+            summary_html = self._summarize_with_time_simple(group_evs)
+            f.append(f"    Note right of {target_participant}: {summary_html}")
+
+    def _summarize_with_time_simple(self, evs, max_items=2):
+        if not evs: return ""
+        lines = []
+        for i, e in enumerate(evs[:max_items]):
+            val_raw = str(e.get('Value', ''))
+            val = val_raw.split('\\')[-1]
+            if len(val) > 20: val = val[:18] + ".."
+            
+            time_str = str(e.get('Time', ''))
+            time_display = ""
+            try:
+                if 'T' in time_str:
+                    dt_part = time_str.split('T')
+                    date_part = dt_part[0].split('-') # YYYY-MM-DD
+                    time_part = dt_part[1][:5] # HH:MM
+                    time_display = f"{date_part[1]}/{date_part[2]} {time_part}"
+                elif len(time_str) >= 16:
+                    date_part = time_str[:10].split('-')
+                    time_part = time_str[11:16]
+                    time_display = f"{date_part[1]}/{date_part[2]} {time_part}"
+                else:
+                        time_display = time_str[:16]
+            except:
+                    time_display = time_str
+
+            source = ""
+            note = str(e.get('Note', ''))
+            tag = str(e.get('Tag', '')).upper()
+            
+            # [Fix] Critical: Robust check for 'system' labeling
+            val_clean = val_raw.strip().lower()
+            score_int = int(e.get('Score', 0) or 0)
+            
+            if "AUTH_FAILURE" in tag or "BRUTE_FORCE_DETECTED" in tag:
+                val = "AUTH_FAILURE" 
+                if "BRUTE_FORCE_DETECTED" in tag: val += " (Brute Force)"
+            elif val_clean == "system":
+                 # Robust check: if score is critical (300), force rewrite
+                 if score_int >= 300:
+                     val = "AUTH_FAILURE (EID:4625)"
+                 elif "Logon Failure" in note or "4625" in note:
+                     val = "AUTH_FAILURE"
+            
+            if 'UserAssist' in note: source = "[UA]"
+            elif 'Amcache' in note: source = "[AC]"
+            elif 'Prefetch' in note: source = "[PF]"
+            elif 'Zone' in note: source = "[ZI]"
+            
+            line = f"{time_display} {val}{source}" if time_display else f"{val}{source}"
+            lines.append(line)
+        
+        if len(evs) > max_items:
+            lines.append(f"(+{len(evs) - max_items} more)")
+        
+        return "<br/>".join(lines)
+
 
     def _render_plutos_section_text(self, dfs):
         f_mock = []

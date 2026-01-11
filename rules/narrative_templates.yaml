@@ -1,0 +1,143 @@
+# ============================================================
+#  SkiaHelios Narrative Templates (Lachesis Engine) v1.0
+#  
+#  [Variables]
+#  {filename}, {timestamp}, {score}, {tag} are auto-injected.
+#  Context-specific vars (like {decoded_str}) are passed if available.
+# ============================================================
+
+# ------------------------------------------------------------
+# 🛡️ Defense Evasion (ADS, Obfuscation, Hiding)
+# ------------------------------------------------------------
+CRITICAL_ADS_MASQUERADE:
+  category: "Defense Evasion"
+  title: "🚨 隠蔽工作の検知 (ADS Abuse)"
+  template: |
+    **検知ファイル:** `{filename}`
+
+    NTFSの代替データストリーム（ADS）機能を悪用し、正規ファイルに見せかけて実行コードを隠蔽しています。
+
+    > 🕵️ **Analyst Insight (Origin Analysis):**
+    > 実行可能形式のADSは、通常のファイル転送では保持されません。
+    > したがって、このアーティファクトは外部から直接持ち込まれたものではなく、**この端末上でストリーム作成コマンド（コマンドライン、スクリプト、またはマルウェアのAPIコール）が実行された結果**であると判断されます。
+    >
+    > これは、**このファイルの作成時点で、攻撃者が既にこの端末上で任意のコード実行能力（Code Execution）を有していたこと**を強く示唆します。
+
+    **推奨アクション:**
+    このファイルの作成時刻（{timestamp}）直前のプロセス実行ログ（EID 4688）またはPowerShellログ（EID 4104）を調査し、ストリーム作成の実行主体（親プロセスやユーザー）を特定してください。
+  recommendation: "MFTおよびUSNジャーナルを確認し、ストリームの作成時刻とプロセスを特定してください。実ファイルを確保し、動的解析を行ってください。"
+
+CRITICAL_RESERVED_DEVICE:
+  category: "Defense Evasion"
+  title: "👻 隠蔽工作: 予約デバイス名の悪用"
+  template: |
+    Windowsシステム予約語 (`LPT1`, `CON`, `NUL`, `COMx` 等) をファイル名として悪用しています。
+    これらは通常のファイル操作APIやエクスプローラーでは削除・閲覧・アクセスが拒否されるため、攻撃者の隠れ蓑として利用されます。
+    
+    * **検知ファイル:** `{filename}`
+  recommendation: "コマンドプロンプトにて `\\\\.\\` プレフィックス (例: `del \\\\.\\C:\\Path\\LPT1.txt`) を使用して削除・アクセスしてください。"
+
+DECODED_B64:
+  category: "Defense Evasion"
+  title: "🧩 難読化解除: Base64 エンコードコマンド"
+  template: |
+    PowerShell や コマンドライン引数において、Base64 でエンコードされた不審な文字列を検出・デコードしました。
+    攻撃者は検知を回避するためにコマンドを難読化しますが、復号結果から本来の意図（ダウンローダーやC2通信）が読み取れます。
+    
+    * **検出箇所:** `{filename}` (またはコマンドライン)
+  recommendation: "デコードされた文字列内の URL や IP アドレスを確認し、通信ブロックを行ってください。"
+
+XOR_DECODED:
+  category: "Defense Evasion"
+  title: "🔓 難読化解除: XOR 暗号化ペイロード"
+  template: |
+    高エントロピーな文字列に対し、XOR ブルートフォース解析を実施した結果、既知の攻撃キーワード（`http`, `MZ`, `This program` 等）が復元されました。
+    これは単純なエンコードよりも高度な隠蔽手法であり、マルウェアのビーコン設定やシェルコードである可能性が高いです。
+  recommendation: "復元されたペイロードをバイナリとして保存し、解析を行ってください。"
+
+REVERSED_CMD:
+  category: "Defense Evasion"
+  title: "🔄 難読化: 文字列反転 (Reverse String)"
+  template: |
+    コマンド内に逆順に記述されたキーワード（例: `lehsrewoP` -> `PowerShell`）を検出しました。
+    これは簡易的なシグネチャ回避手法ですが、明らかに悪意ある操作の指標です。
+  recommendation: "実行されたコマンド全体を復元し、意図を確認してください。"
+
+# ------------------------------------------------------------
+# ⏰ Anti-Forensics (Timestomping)
+# ------------------------------------------------------------
+CRITICAL_NULL_TIMESTOMP:
+  category: "Anti-Forensics"
+  title: "⏰ 痕跡抹消: タイムスタンプ破壊 (Null Timestomp)"
+  template: |
+    ファイル `{filename}` の `$Standard_Information` 属性のタイムスタンプが `0` (または極端な過去) に設定されています。
+    これはツールの不具合ではなく、攻撃者が意図的に「作成日時」を隠そうとした痕跡です。
+  recommendation: "MFTの `$File_Name` 属性や USN ジャーナル、Amcache などの「変更が困難なタイムスタンプ」と照合し、真の実行時刻を特定してください。"
+
+TIMESTOMP_FUTURE_EXTREME:
+  category: "Anti-Forensics"
+  title: "🔮 痕跡攪乱: 未来日付への改ざん"
+  template: |
+    ファイル `{filename}` のタイムスタンプが現在時刻よりも遥か未来（例: 2099年など）に設定されています。
+    これはタイムライン解析ツールにおいて、当該ファイルをリストの最上部または最下部に飛ばし、解析者の目から隠すための手法です。
+  recommendation: "タイムラインのソート順を変更し、このファイルの周辺イベント（作成直前のプロセス実行など）を確認してください。"
+
+CRITICAL_SYSTEM_ROLLBACK:
+  category: "Anti-Forensics"
+  title: "⏳ タイムパラドックス: システム時間の巻き戻し"
+  template: |
+    USNジャーナルにおいて、シーケンス番号 (USN) が進んでいるにもかかわらず、タイムスタンプが過去に逆行する現象（Time Rollback）を検知しました。
+    攻撃者がシステム時刻を変更した状態でファイル操作を行い、その後時刻を戻した可能性があります。
+    
+    * **対象ファイル:** `{filename}`
+  recommendation: "イベントログ (System) の `Time-Service` イベントを確認し、システム時刻変更の実行ユーザーを特定してください。"
+
+# ------------------------------------------------------------
+# 🕸️ Web Exploitation (WebShells)
+# ------------------------------------------------------------
+CRITICAL_WEBSHELL:
+  category: "Persistence"
+  title: "🕷️ ウェブシェルの設置 (WebShell)"
+  template: |
+    Web公開ディレクトリ配下に、WebShell特有のパターン（`eval`, `base64_decode`, `cmd.exe` 呼び出し等）を含むスクリプトファイルが検出されました。
+    これにより、攻撃者はブラウザ経由でサーバー上で任意のコマンドを実行できる状態にあります。
+    
+    * **検知ファイル:** `{filename}`
+  recommendation: "当該ファイルを隔離し、Webサーバーのアクセスログから、このファイルを `POST` リクエスト等で叩いている IP アドレスを特定してください。"
+
+# ------------------------------------------------------------
+# 👻 Ghost Artifacts (Deleted Evidence)
+# ------------------------------------------------------------
+GHOST_FILE_EXECUTION:
+  category: "Execution"
+  title: "👻 亡霊の痕跡: 削除済みファイルの実行"
+  template: |
+    ファイルシステム上には既に存在しない（削除された）ファイルですが、ShimCache や Amcache、Prefetch に「実行された証拠」が残っています。
+    攻撃者はツールを使用後、証拠隠滅のために本体を削除しましたが、メモリやレジストリに残った痕跡（Ghost）が実行を証明しています。
+    
+    * **ファイル名:** `{filename}`
+  recommendation: "ファイル復元ツール（Carving）を試みるか、メモリダンプがあればそこからアーティファクトを抽出してください。"
+
+# ------------------------------------------------------------
+# 🎣 Persistence & Initial Access (LNK, Startup)
+# ------------------------------------------------------------
+CRITICAL_PHISHING_LNK:
+  category: "Initial Access"
+  title: "🎣 フィッシング: 二重拡張子 LNK (Double Extension)"
+  template: |
+    「画像」や「文書」に見せかけたショートカットファイル（例: `invoice.pdf.lnk`）が検出されました。
+    ユーザーにファイルを開かせることで、バックグラウンドで PowerShell やマルウェアを実行させる古典的かつ強力な手口です。
+    
+    * **検知ファイル:** `{filename}`
+  recommendation: "LNKファイルのリンク先パス（Target Path）と引数を解析し、ダウンロードされるペイロード先を特定してください。"
+
+# ------------------------------------------------------------
+# 🌐 Network & Lateral Movement
+# ------------------------------------------------------------
+SUSPICIOUS_RDP_LATERAL:
+  category: "Lateral Movement"
+  title: "🕵️ 横展開: 不審なRDP接続"
+  template: |
+    通常の業務時間外、または管理用ではない端末から、RDP（リモートデスクトップ）による接続試行が検出されました。
+    攻撃者が侵害した端末を踏み台にして、ネットワーク内部へ感染を広げようとしている可能性があります。
+  recommendation: "接続元 IP とアカウントを確認し、侵害範囲を特定してください。"

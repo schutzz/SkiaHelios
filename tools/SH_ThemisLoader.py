@@ -70,7 +70,7 @@ class ThemisLoader:
                         total_loaded += 1
             except Exception as e:
                 print(f"[!] Themis Error: Failed to load {p} ({e})")
-        print(f"[*] Themis Logic Assembled: {len(self.noise_rules)} Noise, {len(self.threat_rules)} Threat Rules from {total_loaded} files.")
+        # print(f"[*] Themis Logic Assembled: {len(self.noise_rules)} Noise, {len(self.threat_rules)} Threat Rules from {total_loaded} files.")
 
     def get_persistence_targets(self, category="Registry"):
         patterns = []

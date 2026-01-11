@@ -184,7 +184,7 @@ class LachesisAnalyzer:
             high_crit_times = sorted(set(high_crit_times))
             core_start = min(high_crit_times) - timedelta(hours=3)
             core_end = max(high_crit_times) + timedelta(hours=3)
-            time_range = f"{core_start.strftime('%Y-%m-%d %H:%M')} 〜 {core_end.strftime('%H:%M')} (UTC)"
+            time_range = f"{core_start.strftime('%Y-%m-%d %H:%M')} 〜 {core_end.strftime('%Y-%m-%d %H:%M')} (UTC)"
         
         # [v5.6] Anti-Forensics Causality Correlation
         self._correlate_antiforensics_and_user_creation()

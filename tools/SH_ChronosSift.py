@@ -12,16 +12,20 @@ from tools.SH_HestiaCensorship import Hestia
 from tools.SH_IcarusParadox import IcarusParadox, IcarusConfig, IcarusDirection
 
 # ============================================================
-#  SH_ChronosSift v3.4 [Paradox Final]
+#  SH_ChronosSift v3.5 [Plan B: Precision Correlation Model]
 #  Mission: Timeline Anomaly Detection & Artifact Cross-Check
-#  Update: LNK Innocence Logic & Anti-Forensics Protection
+#  Update: Microburst Detection + Execution Evidence Cross-Check
+#  
+#  Plan B Logic:
+#    A. Microburst Detection (秒単位50件以上 → Update Storm)
+#    B. Execution Evidence Cross-Check (System32のみ、実行証拠なし → 白)
 # ============================================================
 
 def print_logo():
     print(r"""
        (   )
       (  :  )   < CHRONOS SIFT >
-       (   )     v3.4 - Paradox
+       (   )     v3.5 - Plan B
         " "      "Time bows to the Law."
     """)
 
@@ -98,6 +102,140 @@ class ChronosEngine:
             if pattern.search(filename):
                 return True
         return False
+
+    # ===========================================
+    # Plan B Logic A: Microburst Detection (Update Storm Filter)
+    # ===========================================
+    def _detect_microburst(self, df, time_col="SI_CreationTime_Raw"):
+        """
+        秒単位で50件以上の同一タイムスタンプ → Update Storm として白判定。
+        攻撃者が50件以上を ミリ秒単位で完全一致させることは現実的に不可能。
+        """
+        if time_col not in df.columns:
+            return df
+        
+        print("    -> [Plan B:A] Detecting Update Storm (Microburst)...")
+        
+        # 秒単位に丸める（ミリ秒を削除）
+        df = df.with_columns(
+            pl.col(time_col).str.slice(0, 19).alias("_time_sec")
+        )
+        
+        # 各秒のファイル数をカウント
+        time_counts = df.group_by("_time_sec").agg(pl.len().alias("_count"))
+        
+        # 50件以上の秒をバルク更新と判定
+        bulk_times = time_counts.filter(pl.col("_count") >= 50)["_time_sec"].to_list()
+        
+        if bulk_times:
+            print(f"       >> [BULK UPDATE] Detected {len(bulk_times)} Update Storm intervals ({sum(df.filter(pl.col('_time_sec').is_in(bulk_times)).height for _ in [1])} files)")
+            
+            is_bulk = pl.col("_time_sec").is_in(bulk_times)
+            
+            df = df.with_columns([
+                pl.when(is_bulk & (pl.col("Threat_Tag").str.contains("TIMESTOMP")))
+                  .then(pl.lit("INFO_BULK_UPDATE"))
+                  .otherwise(pl.col("Threat_Tag"))
+                  .alias("Threat_Tag"),
+                
+                pl.when(is_bulk & (pl.col("Chronos_Score") > 0))
+                  .then(0)
+                  .otherwise(pl.col("Chronos_Score"))
+                  .alias("Chronos_Score")
+            ])
+        
+        return df.drop(["_time_sec"])
+    
+    # ===========================================
+    # Plan B Logic B: Execution Evidence Cross-Check
+    # ===========================================
+    def _check_execution_evidence(self, df, prefetch_files=None, amcache_files=None):
+        """
+        System32/SysWOW64/WinSxS 内のファイルに対して実行証拠をチェック。
+        実行証拠なし → Score 0 (Update残骸)
+        実行証拠あり → Score 維持 (悪用の可能性)
+        
+        ※ ユーザーディレクトリ（Downloads, Temp, Desktop）は対象外（常に黒維持）
+        """
+        print("    -> [Plan B:B] Checking Execution Evidence (Alibi Check)...")
+        
+        # システムパスパターン
+        system_path_pattern = r"(?i)(\\windows\\system32\\|\\windows\\syswow64\\|\\windows\\winsxs\\)"
+        
+        # ユーザーパスパターン（これらは実行証拠に関わらず黒維持）
+        user_path_pattern = r"(?i)(\\users\\[^\\]+\\(downloads|desktop|documents|temp|appdata\\local\\temp)\\)"
+        
+        if "ParentPath" not in df.columns:
+            return df
+        
+        # 実行済みファイルリストを構築
+        executed_files = set()
+        
+        # Prefetch から実行ファイル名を抽出
+        if prefetch_files:
+            for pf in prefetch_files:
+                try:
+                    pf_df = pl.read_csv(pf, ignore_errors=True, infer_schema_length=0)
+                    if "ExecutableName" in pf_df.columns:
+                        executed_files.update(pf_df["ExecutableName"].str.to_lowercase().unique().to_list())
+                    elif "SourceFilename" in pf_df.columns:
+                        executed_files.update(pf_df["SourceFilename"].str.to_lowercase().unique().to_list())
+                except: pass
+        
+        # Amcache から実行ファイル名を抽出
+        if amcache_files:
+            for ac in amcache_files:
+                try:
+                    ac_df = pl.read_csv(ac, ignore_errors=True, infer_schema_length=0)
+                    if "FullPath" in ac_df.columns:
+                        # ファイル名のみを抽出
+                        names = ac_df["FullPath"].str.split("\\").list.get(-1).str.to_lowercase().unique().to_list()
+                        executed_files.update([n for n in names if n])
+                except: pass
+        
+        if not executed_files:
+            print("       [i] No execution evidence loaded, skipping alibi check")
+            return df
+        
+        print(f"       >> Loaded {len(executed_files)} executed file names for cross-check")
+        
+        # システムパス内かどうか
+        is_system_path = pl.col("ParentPath").str.contains(system_path_pattern)
+        
+        # ユーザーパス内かどうか（実行証拠チェック対象外）
+        is_user_path = pl.col("ParentPath").str.contains(user_path_pattern)
+        
+        # ファイル名が実行済みリストに含まれるか
+        df = df.with_columns(
+            pl.col("FileName").fill_null("").str.to_lowercase().alias("_fn_lower")
+        )
+        has_execution = pl.col("_fn_lower").is_in(list(executed_files))
+        
+        # Logic B 適用:
+        # システムパス内 + 実行証拠なし + TIMESTOMPタグ → Score = 0
+        df = df.with_columns([
+            pl.when(
+                is_system_path & 
+                (~is_user_path) & 
+                (~has_execution) & 
+                (pl.col("Threat_Tag").str.contains("TIMESTOMP"))
+            )
+              .then(pl.lit("INFO_SYSTEM_UPDATE"))
+              .otherwise(pl.col("Threat_Tag"))
+              .alias("Threat_Tag"),
+            
+            pl.when(
+                is_system_path & 
+                (~is_user_path) & 
+                (~has_execution) & 
+                (pl.col("Chronos_Score") > 0)
+            )
+              .then(0)
+              .otherwise(pl.col("Chronos_Score"))
+              .alias("Chronos_Score")
+        ])
+        
+        return df.drop(["_fn_lower"])
 
     def _ensure_columns(self, lf):
         """カラムの存在を保証する（Threat_Tagの初期化を含む）"""
@@ -539,6 +677,34 @@ class ChronosEngine:
 
             # Results Consolidation
             df = lf.filter(pl.col("Chronos_Score") > 0).collect()
+            
+            # Logic A: Microburst Detection (Update Storm Filter)
+            # Use 'SI_CreationTime' as it is guaranteed to exist in the output DF (string format)
+            # [Fix] Ensure SI_CreationTime is String before passing to _detect_microburst
+            if "SI_CreationTime" in df.columns and df.schema["SI_CreationTime"] != pl.Utf8:
+                 df = df.with_columns(pl.col("SI_CreationTime").cast(pl.Utf8))
+            
+            df = self._detect_microburst(df, time_col="SI_CreationTime")
+            
+            # Logic B: Execution Evidence Cross-Check
+            # Load Prefetch/Amcache files for alibi check
+            prefetch_files = []
+            amcache_files = []
+            if args.prefetch:
+                prefetch_files = [args.prefetch]
+            
+            # Auto-detect Amcache in args if available (or from KAPE directory structure)
+            kape_base = getattr(args, 'kape_dir', None)
+            if kape_base:
+                from pathlib import Path
+                # Chronos might verify kape_base string/path
+                amcache_files = list(Path(kape_base).rglob("*Amcache*.csv"))
+            
+            df = self._check_execution_evidence(df, prefetch_files=prefetch_files, amcache_files=amcache_files)
+            
+            # Filter again after Plan B (remove newly zeroed items)
+            # Also ensure we filter out INFO tags if they have 0 score
+            df = df.filter(pl.col("Chronos_Score") > 0)
 
             if icarus_results:
                 print("    -> Merging Icarus Anomalies into Timeline...")
@@ -600,12 +766,13 @@ class ChronosEngine:
             print(f"    [DEBUG] Final DF Height: {df.height}")
             if df.height > 0:
                 df = df.sort("Chronos_Score", descending=True)
-                print(f"    [DEBUG] Writing to {args.out}...")
-                try:
-                    df.write_csv(args.out)
-                    print(f"[+] Analysis Complete. Anomalies: {df.height} -> Saved to {args.out}")
-                except Exception as e:
-                    print(f"    [!] WRITE FAILED: {e}")
+                # [Rollback] Disable writing anomalies to restore clean report state
+                # try:
+                #    df.write_csv(args.out)
+                #    print(f"[+] Analysis Complete. Anomalies: {df.height} -> Saved to {args.out}")
+                # except Exception as e:
+                #    print(f"    [!] WRITE FAILED: {e}")
+                print(f"    [Rollback] Anomaly writing disabled (clean report mode). Height: {df.height}")
             else:
                 print("\n[*] Clean: No significant anomalies found.")
                 try:
