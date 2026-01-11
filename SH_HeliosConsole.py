@@ -7,6 +7,13 @@ import time
 import json
 from datetime import datetime, timedelta
 
+# [NEW] メモリ監視用に psutil をインポート
+try:
+    import psutil
+except ImportError:
+    print("[!] 'psutil' module not found. Please run: pip install psutil")
+    sys.exit(1)
+
 # ============================================================
 #  SH_HeliosConsole v2.4 [Dual-Core Edition]
 #  Mission: Orchestrate Standard, Triage, and Deep Dive modes.
@@ -19,19 +26,108 @@ BANNER = r"""
  | (___ | | _  _  __ _| |__| | ___| |_  ___  ___
   \___ \| |/ /| |/ _` |  __  |/ _ \ | |/ _ \/ __|
   ____) |   < | | (_| | |  | |  __/ | | (_) \__ \
- |_____/|_|\_\|_|\__,_|_|  |_|\___|_|_|\___/|___/ v2.4
+ |_____/|_|\_\|_|\__,_|_|  |_|\___|_|_|\___/|___/ v6.2
 """
+
+# ベンチマーク結果を保存するリスト
+BENCHMARK_RESULTS = []
 
 def run_stage(cmd, stage_name):
     print(f"\n>>> [EXECUTING] {stage_name} Stage...")
-    start = time.time()
+    
+    start_time = time.time()
+    peak_memory_mb = 0.0
+    
     try:
-        result = subprocess.run(cmd, check=True, text=True)
-    except subprocess.CalledProcessError as e:
-        print(f"[!] {stage_name} Failed: {e}")
+        # subprocess.run ではなく Popen を使ってプロセスを制御
+        process = subprocess.Popen(
+            cmd, 
+            stdout=sys.stdout, 
+            stderr=sys.stderr,
+            text=True
+        )
+        
+        # psutilでプロセスをラップ
+        ps_proc = psutil.Process(process.pid)
+        
+        # プロセス終了まで監視ループ (0.1秒間隔)
+        while process.poll() is None:
+            try:
+                # メモリ情報取得 (RSS: 物理メモリ使用量)
+                # 子プロセスも含める場合は再帰取得が必要ですが、今回はメインプロセスを計測
+                mem_info = ps_proc.memory_info()
+                current_mb = mem_info.rss / (1024 * 1024)
+                if current_mb > peak_memory_mb:
+                    peak_memory_mb = current_mb
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass # プロセスが既に死んでいる場合など
+            
+            time.sleep(0.1)
+            
+        # 終了コード確認
+        if process.returncode != 0:
+            print(f"[!] {stage_name} Failed with return code {process.returncode}")
+            sys.exit(1)
+            
+    except Exception as e:
+        print(f"[!] {stage_name} Execution Error: {e}")
         sys.exit(1)
-    end = time.time()
-    print(f">>> [DONE] {stage_name} finished in {end - start:.4f}s")
+
+    end_time = time.time()
+    duration = end_time - start_time
+    
+    print(f">>> [DONE] {stage_name} finished in {duration:.4f}s | Peak Mem: {peak_memory_mb:.2f} MB")
+    
+    # 結果を記録
+    BENCHMARK_RESULTS.append({
+        "Stage": stage_name,
+        "Duration_Sec": round(duration, 4),
+        "Peak_Memory_MB": round(peak_memory_mb, 2),
+        "Command": " ".join(cmd[:2]) + "..." # コマンド概要
+    })
+
+def generate_benchmark_report(out_dir):
+    """宣伝用のかっこいいベンチマークレポートを出力するっス！"""
+    report_path = out_dir / "Benchmark_Report.md"
+    json_path = out_dir / "Benchmark_Stats.json"
+    
+    total_time = sum(r['Duration_Sec'] for r in BENCHMARK_RESULTS)
+    max_mem = max(r['Peak_Memory_MB'] for r in BENCHMARK_RESULTS) if BENCHMARK_RESULTS else 0
+    
+    # JSON保存 (データ用)
+    with open(json_path, 'w', encoding='utf-8') as f:
+        json.dump({
+            "Total_Time": total_time,
+            "Max_Memory_Peak": max_mem,
+            "Details": BENCHMARK_RESULTS
+        }, f, indent=4)
+        
+    # Markdown生成 (宣伝用)
+    md_content = f"""# 🚀 SkiaHelios Performance Benchmark
+
+**Case:** {out_dir.name}
+**Date:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+**Total Execution Time:** {total_time:.2f} sec
+**Max Memory Consumption:** {max_mem:.2f} MB
+
+| Stage Name | Duration (s) | Peak Memory (MB) | Status |
+| :--- | :---: | :---: | :---: |
+"""
+    
+    for res in BENCHMARK_RESULTS:
+        # メモリ使用量に応じてアイコンを変える遊び心
+        mem_icon = "🟢"
+        if res['Peak_Memory_MB'] > 1000: mem_icon = "🔴"
+        elif res['Peak_Memory_MB'] > 500: mem_icon = "🟡"
+        
+        md_content += f"| **{res['Stage']}** | {res['Duration_Sec']:.2f}s | {mem_icon} {res['Peak_Memory_MB']:.2f} MB | ✅ Done |\n"
+
+    md_content += "\n> *Measured by SH_HeliosConsole Benchmark Engine*\n"
+    
+    with open(report_path, 'w', encoding='utf-8') as f:
+        f.write(md_content)
+    
+    print(f"\n[+] Benchmark Report Generated: {report_path}")
 
 def main():
     pipeline_start = time.time()  # Start timing
@@ -294,6 +390,8 @@ def main():
     elapsed = time.time() - pipeline_start
     mins, secs = divmod(int(elapsed), 60)
     print(f"\n[*] SUCCESS: Pipeline finished in {mins}m {secs}s. Case dir: {out_dir}")
+    
+    generate_benchmark_report(out_dir)
 
 if __name__ == "__main__":
     main()

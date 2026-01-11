@@ -17,6 +17,8 @@ from tools.detectors.network_detector import NetworkDetector
 from tools.detectors.user_activity_detector import UserActivityDetector
 from tools.detectors.noise_filter import NoiseFilter
 from tools.detectors.activity_timeline_detector import ActivityTimelineDetector, LotLClusterDetector
+from tools.detectors.obfuscation_detector import ObfuscationDetector
+from tools.detectors.ads_detector import ADSDetector
 
 # ============================================================
 #  SH_HerculesReferee v5.0 [HERCULES UNBOUND]
@@ -96,6 +98,8 @@ class HerculesReferee:
         self.detectors = [
             WebShellDetector(self.config),
             AntiForensicsDetector(self.config),
+            ObfuscationDetector(self.config),  # Sphinx's Soul
+            ADSDetector(self.config),          # ADS Hunter
             LnkDetector(self.config),
             NetworkDetector(self.config),
             UserActivityDetector(self.config),

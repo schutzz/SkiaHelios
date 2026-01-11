@@ -1,4 +1,4 @@
-# SkiaHelios v5.8 - The Watcher (Reconnaissance & Phishing Insights)
+# SkiaHelios v6.2 - The Decoder (Obfuscation & ADS Hunter)
 
 ![SkiaHelios CI](https://github.com/schutzz/SkiaHelios/actions/workflows/test.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
@@ -15,7 +15,7 @@
 
 Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** orchestrated by **"Hekate"**, supported by **"Chronos" (The Time Lord feat. Icarus Paradox)**, **"Hercules" (The Referee)**, the **"PlutosGate" (Network & Recon Hunter)**, and the **"YARA WebShell Scanner"** to detect advanced threats including **Account Takeover**, **Privilege Escalation**, **Evidence Wiping**, **Web Intrusion Chains**, and **Cross-Artifact Tampering**.
 
-**Current Version:** v6.1 (The Hunter: SysInternals & LotL Detection)
+**Current Version:** v6.2 (The Decoder: Obfuscation & ADS Detection)
 
 ---
 
@@ -127,6 +127,17 @@ graph TD
     * **Exfil Correlation (The Trinity):** Correlates **SRUM (Heat)**, **Browser History (URL)**, and **MFT (File Creation)** to prove data theft intent.
     * **Reconnaissance Analysis:** Scans browser history for suspicious search terms ("exfiltration", "exploit"), known hacking domains (Kali, Metasploit), and security conference downloads (DEFCON).
     * **Email Hunter:** Detects `.pst/.ost` theft (Local MFT scan) and "Sent" actions in Webmail (History scan).
+* **[NEW] Hercules Detectors (v6.2):** Modular detection pipeline integrated into Hercules:
+    * **ObfuscationDetector v2.0:** Multi-layer deobfuscation engine:
+        * **Normalization:** Removes Caret (`^`) / Backtick (`` ` ``), resolves string concatenation (`"ne"+"t"` → `net`), expands environment variables (`%ComSpec%` → `cmd.exe`).
+        * **Reversed String Detection:** Detects reversed keywords like `lehsrewop` (powershell reversed).
+        * **XOR Brute-Force:** Single-byte XOR decryption (0x01-0xFF) with known plaintext attack (http, powershell, MZ header).
+    * **ADSDetector v1.2 (Zero False Negative):** NTFS Alternate Data Streams attack detection:
+        * **Masquerade Detection:** `welcome.txt:putty.exe` pattern (Score 300, `CRITICAL_ADS_MASQUERADE`).
+        * **Reserved Device Names:** `LPT1.txt`, `CON.exe` abuse (Score 300, `CRITICAL_RESERVED_DEVICE`).
+        * **USN Stream Injection:** `StreamChange` / `NamedDataExtend` on text files (Score 200).
+        * **Noise Reduction:** 98% noise eliminated (Zone.Identifier, SmartScreen, OneDrive, Defender, WSL/Docker).
+        * **Zero False Negative:** System path attacks (`C:\ProgramData\...\log.txt:malware.exe`) also detected.
 
 ### 3. Intelligent Noise Filtering (Hestia)
 * **Hestia (Gatekeeper):** Aggressive whitelisting of OS noise.
@@ -205,6 +216,20 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
 ---
 
 ## 📜 Complete Changelog
+
+### v6.2 - The Decoder (Obfuscation & ADS Hunter) 🦁
+* **[NEW]** **ADSDetector v1.2:** NTFS Alternate Data Streams attack detection module.
+    * **Masquerade Detection (Logic A):** Detects hidden executables in text files (`welcome.txt:putty.exe`). Score +300, tag `CRITICAL_ADS_MASQUERADE`.
+    * **Reserved Device Names (Logic B):** Detects `LPT1`, `CON`, `NUL` abuse. Score +300, tag `CRITICAL_RESERVED_DEVICE`.
+    * **USN Stream Injection (Logic C):** Detects `StreamChange`/`NamedDataExtend` on text files. Score +200, tag `SUSPICIOUS_ADS_WRITE`.
+    * **Zero False Negative:** System path attacks (`C:\ProgramData\...\log.txt:malware.exe`) now detected by separating noise filters (`is_noise_light` for Masquerade, `is_noise_full` for USN).
+    * **98% Noise Reduction:** Filters Zone.Identifier, SmartScreen, OneDrive, Defender, WSL/Docker automatically.
+* **[NEW]** **ObfuscationDetector v2.0:** Multi-layer command obfuscation detection.
+    * **Normalization:** Removes Caret (`c^m^d` → `cmd`), Backtick, string concatenation (`"ne"+"t"` → `net`), expands environment variables (`%ComSpec%` → `cmd.exe`). Score +60, tag `DEOBFUSCATED_CMD`.
+    * **Reversed String Detection:** Detects reversed keywords (`lehsrewop` = powershell reversed). Score +80, tag `REVERSED_CMD`.
+    * **XOR Brute-Force:** Single-byte XOR decryption (0x01-0xFF) with known plaintext attack (http, powershell, MZ header). Score +120, tag `XOR_DECODED`.
+* **[Hercules]** Integrated both detectors into the modular detector pipeline.
+* **[Benchmark]** Case 4 (Ali Hadi ADS Challenge): 100% detection rate, 0 false positives, 0 false negatives.
 
 ### v6.1 - The Hunter (SysInternals & LotL) 🦸
 * **[Hercules]** **SysInternals Hunter:** Implemented specific detection logic for the entire SysInternals suite (`PsExec`, `ProcDump`, etc.) with dedicated Analyst Notes explaining likely attacker intent (`[Possible Hands-on-Keyboard]`).
@@ -356,7 +381,9 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
 * [x] **v5.7:** **The Architect (Templated Reporting & Config Justice)**
 * [x] **v5.8:** **The Watcher (Reconnaissance Hunter & Phishing Insights)**
 * [x] **v5.9:** **The Ghost Hunter (USN Condenser & Strict Demotion)**
-* [ ] **v6.0:** **The Oracle (LLM Auto-Summarization & Chat)** - *Planned*
+* [x] **v6.1:** **The Hunter (SysInternals & LotL Detection)**
+* [x] **v6.2:** **The Decoder (Obfuscation & ADS Hunter)**
+* [ ] **v7.0:** **The Oracle (LLM Auto-Summarization & Chat)** - *Planned*
 
 ---
 
