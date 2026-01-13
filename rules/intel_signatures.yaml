@@ -1,880 +1,961 @@
-# ============================================================
-#  SkiaHelios Intelligence Signatures
-#  Project: HERCULES UNBOUND (Stabilized v2.0)
-#  Mission: Externalize threat intelligence from Python code
-# ============================================================
-
-# [Context Filtering] System File Whitelisting
-system_whitelist:
-  paths:
-    - "(?i)\\\\Windows\\\\"
-    - "(?i)\\\\System32\\\\"
-    - "(?i)\\\\SysWOW64\\\\"
-    - "(?i)\\\\WinSxS\\\\"
-    - "(?i)\\\\servicing\\\\"
-    - "(?i)\\\\Microsoft.NET\\\\"
-    - "(?i)\\\\assembly\\\\"
-    - "(?i)\\\\Installer\\\\"
-    - "(?i)\\\\Program Files\\\\Windows"
-    - "(?i)\\\\Program Files (x86)\\\\Windows"
-  
-  files:
-    - "(?i)\\.dll$"
-    - "(?i)\\.sys$"
-    - "(?i)\\.mui$"
-    - "(?i)\\.mum$"
-    - "(?i)\\.cat$"
-    - "(?i)\\.manifest$"
-    - "(?i)\\.inf$"
-    - "(?i)^ntoskrnl"
-    - "(?i)^hal\\.dll"
-    - "(?i)^kernel32"
-
-# ============================================================
-#  Reconnaissance Indicators (Pre-Attack Research Detection)
-# ============================================================
-recon_indicators:
-  # Suspicious Security Research Domains
-  suspicious_domains:
-    - "kali.org"
-    - "kali-linux.com"
-    - "metasploit.com"
-    - "exploit-db.com"
-    - "offensive-security.com"
-    - "packetstormsecurity.com"
-    - "rapid7.com/db"
-    - "cvedetails.com"
-    - "shodan.io"
-    - "hackthebox.eu"
-    - "tryhackme.com"
-    
-  # Suspicious Search Terms (Browser History/URL)
-  suspicious_search_terms:
-    - "(?i)exfiltrat"
-    - "(?i)c2.*communication"
-    - "(?i)data.*theft"
-    - "(?i)credential.*dump"
-    - "(?i)lateral.*movement"
-    - "(?i)privilege.*escalat"
-    - "(?i)reverse.*shell"
-    - "(?i)bind.*shell"
-    - "(?i)post.*exploit"
-    - "(?i)payload.*generat"
-    
-  # Security Conference/Hacking Presentations
-  suspicious_downloads:
-    patterns:
-      - "(?i)defcon.*\\.(pdf|pptx?|zip)$"
-      - "(?i)blackhat.*\\.(pdf|pptx?|zip)$"
-      - "(?i)ccc-congress.*\\.(pdf|pptx?|zip)$"
-      - "(?i)(exploit|rootkit|backdoor|shellcode|keylogger).*\\.(pdf|zip|exe)$"
-      - "(?i)(mimikatz|lazagne|procdump|psexec).*\\.(pdf|zip|exe)$"
-    score: 100
-    tag: "RECON_SECTOOLS"
-
-# [Section 1] Masquerade & Execution Detection
-masquerade:
-  legit_crx_paths:
-    - "Google\\\\Chrome\\\\.*\\\\Extensions"
-    - "Microsoft\\\\Edge\\\\.*\\\\Extensions"
-    - "BraveSoftware\\\\Brave-Browser\\\\.*\\\\Extensions"
-    - "Chromium\\\\.*\\\\Extensions"
-    - "Opera Software\\\\Opera Stable\\\\Extensions"
-    - "Vivaldi\\\\.*\\\\Extensions"
-
-  # [Hunting] Suspicious Execution / Ransomware / Fake Tools
-  suspicious_execution:
-    # Sysinternals Masquerading (Execution Hunting)
-    - pat: "(?i)(sysinternals|vmtoolsio|vmware|psexec|procdump|procmon|autoruns)\\.exe"
-      path_filter: "" # Anywhere is suspicious for 'sysinternals.exe'
-      tag: "CRITICAL_MASQUERADE"
-      score: 300
-    # Ransomware / Malware specific
-    - pat: "(?i)(tasksche|mssecsvc|wannacry|@wanadecryptor@|wcry)\\.exe"
-      path_filter: ""
-      tag: "CRITICAL_RANSOMWARE"
-      score: 300
-    # Generic Suspicious Names
-    - pat: "(?i)(helper|installer|updater)\\.exe"
-      path_filter: "(?i)(users|temp)"
-      tag: "SUSPICIOUS_GENERIC"
-      score: 150
-
-# [Section 1.5] SysInternals Living Off The Land Detection
-# Challenge #7 Special: These are legitimate tools frequently abused by attackers
-sysinternals_lolbas:
-  # Remote Execution Tools (High Priority)
-  remote_execution:
-    - name: "PsExec"
-      patterns: ["psexec.exe", "psexec64.exe", "paexec.exe"]
-      service_name: "PSEXESVC"
-      indicators:
-        - "-s"           # SYSTEM権限
-        - "-i"           # Interactive
-        - "-d"           # Detach
-        - "-c"           # Copy executable
-        - "-accepteula"  # Auto-accept EULA
-        - "\\\\\\\\.*\\\\"  # Remote host
-      score_base: 150
-      score_elevated: 300    # SYSTEM or Remote
-      tag: "SYSINTERNALS_PSEXEC"
-      
-  # Credential Dumping Tools (Critical)
-  credential_tools:
-    - name: "Procdump"
-      patterns: ["procdump.exe", "procdump64.exe"]
-      indicators:
-        - "-ma"          # Full dump
-        - "-mm"          # Mini dump  
-        - "-mp"          # MiniPlus
-        - "lsass"        # LSASS targeting
-        - "csrss"        # CSRSS targeting
-      score_base: 150
-      score_lsass: 500       # LSASS = Max severity
-      tag: "SYSINTERNALS_PROCDUMP"
-      
-  # Reconnaissance Tools (Medium)
-  recon_tools:
-    - name: "ProcMon"
-      patterns: ["procmon.exe", "procmon64.exe"]
-      indicators:
-        - "/Quiet"
-        - "/BackingFile"
-        - "/Minimized"
-      score_base: 80
-      tag: "SYSINTERNALS_PROCMON"
-      
-    - name: "ProcExp"
-      patterns: ["procexp.exe", "procexp64.exe"]
-      score_base: 60
-      tag: "SYSINTERNALS_PROCEXP"
-      
-    - name: "Autoruns"
-      patterns: ["autoruns.exe", "autorunsc.exe", "autoruns64.exe"]
-      indicators:
-        - "-a"           # All entries
-        - "-c"           # CSV output
-        - "-m"           # Verify signatures
-        - "-h"           # Show hashes
-      score_base: 80
-      tag: "SYSINTERNALS_AUTORUNS"
-      
-    - name: "AccessChk"
-      patterns: ["accesschk.exe", "accesschk64.exe"]
-      indicators:
-        - "-uwcqv"       # Check permissions
-        - "-accepteula"
-      score_base: 100        # Privilege escalation recon
-      tag: "SYSINTERNALS_ACCESSCHK"
-      
-  # Process Manipulation (Medium-High)
-  process_tools:
-    - name: "PsKill"
-      patterns: ["pskill.exe", "pskill64.exe"]
-      score_base: 150
-      tag: "SYSINTERNALS_PSKILL"
-      
-    - name: "PsSuspend"
-      patterns: ["pssuspend.exe", "pssuspend64.exe"]
-      score_base: 100
-      tag: "SYSINTERNALS_PSSUSPEND"
-      
-    - name: "Handle"
-      patterns: ["handle.exe", "handle64.exe"]
-      score_base: 60
-      tag: "SYSINTERNALS_HANDLE"
-      
-    - name: "ListDLLs"
-      patterns: ["listdlls.exe", "listdlls64.exe"]
-      score_base: 60
-      tag: "SYSINTERNALS_LISTDLLS"
-      
-  # File System Tools
-  filesystem_tools:
-    - name: "PsFile"
-      patterns: ["psfile.exe", "psfile64.exe"]
-      score_base: 80
-      tag: "SYSINTERNALS_PSFILE"
-      
-    - name: "Streams"
-      patterns: ["streams.exe", "streams64.exe"]
-      score_base: 60
-      tag: "SYSINTERNALS_STREAMS"
-      
-    - name: "SDelete" 
-      patterns: ["sdelete.exe", "sdelete64.exe"]
-      score_base: 200        # Anti-forensics!
-      tag: "SYSINTERNALS_SDELETE"
-
-  # Download Source Detection
-  download_sources:
-    - "live.sysinternals.com"
-    - "download.sysinternals.com"
-    - "technet.microsoft.com/sysinternals"
-
-# [Section 1.6 & 5.5] Web Intrusion Detection
-web_intrusion:
-  directories:
-    - "(?i)htdocs"
-    - "(?i)wwwroot"
-    - "(?i)inetpub"
-    - "(?i)www"
-    - "(?i)public_html"
-    - "(?i)webapps"
-    - "(?i)sites"
-    - "(?i)html"
-    
-  suspicious_files:
-    - "(?i)tmp[a-z0-9]+\\.php"
-    - "(?i)^\\d+\\.php"
-    - "(?i)shell\\.php"
-    - "(?i)cmd\\.php"
-    - "(?i)c99\\.php"
-    - "(?i)r57\\.php"
-    - "(?i)b374k"
-    - "(?i)wso\\.php"
-    - "(?i)chopper"
-    - "(?i)backdoor"
-    - "(?i)pwn"
-    - "(?i)hack"
-    # [NEW] Additional webshell variants
-    - "(?i)phpshell"
-    - "(?i)php-?cmd"
-    - "(?i)phpspy"
-    - "(?i)weevely"
-    - "(?i)alfa.*shell"
-    - "(?i)mini.*shell"
-    - "(?i)p0wny"
-    - "(?i)priv8"
-    
-  indicators:
-    - "(?i)w3wp\\.exe"
-    - "(?i)httpd\\.exe"
-    - "(?i)nginx\\.exe"
-    - "(?i)aspnet_compiler"
-    - "(?i)csc\\.exe.*temp"
-    - "(?i)webshell"
-    - "(?i)china.*chopper"
-    - "(?i)b374k"
-    
-  # [NEW] Known Vulnerable Applications (Red Flag in Production)
-  vulnerable_apps:
-    - "(?i)\\\\dvwa\\\\|/dvwa/"
-    - "(?i)mutillidae"
-    - "(?i)webgoat"
-    - "(?i)hackazon"
-    - "(?i)juiceshop"
-    - "(?i)bwapp"
-    - "(?i)damn.*vulnerable"
-
-
-# [Section 2] Anti-Forensics Tool Detection
+aion_tuning:
+  scavenger_keywords:
+  - \"Performance\"
+  - \"Monitor\"
+  - \"Extension\"
+  - \"Service\"
+  - \"Driver\"
+  - \"Security\"
+  - \"Update\"
+  - \"Helper\"
+  - \"System\"
+  - \"Install\"
+  - \"Shell\"
+  - \"Run\"
+  - \"Global\"
+  - \"Proxy\"
+  - \"PowerShell\"
+  - \"Remote\"
+  - \"Putty\"
+  - \"WinSCP\"
+  - \"SetMACE\"
+  - \"SDelete\"
 anti_forensics:
+  evidence_wiping:
+  - (?i)fsutil.*usn.*deletejournal
+  - (?i)\$usnjrnl.*delete
+  - (?i)\$mft.*delete
+  - '(?i)format\s+c:'
+  - (?i)cipher\s+/w
+  - (?i)vssadmin.*delete.*shadows
+  - (?i)wbadmin.*delete.*catalog
+  - (?i)wbadmin.*delete.*systemstatebackup
+  - (?i)MpCmdRun.*-RemoveDefinitions
+  - (?i)MpCmdRun.*-AddExclusion
+  - (?i)bcdedit.*/set.*recoveryenabled.*no
+  log_deletion:
+  - (?i)1102
+  - (?i)104
+  - (?i)wevtutil.*cl
+  - (?i)clear-eventlog
+  - (?i)clearev
+  - (?i)del.*\.evtx
+  - (?i)remove.*\.evtx
+  - (?i)auditpol.*/clear
   tools:
     bcwipe.exe: BCWIPE_WIPING
     ccleaner.exe: CCLEANER_WIPING
-    sdelete.exe: SDELETE_WIPING
-    eraser.exe: ERASER_WIPING
     cipher.exe: CIPHER_WIPING
-    
-  log_deletion:
-    - "(?i)1102"
-    - "(?i)104"
-    - "(?i)wevtutil.*cl"
-    - "(?i)clear-eventlog"
-    - "(?i)clearev"
-    - "(?i)del.*\\.evtx"
-    - "(?i)remove.*\\.evtx"
-    - "(?i)auditpol.*/clear"
-    
-  evidence_wiping:
-    - "(?i)fsutil.*usn.*deletejournal"
-    - "(?i)\\$usnjrnl.*delete"
-    - "(?i)\\$mft.*delete"
-    - "(?i)format\\s+c:"
-    - "(?i)cipher\\s+/w"
-    # Destructive Commands
-    - "(?i)vssadmin.*delete.*shadows"
-    - "(?i)wbadmin.*delete.*catalog"
-    - "(?i)wbadmin.*delete.*systemstatebackup"
-    - "(?i)MpCmdRun.*-RemoveDefinitions"
-    - "(?i)MpCmdRun.*-AddExclusion"
-    - "(?i)bcdedit.*/set.*recoveryenabled.*no"
-
-# [Section 3] LNK Analysis & Enrichment
-lnk_threats:
-  - pat: "powershell.*-enc"
-    tag: "PS_ENCODED"
-    score: 50
-  - pat: "powershell.*-w.*hidden"
-    tag: "PS_HIDDEN"
-    score: 40
-  - pat: "powershell.*iex"
-    tag: "PS_IEX"
-    score: 50
-  - pat: "bypass"
-    tag: "PS_BYPASS"
-    score: 30
-  - pat: "downloadstring"
-    tag: "PS_DOWNLOAD"
-    score: 45
-  - pat: "invoke-expression"
-    tag: "PS_IEX"
-    score: 50
-  - pat: "cmd\\.exe.*/c.*powershell"
-    tag: "CMD_PS_CHAIN"
-    score: 40
-  - pat: "cmd\\.exe.*/c.*mshta"
-    tag: "CMD_MSHTA_CHAIN"
-    score: 45
-  - pat: "mshta.*http"
-    tag: "MSHTA_REMOTE"
-    score: 50
-  - pat: "rundll32.*javascript"
-    tag: "RUNDLL_JS"
-    score: 50
-  - pat: "regsvr32.*/s.*/u"
-    tag: "REGSVR32_BYPASS"
-    score: 45
-  - pat: "certutil.*-urlcache"
-    tag: "CERTUTIL_DL"
-    score: 45
-  - pat: "certutil.*-decode"
-    tag: "CERTUTIL_DECODE"
-    score: 40
-  - pat: "bitsadmin.*/transfer"
-    tag: "BITS_JOB"
-    score: 45
-  - pat: "curl.*http"
-    tag: "CURL_DL"
-    score: 40
-  - pat: "wget"
-    tag: "WGET_DL"
-    score: 40
-  - pat: "wscript"
-    tag: "WSCRIPT"
-    score: 35
-  - pat: "cscript"
-    tag: "CSCRIPT"
-    score: 35
-  - pat: "\\.vbs"
-    tag: "VBS_SCRIPT"
-    score: 35
-  - pat: "\\.js\\b"
-    tag: "JS_SCRIPT"
-    score: 35
-  - pat: "\\.hta\\b"
-    tag: "HTA_SCRIPT"
-    score: 40
-  # Ransomware Destructive Commands
-  - pat: "vssadmin.*delete.*shadows"
-    tag: "RANSOMWARE_VSS_DELETE"
-    score: 500
-  - pat: "vssadmin.*resize.*shadowstorage"
-    tag: "RANSOMWARE_VSS_RESIZE"
-    score: 450
-  - pat: "wmic.*shadowcopy.*delete"
-    tag: "RANSOMWARE_WMIC_SHADOW"
-    score: 500
-  - pat: "wbadmin.*delete.*systemstatebackup"
-    tag: "RANSOMWARE_BACKUP_DELETE"
-    score: 500
-  - pat: "wbadmin.*delete.*catalog"
-    tag: "RANSOMWARE_CATALOG_DELETE"
-    score: 450
-  - pat: "bcdedit.*/set.*recoveryenabled.*no"
-    tag: "RANSOMWARE_RECOVERY_DISABLE"
-    score: 500
-  - pat: "bcdedit.*/set.*bootstatuspolicy.*ignoreallfailures"
-    tag: "RANSOMWARE_BOOT_POLICY"
-    score: 450
-
-# [Section 3] Robust Noise Filter
-noise_filters:
-  paths:
-    - "windows[\\\\/]notifications"
-    - "microsoft[\\\\/]windows[\\\\/]notifications"
-    - "appdata[\\\\/]local[\\\\/]microsoft[\\\\/]windows[\\\\/]notifications"
-    - "windows[\\\\/]inetcache"
-    - "inetcookies"
-    - "windows[\\\\/]softwaredistribution"
-    - "windows[\\\\/]servicing"
-    - "appdata[\\\\/]local[\\\\/]temp"
-    - "windows[\\\\/]temp"
-    - "thumbcache"
-    - "officefilecache"
-    # General Noise
-    - "chocolatey"
-    - "packages"
-    - "nuget"
-    - "choco.exe"
-    - "boxstarter"
-    - "windows kit"
-    - "setup.exe"
-    - "install.exe"
-    - "update.exe"
-    # Provisioning / VM Noise
-    - "win-updates"
-    - "preprovisioner"
-    - "post-win-updates"
-    - "finish-actions"
-    - "start-winrm"
-    - "(?i)^A:\\\\" # Floppy Drive Provisioning
-    
-    # Windows OOBE (Generic)
-    - "windows[\\\\/]system32[\\\\/]oobe"
-    - "oobe-"
-    - "knockout-helpers.js"
-    - "gifsequenceplayer.js"
-    - "winjs"
-    - "chakracore"
-
-  # [CRITICAL PATCH] Garbage Collection for Hekate Hybrid
-  # Hekate v2.7 がこのセクションを参照します。
-  garbage_strings:
-    - "%%"
-    - "have co"
-    - "InputApp"
-    - "Microsoft.Windows"
-    - "Windows.System"
-    
-  # Noisy Extensions
-  noisy_extensions_in_temp:
-    - ".psm1"
-    - ".ps1"
-    - ".tmp"
-
-# [Section 7] Network Config
-network_config:
-  suspicious_ports:
-    - 445   # SMB
-    - 3389  # RDP
-    - 5985  # WinRM
-    - 5986  # WinRM SSL
-    - 8080  # Proxy/Web
-    - 4444  # Metasploit
-    - 443   # HTTPS (Context dependent)
-  
-  private_ip_ranges:
-    - "192.168."
-    - "10."
-    - "172.16."
-    - "172.17."
-    - "172.18."
-    - "172.19."
-    - "172.2[0-9]."
-    - "172.3[0-1]."
-    
-  json_noise: ["HiveLength", "FriendlyName", "HiveName", "KeysUpdated", "DirtyPages", "UsrClass.dat", "ntuser.dat"]
-  
-  system_proc_noise:
-    - "wmpnetworksvc"
-    - "tiworker"
-    - "searchindexer"
-    - "conhost"
-    - "svchost"
-    - "backgroundtaskhost"
-    - "dllhost"
-    - "runtimebroker"
-    - "sihost"
-    - "audiodg"
-    
-  forensic_noise:
-    - "accessdata"
-    - "ftk imager"
-    - "tableau"
-    - "celebrite"
-    - "magnet"
-    - "axiom"
-    - "encase"
-    
-  windows_apps_noise:
-    - "microsoft.windows"
-    - "program files\\windowsapps"
-    - "windows communications apps"
-    - "soundrecorder"
-    - "windowsalarms"
-    - "windowsscan"
-    - "calc.exe"
-
-# [Section 4] Strict Evidence Hierarchy (Dual-Use)
-dual_use:
-  tools: ["python", "nmap", "teamviewer", "putty", "winscp", "powershell", "cmd.exe", "net.exe", "ipconfig"]
-  execution_artifacts: ["Process", "EventLog", "Shimcache", "Amcache", "Prefetch", "UserAssist"]
-
-# [Section 5] C2 / Lateral Movement
-network_detection:
-  c2_patterns:
-    - "(?i)beacon"
-    - "(?i)callback"
-    - "(?i)reverse.*shell"
-    - "(?i)connect.*back"
-    - "(?i)meterpreter"
-    - "(?i)cobalt.*strike"
-    - "(?i)empire"
-    - "(?i)sliver"
-    - "(?i)havoc"
-    - "(?i)covenant"
-
-  lateral_patterns:
-    - "(?i)psexec"
-    - "(?i)wmic.*process"
-    - "(?i)winrm"
-    - "(?i)invoke-command"
-    - "(?i)enter-pssession"
-    - "(?i)schtasks.*/create.*/s\\s+[^/]"
-    - "(?i)at\\s+\\\\\\\\"
-    - "(?i)net\\s+use\\s+\\\\\\\\"
-    - "(?i)reg.*\\\\\\\\.*\\\\hklm"
-    - "(?i)sc.*\\\\\\\\.*create"
-
-# [Section 5.5] User Creation / Privilege Escalation
-privilege_escalation:
-  user_creation:
-    - "net user \\S+ /add"
-    - "net localgroup.*administrators.*/add"
-    - "(?i)net\\s+localgroup.*remote.*desktop.*/add"
-    - "(?i)4720"
-    - "(?i)4732"
-    - "(?i)4728"
-    - "(?i)new-localuser"
-    - "(?i)add-localgroupmember"
-    
-  sam_registry:
-    - "(?i)\\\\sam\\\\domains\\\\account\\\\users"
-    - "(?i)\\\\sam\\\\sam\\\\domains\\\\account"
-    - "(?i)hklm\\\\sam"
-
-# Silencer Lists (Ghost Correlation / Time Sync)
-silencer:
-  time_agents:
-    - "vboxservice"
-    - "vmtoolsd"
-    - "w32tm"
-    - "svchost"
-    
-  noise_processes:
-    - "tmpidcrl.dll"
-    - "mcafee.truekey"
-    - "userinfo.dll"
-    - "conhost.exe"
-    - "svchost.exe"
-    - "taskhost.exe"
-
-# ShellBags Audit
-shellbags:
-  high_risk_zones:
-    - "downloads"
-    - "temp"
-    - "hash_suite"
-    - "jetico"
-    - "nmap"
-    - "wireshark"
-
-# ============================================================
-#  PlutosGate Configuration
-# ============================================================
-plutos_config:
-  high_heat_processes:
-    - "mstsc.exe"
-    - "svchost.exe"
-    - "7z.exe"
-    - "rar.exe"
-    - "curl.exe"
-    - "wget.exe"
-    - "powershell.exe"
-    - "psexesvc.exe"
-    - "chrome.exe"
-    - "msedge.exe"
-    - "rundll32.exe"
-    - "regsvr32.exe"
-    - "wmic.exe"
-    - "git.exe"
-    - "ssh.exe"
-    - "outlook.exe"
-    - "thunderbird.exe"
-    - "hxoutlook.exe"
-    
-  burst_threshold_bytes: 52428800  # 50MB
-
-  exfil_domains:
-    - "drive\\.google"
-    - "docs\\.google"
-    - "dropbox"
-    - "onedrive"
-    - "sharepoint"
-    - "box\\.com"
-    - "icloud"
-    - "pcloud"
-    - "kdrive"
-    - "amazon\\.com/clouddrive"
-    - "wetransfer"
-    - "sendspace"
-    - "mediafire"
-    - "mega\\.nz"
-    - "gofile\\.io"
-    - "anonfiles"
-    - "file\\.io"
-    - "transfer\\.sh"
-    - "ufile\\.io"
-    - "sendgb"
-    - "github\\.com"
-    - "gitlab\\.com"
-    - "bitbucket"
-    - "pastebin"
-    - "mail\\.google"
-    - "outlook\\.live"
-    - "mail\\.yahoo"
-    - "proton\\.me"
-    - "tutanota"
-
-  suspicious_url_keywords:
-    - "/upload"
-    - "attachment"
-    - "share"
-    - "dl=0"
-    - "export"
-
-  mail_action_keywords:
-    - "sent"
-    - "compose"
-    - "draft"
-    - "outbox"
-    - "send"
-    - "attachment"
-    - "upload"
-
-  iis_attack_signatures:
-    - "(?i)union\\s+select"
-    - "(?i)xp_cmdshell"
-    - "(?i)exec\\s*\\("
-    - "(?i)select\\s+.*\\s+from"
-    - "'\\s*or\\s*'1'\\s*=\\s*'1"
-    - "(?i)drop\\s+table"
-    - "(?i)insert\\s+into"
-    - "(?i)eval\\s*\\("
-    - "(?i)base64_decode"
-    - "(?i)cmd\\.exe"
-    - "(?i)powershell"
-    - "(?i)/c\\+"
-    - "(?i)%2Fc%2B"
-    - "(?i)wscript"
-    - "(?i)cscript"
-    - "\\.\\./"
-    - "\\.\\.%2f"
-    - "%2e%2e%2f"
-    - "(?i)\\.\\.\\\\"
-    - "(?i)china\\s*chopper"
-    - "(?i)c99\\.php"
-    - "(?i)r57\\.php"
-    - "(?i)b374k"
-    - "\\.asp;\\."
-    - "\\.aspx;\\."
-
-  network_noise_ips:
-    - "0.0.0.0"
-    - "255.255.255.255"
-    - "127.0.0.1"
-    - "::1"
-
-  target_event_ids: [3, 5156, 5154, 5157]
-
-# ============================================================
-#  Lachesis Reporting Configuration
-# ============================================================
-lachesis_config:
-  garbage_paths:
-    - "appdata/local/google/chrome"
-    - "appdata/roaming/microsoft/spelling"
-    - "appdata/roaming/skype"
-    - "appdata/local/packages"
-    - "windows/assembly"
-    - "windows/servicing"
-    - "windows/prefetch"
-    - "inetcache"
-    - "tkdata"
-    - "thumbcache"
-    - "iconcache"
-    - "windows/notifications"
-    - "appdata/local/microsoft/windows/notifications"
-
-  trusted_system_roots:
-    - "c:/windows/"
-    - "c:/program files/"
-    - "c:/program files (x86)/"
-    - "{windows}"
-    - "{system32}"
-    - "{program files"
-    - "{common program files"
-
-  suspicious_subdirs:
-    - "/temp"
-    - "/tmp"
-    - "/users/public"
-    - "/appdata"
-    - "/programdata"
-    - "downloads"
-    - "documents"
-    - "desktop"
-
-  infra_ips:
-    - "10.0.2.15"
-    - "10.0.2.2"
-    - "127.0.0.1"
-    - "0.0.0.0"
-    - "::1"
-    - "1.1.1.1"
-    - "8.8.8.8"
-    - "8.8.4.4"
-
-  force_include_tags:
-    - "TIME_PARADOX"
-    - "MASQUERADE"
-    - "PHISHING"
-    - "SUSPICIOUS_CMDLINE"
-    - "ROLLBACK"
-
-  force_include_types:
-    - "TIME_PARADOX"
-    - "CRITICAL_MASQUERADE"
-    - "CRITICAL_PHISHING"
-    - "TIMESTOMP"
-    - "CREDENTIALS"
-
-    # ============================================================
-#  AION Scavenger Tuning (Deep Hive Mining)
-# ============================================================
-aion_tuning:
-  # [Limited Release] Only resurrection artifacts matching these keywords
-  # Case 7 (Garbage Hive) の大量誤検知を防ぎつつ、
-  # Case 2 (Hidden Persistence) を救出するための「選抜リスト」
-  scavenger_keywords:
-    - \"Performance\"   # Case 2: Performance Monitor Us
-    - \"Monitor\"       # Case 2: Monitor DLLs
-    - \"Extension\"     # Case 2: Chrome Extension
-    - \"Service\"       # General Persistence
-    - \"Driver\"        # Malicious Drivers
-    - \"Security\"      # Often spoofed (SecurityHealth, etc.)
-    - \"Update\"        # Fake Updaters (Java Update, etc.)
-    - \"Helper\"        # Browser Helper Objects
-    - \"System\"        # System masquerading
-    - \"Install\"       # Installers
-    - \"Shell\"         # Shell Extensions
-    - \"Run\"           # Run keys
-    - \"Global\"        # Global flags
-    - \"Proxy\"         # Network proxies
-    - \"PowerShell\"    # Fileless
-
-# ============================================================
-#  Persistence Noise Filters (Case 2 Optimization)
-# ============================================================
-persistence_noise:
-  # Built-in Windows Groups (Always ignore these in persistence detection)
-  builtin_groups:
-    - "^(Administrator|Administrators|Guests|Users|Backup Operators|Replicator)$"
-    - "^(Power Users|Network Configuration Operators|Remote Desktop Users)$"
-    - "^(WORKGROUP|Domain Users|Domain Admins|Enterprise Admins)$"
-    - "^(IIS_IUSRS|Event Log Readers|Cryptographic Operators)$"
-    - "^(Hyper-V Administrators|Performance Monitor Users|Distributed COM)$"
-    
-  # Windows Privileges (Filter these from SAM scavenge)
-  privileges:
-    - "^Se[A-Za-z]+Privilege$"     # SeDebugPrivilege, SeBackupPrivilege, etc.
-    - "^(SidHistory|SamAccountName|LogonHours)$"
-    - "^(SubjectLogonId|SubjectDomainName|TargetDomainName)$"
-    - "^(TargetSid|OldUacValue|NewUacValue|PrivilegeList)$"
-    - "^(AllowedToDelegateTo|LogonHours)$"
-    
-  # Partial/Garbage Strings (Filter incomplete names)
-  garbage_patterns:
-    - "^[A-Z]{2,6}$"               # Very short uppercase (ROUP, WIN-0Q, etc.)
-    - "^(ilege|nistrator|ation Operators|natePrivilege)$"
-    - "^-[A-Z0-9]+$"               # Patterns like -9B6
-
-# ============================================================
-#  Timestomp Whitelist (Reduce False Positives)
-#  NOTE: SysInternals tools REMOVED - they are LOLBAS and can be abused
-# ============================================================
-timestomp_whitelist:
-  # Installers ONLY (Timestamp anomalies are common and not indicators)
-  installers:
-    - "(?i).*setup.*\\.exe$"
-    - "(?i).*install.*\\.exe$"
-    - "(?i)chromesetup\\.exe$"
-    - "(?i)firefoxsetup\\.exe$"
-    - "(?i)python-[0-9]+\\.[0-9]+.*\\.exe$"
-    - "(?i)node-v[0-9]+.*\\.exe$"
-    
-  # Virtualization (VM tools often have timestamp issues)
-  virtualization:
-    - "(?i)vbox.*\\.exe$"
-    - "(?i)vmware.*\\.exe$"
-    - "(?i)vm.*additions.*\\.exe$"
-
-# ============================================================
-#  Context-Based Scoring (Forensic Host Detection)
-# ============================================================
+    eraser.exe: ERASER_WIPING
+    sdelete.exe: SDELETE_WIPING
+anti_forensics_tools:
+  timestompers:
+  - pat: (?i)setmace
+    score: 400
+    tag: CRITICAL_TIMESTOMP
+  - pat: (?i)timestomp
+    score: 400
+    tag: CRITICAL_TIMESTOMP
+  - pat: (?i)nircmd.*setfiletime
+    score: 350
+    tag: CRITICAL_TIMESTOMP
+  wipers:
+  - pat: (?i)sdelete(64)?\.exe
+    score: 350
+    tag: CRITICAL_EVIDENCE_WIPE
+  - pat: (?i)eraser\.exe
+    score: 300
+    tag: CRITICAL_EVIDENCE_WIPE
+  - pat: (?i)bcwipe\.exe
+    score: 350
+    tag: CRITICAL_EVIDENCE_WIPE
+  - pat: (?i)ultradefrag
+    score: 150
+    tag: SUSPICIOUS_DEFRAG
 context_scoring:
-  # Hostnames/Usernames that indicate forensic workstation
-  forensic_indicators:
-    hostnames:
-      - "(?i)(forensic|dfir|analyst|soc|malware|threat)"
-      - "(?i)(hunter|investigator|incident)"
-      - "(?i)4orensics"   # Case 2 specific
-    usernames:
-      - "(?i)(analyst|hunter|forensic|admin)"
-      
-  # Score adjustments for SysInternals on forensic hosts
-  sysinternals_scores:
-    # Default scores (general endpoints)
-    default:
-      timestomp: 100
-      execution: 80
-    # Forensic workstation scores (reduced)
-    forensic_host:
-      timestomp: 30
-      execution: 20
-      
-  # SysInternals tool patterns
-  sysinternals_patterns:
-    - "(?i)procexp(64)?\\.exe$"
-    - "(?i)procmon(64)?\\.exe$"
-    - "(?i)autoruns(c|64)?\\.exe$"
-    - "(?i)accesschk(64)?\\.exe$"
-    - "(?i)psexec(64)?\\.exe$"
-    - "(?i)procdump(64)?\\.exe$"
-
-# ============================================================
-#  Execution Hunting Targets (YAML-Driven, not hardcoded)
-# ============================================================
+  path_penalties:
+  - path: windowsapps
+    penalty: -260
+  - path: infusedapps
+    penalty: -260
+  - path: winsxs
+    penalty: -250
+  - path: servicing
+    penalty: -250
+  - path: assembly
+    penalty: -250
+  - path: microsoft.net
+    penalty: -200
+  - path: system32
+    penalty: -150
+  - path: syswow64
+    penalty: -150
+correlation_rules:
+- action:
+    insight_template: '🚨 **Traffic Confirmed**: SRUMにより {value_mb} MB の通信が確認されました。実行だけでなく、実質的なデータ転送を伴う活動です。'
+    note_append: ' [📡 TRAFFIC: {value_mb} MB]'
+    score_override: 500
+    tag_append: TRAFFIC_CONFIRMED,DATA_EXFIL_LIKELY
+  description: Verify Lateral Movement tools with actual network traffic
+  id: CORR_LATERAL_TRAFFIC
+  triggers:
+    tags:
+    - LATERAL_MOVEMENT
+    - REMOTE_ACCESS
+    - UNC_EXECUTION
+    - NETWORK_SHARE_EXECUTION
+  validator:
+    key_field: Process
+    metric_field: BytesSent
+    operator: '>'
+    source: Plutos_Srum
+    target_field: Value
+    threshold: 1000000
+- action:
+    note_append: ' [📡 Active]'
+    score_min: 300
+    tag_append: TRAFFIC_ACTIVE
+  description: Confirm active network connection for tools
+  id: CORR_ACTIVE_CONN
+  triggers:
+    tags:
+    - REMOTE_ACCESS
+    - DOWNLOADER
+  validator:
+    key_field: Process
+    metric_field: BytesSent
+    operator: '>'
+    source: Plutos_Srum
+    target_field: Value
+    threshold: 0
+devops_tools:
+  package_managers:
+  - pat: (?i)choco(latey)?\.exe
+    score: 60
+    tag: PACKAGE_MANAGER
+  - pat: (?i)\\puppet
+    score: 80
+    tag: CONFIG_MANAGEMENT
+  - pat: (?i)\\chef
+    score: 80
+    tag: CONFIG_MANAGEMENT
+  - pat: (?i)\\ansible
+    score: 80
+    tag: CONFIG_MANAGEMENT
+dual_use:
+  execution_artifacts:
+  - Process
+  - EventLog
+  - Shimcache
+  - Amcache
+  - Prefetch
+  - UserAssist
+  tools:
+  - python
+  - nmap
+  - teamviewer
+  - putty
+  - winscp
+  - powershell
+  - cmd.exe
+  - net.exe
+  - ipconfig
+  - choco.exe
 execution_hunting:
   targets:
-    # SysInternals - Remote Execution (Critical)
-    psexec.exe: 200
-    psexec64.exe: 200
-    paexec.exe: 200
-    # SysInternals - Credential/Memory Dump (Critical)
-    procdump.exe: 250
-    procdump64.exe: 250
-    # SysInternals - Reconnaissance
-    procmon.exe: 100
-    procmon64.exe: 100
-    procexp.exe: 80
-    procexp64.exe: 80
+    '@wanadecryptor@.exe': 500
     autoruns.exe: 100
     autorunsc.exe: 100
-    # Credential Dumping Tools (Critical)
-    mimikatz.exe: 500
-    sekurlsa.exe: 500
+    cobaltstrike.exe: 500
     lazagne.exe: 400
-    # Masquerade / Ransomware (Critical)
+    mimikatz.exe: 500
+    paexec.exe: 200
+    procdump.exe: 250
+    procdump64.exe: 250
+    procexp.exe: 80
+    procexp64.exe: 80
+    procmon.exe: 100
+    procmon64.exe: 100
+    psexec.exe: 200
+    psexec64.exe: 200
+    psexesvc.exe: 250
+    remcomsvc.exe: 250
+    sekurlsa.exe: 500
     sysinternals.exe: 300
+    tasksche.exe: 400
     vmtoolsio.exe: 300
     vssadmin.exe: 150
     wannacry.exe: 500
-    tasksche.exe: 400
-    "@wanadecryptor@.exe": 500
-    # Known Attack Tools
-    psexesvc.exe: 250
-    remcomsvc.exe: 250
-    cobaltstrike.exe: 500
+internal_recon:
+  patterns:
+  - 192\\.168\\.
+  - 10\\.
+  - 172\\.(1[6-9]|2[0-9]|3[0-1])\\.
+  - 127\\.0\\.0\\.1
+  - localhost
+  - phpMyAdmin
+  - XAMPP
+  - htdocs
+  score: 200
+  tag: INTERNAL_RECON
+lachesis_config:
+  force_include_tags:
+  - TIME_PARADOX
+  - MASQUERADE
+  - PHISHING
+  - SUSPICIOUS_CMDLINE
+  - ROLLBACK
+  force_include_types:
+  - TIME_PARADOX
+  - CRITICAL_MASQUERADE
+  - CRITICAL_PHISHING
+  - TIMESTOMP
+  - CREDENTIALS
+  garbage_paths:
+  - appdata/local/google/chrome
+  - appdata/roaming/microsoft/spelling
+  - appdata/roaming/skype
+  - appdata/local/packages
+  - windows/assembly
+  - windows/servicing
+  - windows/prefetch
+  - inetcache
+  - tkdata
+  - thumbcache
+  - iconcache
+  - windows/notifications
+  - appdata/local/microsoft/windows/notifications
+  - winsxs/catalogs
+  - winsxs/manifests
+  - windows/assembly/nativeimages
+  - windows/servicing/packages
+  - windows/installer
+  - driverstore/filerepository
+  infra_ips:
+  - 10.0.2.15
+  - 10.0.2.2
+  - 127.0.0.1
+  - 0.0.0.0
+  - ::1
+  - 1.1.1.1
+  - 8.8.8.8
+  - 8.8.4.4
+  suspicious_subdirs:
+  - /temp
+  - /tmp
+  - /users/public
+  - /appdata
+  - /programdata
+  - downloads
+  - documents
+  - desktop
+  trusted_system_roots:
+  - c:/windows/
+  - c:/program files/
+  - c:/program files (x86)/
+  - '{windows}'
+  - '{system32}'
+  - '{program files'
+  - '{common program files'
+lnk_threats:
+- pat: powershell.*-enc
+  score: 50
+  tag: PS_ENCODED
+- pat: powershell.*-w.*hidden
+  score: 40
+  tag: PS_HIDDEN
+- pat: powershell.*iex
+  score: 50
+  tag: PS_IEX
+- pat: bypass
+  score: 30
+  tag: PS_BYPASS
+- pat: downloadstring
+  score: 45
+  tag: PS_DOWNLOAD
+- pat: invoke-expression
+  score: 50
+  tag: PS_IEX
+- pat: cmd\.exe.*/c.*powershell
+  score: 40
+  tag: CMD_PS_CHAIN
+- pat: cmd\.exe.*/c.*mshta
+  score: 45
+  tag: CMD_MSHTA_CHAIN
+- pat: mshta.*http
+  score: 50
+  tag: MSHTA_REMOTE
+- pat: rundll32.*javascript
+  score: 50
+  tag: RUNDLL_JS
+- pat: regsvr32.*/s.*/u
+  score: 45
+  tag: REGSVR32_BYPASS
+- pat: certutil.*-urlcache
+  score: 45
+  tag: CERTUTIL_DL
+- pat: certutil.*-decode
+  score: 40
+  tag: CERTUTIL_DECODE
+- pat: bitsadmin.*/transfer
+  score: 45
+  tag: BITS_JOB
+- pat: curl.*http
+  score: 40
+  tag: CURL_DL
+- pat: wget
+  score: 40
+  tag: WGET_DL
+- pat: wscript
+  score: 35
+  tag: WSCRIPT
+- pat: cscript
+  score: 35
+  tag: CSCRIPT
+- pat: \.vbs
+  score: 35
+  tag: VBS_SCRIPT
+- pat: \.js\b
+  score: 35
+  tag: JS_SCRIPT
+- pat: \.hta\b
+  score: 40
+  tag: HTA_SCRIPT
+- pat: vssadmin.*delete.*shadows
+  score: 500
+  tag: RANSOMWARE_VSS_DELETE
+- pat: vssadmin.*resize.*shadowstorage
+  score: 450
+  tag: RANSOMWARE_VSS_RESIZE
+- pat: wmic.*shadowcopy.*delete
+  score: 500
+  tag: RANSOMWARE_WMIC_SHADOW
+- pat: wbadmin.*delete.*systemstatebackup
+  score: 500
+  tag: RANSOMWARE_BACKUP_DELETE
+- pat: wbadmin.*delete.*catalog
+  score: 450
+  tag: RANSOMWARE_CATALOG_DELETE
+- pat: bcdedit.*/set.*recoveryenabled.*no
+  score: 500
+  tag: RANSOMWARE_RECOVERY_DISABLE
+- pat: bcdedit.*/set.*bootstatuspolicy.*ignoreallfailures
+  score: 450
+  tag: RANSOMWARE_BOOT_POLICY
+masquerade:
+  legit_crx_paths:
+  - Google\\Chrome\\.*\\Extensions
+  - Microsoft\\Edge\\.*\\Extensions
+  - BraveSoftware\\Brave-Browser\\.*\\Extensions
+  - Chromium\\.*\\Extensions
+  - Opera Software\\Opera Stable\\Extensions
+  - Vivaldi\\.*\\Extensions
+  suspicious_execution:
+  - pat: (?i)(sysinternals|vmtoolsio|vmware|psexec|procdump|procmon|autoruns)\.exe
+    path_filter: ''
+    score: 300
+    tag: CRITICAL_MASQUERADE
+  - pat: (?i)(tasksche|mssecsvc|wannacry|@wanadecryptor@|wcry)\.exe
+    path_filter: ''
+    score: 300
+    tag: CRITICAL_RANSOMWARE
+  - pat: (?i)(helper|installer|updater)\.exe
+    path_filter: (?i)(users|temp)
+    score: 150
+    tag: SUSPICIOUS_GENERIC
+network_config:
+  forensic_noise:
+  - accessdata
+  - ftk imager
+  - tableau
+  - celebrite
+  - magnet
+  - axiom
+  - encase
+  json_noise:
+  - HiveLength
+  - FriendlyName
+  - HiveName
+  - KeysUpdated
+  - DirtyPages
+  - UsrClass.dat
+  - ntuser.dat
+  private_ip_ranges:
+  - 192.168.
+  - '10.'
+  - 172.16.
+  - 172.17.
+  - 172.18.
+  - 172.19.
+  - 172.2[0-9].
+  - 172.3[0-1].
+  suspicious_ports:
+  - 445
+  - 3389
+  - 5985
+  - 5986
+  - 8080
+  - 4444
+  - 443
+  system_proc_noise:
+  - wmpnetworksvc
+  - tiworker
+  - searchindexer
+  - conhost
+  - svchost
+  - backgroundtaskhost
+  - dllhost
+  - runtimebroker
+  - sihost
+  - audiodg
+  windows_apps_noise:
+  - microsoft.windows
+  - program files\windowsapps
+  - windows communications apps
+  - soundrecorder
+  - windowsalarms
+  - windowsscan
+  - calc.exe
+network_detection:
+  c2_patterns:
+  - (?i)beacon
+  - (?i)callback
+  - (?i)reverse.*shell
+  - (?i)connect.*back
+  - (?i)meterpreter
+  - (?i)cobalt.*strike
+  - (?i)empire
+  - (?i)sliver
+  - (?i)havoc
+  - (?i)covenant
+  lateral_patterns:
+  - (?i)psexec
+  - (?i)wmic.*process
+  - (?i)winrm
+  - (?i)invoke-command
+  - (?i)enter-pssession
+  - (?i)schtasks.*/create.*/s\s+[^/]
+  - (?i)at\s+\\\\
+  - (?i)net\s+use\s+\\\\
+  - (?i)reg.*\\\\.*\\hklm
+  - (?i)sc.*\\\\.*create
+network_share_detection:
+  unc_patterns:
+  - pat: ^\\\\[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+
+    score: 200
+    tag: LATERAL_MOVEMENT,NETWORK_EXEC
+  - pat: ^\\\\[a-zA-Z0-9-]+\\[a-zA-Z0-9$]+
+    score: 150
+    tag: SMB_SHARE_ACCESS
+noise_filters:
+  garbage_strings:
+  - '%%'
+  - have co
+  - InputApp
+  - Microsoft.Windows
+  - Windows.System
+  noisy_extensions_in_temp:
+  - .psm1
+  - .ps1
+  - .tmp
+  paths:
+  - windows[\\/]notifications
+  - microsoft[\\/]windows[\\/]notifications
+  - appdata[\\/]local[\\/]microsoft[\\/]windows[\\/]notifications
+  - windows[\\/]inetcache
+  - inetcookies
+  - windows[\\/]softwaredistribution
+  - windows[\\/]servicing
+  - appdata[\\/]local[\\/]temp
+  - windows[\\/]temp
+  - thumbcache
+  - officefilecache
+  - windows kit
+  - setup.exe
+  - install.exe
+  - update.exe
+  - win-updates
+  - preprovisioner
+  - post-win-updates
+  - finish-actions
+  - start-winrm
+  - (?i)^A:\\
+  - windows[\\/]system32[\\/]oobe
+  - oobe-
+  - knockout-helpers.js
+  - gifsequenceplayer.js
+  - winjs
+  - chakracore
+persistence_noise:
+  builtin_groups:
+  - ^(Administrator|Administrators|Guests|Users|Backup Operators|Replicator)$
+  - ^(Power Users|Network Configuration Operators|Remote Desktop Users)$
+  - ^(WORKGROUP|Domain Users|Domain Admins|Enterprise Admins)$
+  - ^(IIS_IUSRS|Event Log Readers|Cryptographic Operators)$
+  - ^(Hyper-V Administrators|Performance Monitor Users|Distributed COM)$
+  garbage_patterns:
+  - ^[A-Z]{2,6}$
+  - ^(ilege|nistrator|ation Operators|natePrivilege)$
+  - ^-[A-Z0-9]+$
+  privileges:
+  - ^Se[A-Za-z]+Privilege$
+  - ^(SidHistory|SamAccountName|LogonHours)$
+  - ^(SubjectLogonId|SubjectDomainName|TargetDomainName)$
+  - ^(TargetSid|OldUacValue|NewUacValue|PrivilegeList)$
+  - ^(AllowedToDelegateTo|LogonHours)$
+plutos_config:
+  burst_threshold_bytes: 52428800
+  exfil_domains:
+  - drive\.google
+  - docs\.google
+  - dropbox
+  - onedrive
+  - sharepoint
+  - box\.com
+  - icloud
+  - pcloud
+  - kdrive
+  - amazon\.com/clouddrive
+  - wetransfer
+  - sendspace
+  - mediafire
+  - mega\.nz
+  - gofile\.io
+  - anonfiles
+  - file\.io
+  - transfer\.sh
+  - ufile\.io
+  - sendgb
+  - github\.com
+  - gitlab\.com
+  - bitbucket
+  - pastebin
+  - mail\.google
+  - outlook\.live
+  - mail\.yahoo
+  - proton\.me
+  - tutanota
+  high_heat_processes:
+  - mstsc.exe
+  - svchost.exe
+  - 7z.exe
+  - rar.exe
+  - curl.exe
+  - wget.exe
+  - powershell.exe
+  - psexesvc.exe
+  - chrome.exe
+  - msedge.exe
+  - rundll32.exe
+  - regsvr32.exe
+  - wmic.exe
+  - git.exe
+  - ssh.exe
+  - outlook.exe
+  - thunderbird.exe
+  - hxoutlook.exe
+  iis_attack_signatures:
+  - (?i)union\s+select
+  - (?i)xp_cmdshell
+  - (?i)exec\s*\(
+  - (?i)select\s+.*\s+from
+  - '''\s*or\s*''1''\s*=\s*''1'
+  - (?i)drop\s+table
+  - (?i)insert\s+into
+  - (?i)eval\s*\(
+  - (?i)base64_decode
+  - (?i)cmd\.exe
+  - (?i)powershell
+  - (?i)/c\+
+  - (?i)%2Fc%2B
+  - (?i)wscript
+  - (?i)cscript
+  - \.\./
+  - \.\.%2f
+  - '%2e%2e%2f'
+  - (?i)\.\.\\
+  - (?i)china\s*chopper
+  - (?i)c99\.php
+  - (?i)r57\.php
+  - (?i)b374k
+  - \.asp;\.
+  - \.aspx;\.
+  mail_action_keywords:
+  - sent
+  - compose
+  - draft
+  - outbox
+  - send
+  - attachment
+  - upload
+  network_noise_ips:
+  - 0.0.0.0
+  - 255.255.255.255
+  - 127.0.0.1
+  - ::1
+  suspicious_url_keywords:
+  - /upload
+  - attachment
+  - share
+  - dl=0
+  - export
+  target_event_ids:
+  - 3
+  - 5156
+  - 5154
+  - 5157
+privilege_escalation:
+  sam_registry:
+  - (?i)\\sam\\domains\\account\\users
+  - (?i)\\sam\\sam\\domains\\account
+  - (?i)hklm\\sam
+  user_creation:
+  - net user \S+ /add
+  - net localgroup.*administrators.*/add
+  - (?i)net\s+localgroup.*remote.*desktop.*/add
+  - (?i)4720
+  - (?i)4732
+  - (?i)4728
+  - (?i)new-localuser
+  - (?i)add-localgroupmember
+recon_indicators:
+  suspicious_domains:
+  - kali.org
+  - kali-linux.com
+  - metasploit.com
+  - exploit-db.com
+  - offensive-security.com
+  - packetstormsecurity.com
+  - rapid7.com/db
+  - cvedetails.com
+  - shodan.io
+  - hackthebox.eu
+  - tryhackme.com
+  suspicious_downloads:
+    patterns:
+    - (?i)defcon.*\.(pdf|pptx?|zip)$
+    - (?i)blackhat.*\.(pdf|pptx?|zip)$
+    - (?i)ccc-congress.*\.(pdf|pptx?|zip)$
+    - (?i)(exploit|rootkit|backdoor|shellcode|keylogger).*\.(pdf|zip|exe)$
+    - (?i)(mimikatz|lazagne|procdump|psexec).*\.(pdf|zip|exe)$
+    score: 100
+    tag: RECON_SECTOOLS
+  suspicious_search_terms:
+  - (?i)exfiltrat
+  - (?i)c2.*communication
+  - (?i)data.*theft
+  - (?i)credential.*dump
+  - (?i)lateral.*movement
+  - (?i)privilege.*escalat
+  - (?i)reverse.*shell
+  - (?i)bind.*shell
+  - (?i)post.*exploit
+  - (?i)payload.*generat
+remote_access_tools:
+  openssh:
+  - pat: (?i)\\ssh\.exe
+    score: 80
+    tag: OPENSSH_ACTIVITY
+  - pat: (?i)\\ssh-keygen\.exe
+    score: 120
+    tag: SSH_KEY_GEN
+  - pat: (?i)\\ssh-add\.exe
+    score: 100
+    tag: SSH_KEY_AGENT
+  - pat: (?i)\\scp\.exe
+    score: 130
+    tag: SSH_FILE_TRANSFER
+  ssh_clients:
+  - pat: (?i)putty\.exe
+    score: 100
+    tag: SSH_CLIENT
+  - pat: (?i)puttygen\.exe
+    score: 120
+    tag: SSH_KEY_GEN
+  - pat: (?i)(pscp|psftp|plink)\.exe
+    score: 130
+    tag: SSH_FILE_TRANSFER
+  - pat: (?i)kitty\.exe
+    score: 100
+    tag: SSH_CLIENT
+  - pat: (?i)winscp\.exe
+    score: 100
+    tag: SSH_CLIENT
+sensitive_data:
+  keywords:
+  - confidential
+  - secret
+  - password
+  - credential
+  - private
+  - internal
+  - restricted
+  - 社外秘
+  - 機密
+  - 取扱注意
+  - パスワード
+  score: 300
+  tag: SENSITIVE_DATA_ACCESS
+shellbags:
+  high_risk_zones:
+  - downloads
+  - temp
+  - hash_suite
+  - jetico
+  - nmap
+  - wireshark
+silencer:
+  noise_processes:
+  - tmpidcrl.dll
+  - mcafee.truekey
+  - userinfo.dll
+  - conhost.exe
+  - svchost.exe
+  - taskhost.exe
+  time_agents:
+  - vboxservice
+  - vmtoolsd
+  - w32tm
+  - svchost
+sysinternals_lolbas:
+  credential_tools:
+  - indicators:
+    - -ma
+    - -mm
+    - -mp
+    - lsass
+    - csrss
+    name: Procdump
+    patterns:
+    - procdump.exe
+    - procdump64.exe
+    score_base: 150
+    score_lsass: 500
+    tag: SYSINTERNALS_PROCDUMP
+  download_sources:
+  - live.sysinternals.com
+  - download.sysinternals.com
+  - technet.microsoft.com/sysinternals
+  filesystem_tools:
+  - name: PsFile
+    patterns:
+    - psfile.exe
+    - psfile64.exe
+    score_base: 80
+    tag: SYSINTERNALS_PSFILE
+  - name: Streams
+    patterns:
+    - streams.exe
+    - streams64.exe
+    score_base: 60
+    tag: SYSINTERNALS_STREAMS
+  - name: SDelete
+    patterns:
+    - sdelete.exe
+    - sdelete64.exe
+    score_base: 200
+    tag: SYSINTERNALS_SDELETE
+  process_tools:
+  - name: PsKill
+    patterns:
+    - pskill.exe
+    - pskill64.exe
+    score_base: 150
+    tag: SYSINTERNALS_PSKILL
+  - name: PsSuspend
+    patterns:
+    - pssuspend.exe
+    - pssuspend64.exe
+    score_base: 100
+    tag: SYSINTERNALS_PSSUSPEND
+  - name: Handle
+    patterns:
+    - handle.exe
+    - handle64.exe
+    score_base: 60
+    tag: SYSINTERNALS_HANDLE
+  - name: ListDLLs
+    patterns:
+    - listdlls.exe
+    - listdlls64.exe
+    score_base: 60
+    tag: SYSINTERNALS_LISTDLLS
+  recon_tools:
+  - indicators:
+    - /Quiet
+    - /BackingFile
+    - /Minimized
+    name: ProcMon
+    patterns:
+    - procmon.exe
+    - procmon64.exe
+    score_base: 80
+    tag: SYSINTERNALS_PROCMON
+  - name: ProcExp
+    patterns:
+    - procexp.exe
+    - procexp64.exe
+    score_base: 60
+    tag: SYSINTERNALS_PROCEXP
+  - indicators:
+    - -a
+    - -c
+    - -m
+    - -h
+    name: Autoruns
+    patterns:
+    - autoruns.exe
+    - autorunsc.exe
+    - autoruns64.exe
+    score_base: 80
+    tag: SYSINTERNALS_AUTORUNS
+  - indicators:
+    - -uwcqv
+    - -accepteula
+    name: AccessChk
+    patterns:
+    - accesschk.exe
+    - accesschk64.exe
+    score_base: 100
+    tag: SYSINTERNALS_ACCESSCHK
+  remote_execution:
+  - indicators:
+    - -s
+    - -i
+    - -d
+    - -c
+    - -accepteula
+    - \\\\.*\\
+    name: PsExec
+    patterns:
+    - psexec.exe
+    - psexec64.exe
+    - paexec.exe
+    score_base: 150
+    score_elevated: 300
+    service_name: PSEXESVC
+    tag: SYSINTERNALS_PSEXEC
+system_whitelist:
+  files:
+  - (?i)\.dll$
+  - (?i)\.sys$
+  - (?i)\.mui$
+  - (?i)\.mum$
+  - (?i)\.cat$
+  - (?i)\.manifest$
+  - (?i)\.inf$
+  - (?i)^ntoskrnl
+  - (?i)^hal\.dll
+  - (?i)^kernel32
+  paths:
+  - (?i)\\Windows\\
+  - (?i)\\System32\\
+  - (?i)\\SysWOW64\\
+  - (?i)\\WinSxS\\
+  - (?i)\\servicing\\
+  - (?i)\\Microsoft.NET\\
+  - (?i)\\assembly\\
+  - (?i)\\Installer\\
+  - (?i)\\Program Files\\Windows
+  - (?i)\\Program Files (x86)\\Windows
+  - (?i)\\\\windowsapps\\\\
+  - (?i)deletedalluserpackages
+timestomp_whitelist:
+  installers:
+  - (?i).*setup.*\.exe$
+  - (?i).*install.*\.exe$
+  - (?i)chromesetup\.exe$
+  - (?i)firefoxsetup\.exe$
+  - (?i)python-[0-9]+\.[0-9]+.*\.exe$
+  - (?i)node-v[0-9]+.*\.exe$
+  virtualization:
+  - (?i)vbox.*\.exe$
+  - (?i)vmware.*\.exe$
+  - (?i)vm.*additions.*\.exe$
+v53_watcher_config:
+  internal_recon_patterns:
+  - 192\.168\.\d+\.\d+
+  - 10\.\d+\.\d+\.\d+
+  - 172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+
+  - 127\.0\.0\.1
+  - localhost
+  - phpMyAdmin
+  - XAMPP
+  - htdocs
+  noise_exclusion_paths:
+  - windows/microsoft.net/framework
+  - windows/microsoft.net/framework64
+  - windows/winsxs
+  - windows/servicing
+  - windows/assembly
+  - windows/installer
+  - windows/temp/cab_
+  - programdata/microsoft/windows/wer
+  sensitive_extensions:
+  - .docx
+  - .xlsx
+  - .pdf
+  - .doc
+  - .xls
+  - .pptx
+  - .txt
+  - .rtf
+  sensitive_keywords:
+  - confidential
+  - secret
+  - password
+  - credential
+  - private
+  - internal
+  - restricted
+  - classified
+  - proprietary
+  - sensitive
+web_intrusion:
+  directories:
+  - (?i)htdocs
+  - (?i)wwwroot
+  - (?i)inetpub
+  - (?i)www
+  - (?i)public_html
+  - (?i)webapps
+  - (?i)sites
+  - (?i)html
+  indicators:
+  - (?i)w3wp\.exe
+  - (?i)httpd\.exe
+  - (?i)nginx\.exe
+  - (?i)aspnet_compiler
+  - (?i)csc\.exe.*temp
+  - (?i)webshell
+  - (?i)china.*chopper
+  - (?i)b374k
+  suspicious_files:
+  - (?i)tmp[a-z0-9]+\.php
+  - (?i)^\d+\.php
+  - (?i)shell\.php
+  - (?i)cmd\.php
+  - (?i)c99\.php
+  - (?i)r57\.php
+  - (?i)b374k
+  - (?i)wso\.php
+  - (?i)chopper
+  - (?i)backdoor
+  - (?i)pwn
+  - (?i)hack
+  - (?i)phpshell
+  - (?i)php-?cmd
+  - (?i)phpspy
+  - (?i)weevely
+  - (?i)alfa.*shell
+  - (?i)mini.*shell
+  - (?i)p0wny
+  - (?i)priv8
+  vulnerable_apps:
+  - (?i)\\dvwa\\|/dvwa/
+  - (?i)mutillidae
+  - (?i)webgoat
+  - (?i)hackazon
+  - (?i)juiceshop
+  - (?i)bwapp
+  - (?i)damn.*vulnerable

@@ -30,7 +30,7 @@ def print_logo():
     """)
 
 class ChronosEngine:
-    def __init__(self, tolerance=10.0, config=None):
+    def __init__(self, tolerance=60.0, config=None):
         self.tolerance = tolerance
         self.hestia = Hestia()
         self.config = config or {}
@@ -112,13 +112,19 @@ class ChronosEngine:
         攻撃者が50件以上を ミリ秒単位で完全一致させることは現実的に不可能。
         """
         if time_col not in df.columns:
-            return df
+            # [FIX] Fallback to Timestamp_UTC if SI_CreationTime is missing
+            if "Timestamp_UTC" in df.columns:
+                print("       [i] Falling back to Timestamp_UTC for Microburst detection")
+                time_col = "Timestamp_UTC"
+            else:
+                return df
         
         print("    -> [Plan B:A] Detecting Update Storm (Microburst)...")
         
         # 秒単位に丸める（ミリ秒を削除）
+        # [FIX] Ensure type is string before slicing
         df = df.with_columns(
-            pl.col(time_col).str.slice(0, 19).alias("_time_sec")
+            pl.col(time_col).cast(pl.Utf8).str.slice(0, 19).alias("_time_sec")
         )
         
         # 各秒のファイル数をカウント
@@ -284,6 +290,12 @@ class ChronosEngine:
             
             # Check if null timestamp
             is_null = si_creation is None or (hasattr(si_creation, 'year') and si_creation.year < 1980)
+
+            # [FIX] Ignore Non-Filesystem Artifacts (UserAssist, EventLog, etc.) from Null Stomp Check
+            # Even if they have "exe" extension, they don't have MFT Creation Time.
+            artifact_type = row.get("Artifact_Type", "")
+            if artifact_type and artifact_type not in ["MFT", "LogFile", "UsnJournal"]:
+                is_null = False # Skip this check for non-FS artifacts
             
             if not is_null:
                 results.append({"score": row.get("Threat_Score", 0), "tag": row.get("Threat_Tag", ""), "anomaly": row.get("Anomaly_Time", "")})
@@ -416,6 +428,73 @@ class ChronosEngine:
 
         return lf.drop(["_dt", "_prev_dt", "_time_diff", "UpdateSequenceNumber_Int"])
 
+    def _detect_mft_timestomp(self, lf):
+        # 7. MFT Timestomp 検知 (Extreme Future etc.)
+        cols = lf.collect_schema().names()
+        si_cr, fn_cr = "SI_CreationTime", "FileName_Created"
+        
+        if "SI_CreationTime_Raw" in cols and "si_dt" in cols:
+            extreme_cond = (
+                (pl.col("SI_CreationTime_Raw").is_not_null()) & 
+                (pl.col("si_dt").is_null()) &
+                (pl.col("SI_CreationTime_Raw").str.len_chars() > 10)
+            ) | (pl.col("si_dt").dt.year() > 2030)
+
+            lf = lf.with_columns([
+                pl.when(extreme_cond)
+                  .then(pl.lit("TIMESTOMP_FUTURE_EXTREME"))
+                  .otherwise(pl.lit(""))
+                  .alias("Anomaly_Extreme")
+            ])
+
+            # Smart Filter: Keep valid dates OR extreme anomalies
+            lf = lf.filter(
+                (pl.col("si_dt").is_not_null() & pl.col("fn_dt").is_not_null()) | 
+                (pl.col("Anomaly_Extreme") != "")
+            )
+
+            lf = lf.with_columns((pl.col("fn_dt") - pl.col("si_dt")).dt.total_seconds().fill_null(0).alias("diff_sec"))
+
+            lf = lf.with_columns([
+                pl.when(pl.col("Anomaly_Time") == "CRITICAL_SYSTEM_ROLLBACK")
+                  .then(pl.lit("CRITICAL_SYSTEM_ROLLBACK"))
+                .when(pl.col("Threat_Tag").str.contains("CRITICAL_TIMESTOMP"))
+                  .then(pl.lit("CRITICAL_TIMESTOMP_ATTEMPT"))
+                .when((pl.col("Threat_Score") >= 80) & (pl.col("Threat_Tag") != "NOISE_ARTIFACT"))
+                  .then(pl.lit("CRITICAL_ARTIFACT"))
+                .when(pl.col("diff_sec") < -60)
+                  .then(pl.lit("INFO_UPDATE_PATTERN")) # [FIX] Regular Update
+                .when(pl.col("diff_sec") > self.tolerance)
+                  .then(pl.lit("TIMESTOMP_BACKDATE")) # [FIX] Backdating (MFT is older than Created)
+                .otherwise(pl.lit("")).alias("Anomaly_Time"),
+                
+                pl.when(pl.col("si_dt").dt.microsecond() == 0)
+                  .then(pl.lit("ZERO_PRECISION"))
+                  .otherwise(pl.lit("")).alias("Anomaly_Zero")
+            ])
+            
+            score_expr = (
+                pl.when(pl.col("Anomaly_Time") == "CRITICAL_SYSTEM_ROLLBACK").then(300)
+                .when(pl.col("Threat_Tag") == "NOISE_ARTIFACT").then(0)
+                .when(pl.col("Threat_Tag") == "INFO_VM_TIME_SYNC").then(0)
+                .when(pl.col("Threat_Tag") == "INFO_NULL_TIMESTAMP").then(0)
+                .when(pl.col("Anomaly_Time") == "INFO_UPDATE_PATTERN").then(0) # [FIX] Score 0 for updates
+                .when(pl.col("Threat_Tag").str.contains("CRITICAL")).then(300) 
+                .when(pl.col("Anomaly_Time") == "CRITICAL_ARTIFACT").then(200)
+                .when(pl.col("Anomaly_Time") == "TIMESTOMP_BACKDATE").then(200) # [FIX] Score 200 for backdate
+                .otherwise(0)
+            )
+            lf = lf.with_columns(score_expr.alias("Chronos_Score"))
+        else:
+            print("    [!] MFT Timestamps not found. Skipping Standard Timestomp detection.")
+            lf = lf.with_columns([
+                pl.lit("").alias("Anomaly_Time"),
+                pl.lit("").alias("Anomaly_Zero"),
+                pl.lit(0).alias("Chronos_Score")
+            ])
+        
+        return lf.drop(["_dt", "_prev_dt", "_time_diff", "UpdateSequenceNumber_Int"])
+
     def _detect_system_time_context(self, lf):
         """
         Themisスコアリングの「後」に実行。
@@ -522,11 +601,78 @@ class ChronosEngine:
 
         return df.drop(["_pp", "_fn"])
 
+    def _detect_mft_timestomp(self, lf):
+        # 7. MFT Timestomp 検知 (Extreme Future etc.)
+        cols = lf.collect_schema().names()
+        si_cr, fn_cr = "SI_CreationTime", "FileName_Created"
+        
+        if "SI_CreationTime_Raw" in cols and "si_dt" in cols:
+            extreme_cond = (
+                (pl.col("SI_CreationTime_Raw").is_not_null()) & 
+                (pl.col("si_dt").is_null()) &
+                (pl.col("SI_CreationTime_Raw").str.len_chars() > 10)
+            ) | (pl.col("si_dt").dt.year() > 2030)
+
+            lf = lf.with_columns([
+                pl.when(extreme_cond)
+                  .then(pl.lit("TIMESTOMP_FUTURE_EXTREME"))
+                  .otherwise(pl.lit(""))
+                  .alias("Anomaly_Extreme")
+            ])
+
+            # Smart Filter: Keep valid dates OR extreme anomalies
+            lf = lf.filter(
+                (pl.col("si_dt").is_not_null() & pl.col("fn_dt").is_not_null()) | 
+                (pl.col("Anomaly_Extreme") != "")
+            )
+
+            lf = lf.with_columns((pl.col("fn_dt") - pl.col("si_dt")).dt.total_seconds().fill_null(0).alias("diff_sec"))
+
+            lf = lf.with_columns([
+                pl.when(pl.col("Anomaly_Time") == "CRITICAL_SYSTEM_ROLLBACK")
+                  .then(pl.lit("CRITICAL_SYSTEM_ROLLBACK"))
+                .when(pl.col("Threat_Tag").str.contains("CRITICAL_TIMESTOMP"))
+                  .then(pl.lit("CRITICAL_TIMESTOMP_ATTEMPT"))
+                .when((pl.col("Threat_Score") >= 80) & (pl.col("Threat_Tag") != "NOISE_ARTIFACT"))
+                  .then(pl.lit("CRITICAL_ARTIFACT"))
+                .when(pl.col("diff_sec") < -60)
+                  .then(pl.lit("INFO_UPDATE_PATTERN")) # [FIX] Regular Update
+                .when(pl.col("diff_sec") > self.tolerance)
+                  .then(pl.lit("TIMESTOMP_BACKDATE")) # [FIX] Backdating (MFT is older than Created)
+                .otherwise(pl.lit("")).alias("Anomaly_Time"),
+                
+                pl.when(pl.col("si_dt").dt.microsecond() == 0)
+                  .then(pl.lit("ZERO_PRECISION"))
+                  .otherwise(pl.lit("")).alias("Anomaly_Zero")
+            ])
+            
+            score_expr = (
+                pl.when(pl.col("Anomaly_Time") == "CRITICAL_SYSTEM_ROLLBACK").then(300)
+                .when(pl.col("Threat_Tag") == "NOISE_ARTIFACT").then(0)
+                .when(pl.col("Threat_Tag") == "INFO_VM_TIME_SYNC").then(0)
+                .when(pl.col("Threat_Tag") == "INFO_NULL_TIMESTAMP").then(0)
+                .when(pl.col("Anomaly_Time") == "INFO_UPDATE_PATTERN").then(0) # [FIX] Score 0 for updates
+                .when(pl.col("Threat_Tag").str.contains("CRITICAL")).then(300) 
+                .when(pl.col("Anomaly_Time") == "CRITICAL_ARTIFACT").then(200)
+                .when(pl.col("Anomaly_Time") == "TIMESTOMP_BACKDATE").then(200) # [FIX] Score 200 for backdate
+                .otherwise(0)
+            )
+            lf = lf.with_columns(score_expr.alias("Chronos_Score"))
+        else:
+            print("    [!] MFT Timestamps not found. Skipping Standard Timestomp detection.")
+            lf = lf.with_columns([
+                pl.lit("").alias("Anomaly_Time"),
+                pl.lit("").alias("Anomaly_Zero"),
+                pl.lit(0).alias("Chronos_Score")
+            ])
+        
+        return lf
+
     def analyze(self, args):
         mode_str = "LEGACY" if args.legacy else "STANDARD"
         print(f"[*] Chronos v3.4 awakening... Mode: {mode_str}")
         try:
-            loader = ThemisLoader(["rules/triage_rules.yaml", "rules/sigma_file_event.yaml"])
+            loader = ThemisLoader(["rules/triage_rules.yaml", "rules/sigma_file_event.yaml", "rules/intel_signatures.yaml"])
             lf = pl.read_csv(args.file, ignore_errors=True, infer_schema_length=0).lazy()
             
             # Normalize Columns
@@ -594,66 +740,7 @@ class ChronosEngine:
             lf = self._apply_safety_filters(lf)
             
             # 7. MFT Timestomp 検知 (Extreme Future etc.)
-            cols = lf.collect_schema().names()
-            si_cr, fn_cr = "SI_CreationTime", "FileName_Created"
-            
-            if "SI_CreationTime_Raw" in cols and "si_dt" in cols:
-                extreme_cond = (
-                    (pl.col("SI_CreationTime_Raw").is_not_null()) & 
-                    (pl.col("si_dt").is_null()) &
-                    (pl.col("SI_CreationTime_Raw").str.len_chars() > 10)
-                ) | (pl.col("si_dt").dt.year() > 2030)
-
-                lf = lf.with_columns([
-                    pl.when(extreme_cond)
-                      .then(pl.lit("TIMESTOMP_FUTURE_EXTREME"))
-                      .otherwise(pl.lit(""))
-                      .alias("Anomaly_Extreme")
-                ])
-
-                # Smart Filter: Keep valid dates OR extreme anomalies
-                lf = lf.filter(
-                    (pl.col("si_dt").is_not_null() & pl.col("fn_dt").is_not_null()) | 
-                    (pl.col("Anomaly_Extreme") != "")
-                )
-
-                lf = lf.with_columns((pl.col("fn_dt") - pl.col("si_dt")).dt.total_seconds().fill_null(0).alias("diff_sec"))
-
-                lf = lf.with_columns([
-                    pl.when(pl.col("Anomaly_Time") == "CRITICAL_SYSTEM_ROLLBACK")
-                      .then(pl.lit("CRITICAL_SYSTEM_ROLLBACK"))
-                    .when(pl.col("Threat_Tag").str.contains("CRITICAL_TIMESTOMP"))
-                      .then(pl.lit("CRITICAL_TIMESTOMP_ATTEMPT"))
-                    .when((pl.col("Threat_Score") >= 80) & (pl.col("Threat_Tag") != "NOISE_ARTIFACT"))
-                      .then(pl.lit("CRITICAL_ARTIFACT"))
-                    .when(pl.col("diff_sec") < -60)
-                      .then(pl.lit("TIMESTOMP_BACKDATE"))
-                    .when(pl.col("diff_sec") > self.tolerance)
-                      .then(pl.lit("FALSIFIED_FUTURE"))
-                    .otherwise(pl.lit("")).alias("Anomaly_Time"),
-                    
-                    pl.when(pl.col("si_dt").dt.microsecond() == 0)
-                      .then(pl.lit("ZERO_PRECISION"))
-                      .otherwise(pl.lit("")).alias("Anomaly_Zero")
-                ])
-                
-                score_expr = (
-                    pl.when(pl.col("Anomaly_Time") == "CRITICAL_SYSTEM_ROLLBACK").then(300)
-                    .when(pl.col("Threat_Tag") == "NOISE_ARTIFACT").then(0)
-                    .when(pl.col("Threat_Tag") == "INFO_VM_TIME_SYNC").then(0)
-                    .when(pl.col("Threat_Tag") == "INFO_NULL_TIMESTAMP").then(0) # 無実のLNKは0点
-                    .when(pl.col("Threat_Tag").str.contains("CRITICAL")).then(300) 
-                    .when(pl.col("Anomaly_Time") == "CRITICAL_ARTIFACT").then(200)
-                    .when(pl.col("Anomaly_Time") == "TIMESTOMP_BACKDATE").then(100)
-                    .otherwise(0)
-                )
-                lf = lf.with_columns(score_expr.alias("Chronos_Score"))
-            else:
-                print("    [!] MFT Timestamps not found. Skipping Standard Timestomp detection.")
-                lf = lf.with_columns([
-                    pl.col("Anomaly_Time").fill_null("").alias("Anomaly_Time"),
-                    pl.col("Threat_Score").alias("Chronos_Score")
-                ])
+            lf = self._detect_mft_timestomp(lf)
 
             # --- Icarus Integration ---
             icarus_results = []
@@ -766,13 +853,12 @@ class ChronosEngine:
             print(f"    [DEBUG] Final DF Height: {df.height}")
             if df.height > 0:
                 df = df.sort("Chronos_Score", descending=True)
-                # [Rollback] Disable writing anomalies to restore clean report state
-                # try:
-                #    df.write_csv(args.out)
-                #    print(f"[+] Analysis Complete. Anomalies: {df.height} -> Saved to {args.out}")
-                # except Exception as e:
-                #    print(f"    [!] WRITE FAILED: {e}")
-                print(f"    [Rollback] Anomaly writing disabled (clean report mode). Height: {df.height}")
+                try:
+                    df.write_csv(args.out)
+                    print(f"[+] Analysis Complete. Anomalies: {df.height} -> Saved to {args.out}")
+                except Exception as e:
+                    print(f"    [!] WRITE FAILED: {e}")
+                # print(f"    [Rollback] Anomaly writing disabled (clean report mode). Height: {df.height}")
             else:
                 print("\n[*] Clean: No significant anomalies found.")
                 try:
@@ -796,7 +882,7 @@ def main(argv=None):
     parser.add_argument("--shimcache", help="ShimCache CSV for Icarus Paradox check")
     parser.add_argument("--usnj", help="USN Journal CSV for Icarus Paradox check")
     parser.add_argument("-o", "--out", default="Chronos_Results.csv")
-    parser.add_argument("-t", "--tolerance", type=float, default=10.0)
+    parser.add_argument("-t", "--tolerance", type=float, default=60.0)
     parser.add_argument("--legacy", action="store_true")
     parser.add_argument("--targets-only", action="store_true")
     parser.add_argument("--all", action="store_true")

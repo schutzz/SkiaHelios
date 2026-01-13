@@ -62,6 +62,8 @@ class ChaosGrasp:
         if "recentdocs" in fname: return "RECENT_DOCS"
         if "evtxecmd" in fname or "eventlog" in fname: return "EVENT_LOG"
         if "activity" in fname and ".csv" in fname: return "ACTIVITY_TIMELINE"  # NEW: Windows Activity Timeline
+        if "$mft" in fname or "mft_output" in fname: return "MFT"
+        if "$j" in fname or "usnjrnl" in fname: return "USN"
         if "registry" in fname or "system" in fname or "ntuser" in fname: return "REGISTRY_GENERIC"
         return None
 
@@ -96,6 +98,8 @@ class ChaosGrasp:
                 elif artifact_type == "USER_ASSIST": self._add_user_assist(lf, csv_path)
                 elif artifact_type == "PREFETCH": self._add_prefetch(lf, csv_path)
                 elif artifact_type == "AMCACHE": self._add_amcache(lf, csv_path)
+                elif artifact_type == "MFT": self._add_mft(lf, csv_path)
+                elif artifact_type == "USN": self._add_usn(lf, csv_path)
                 elif artifact_type == "RECENT_DOCS": self._add_recent_docs(lf, csv_path)
                 elif artifact_type == "EVENT_LOG": self._add_event_logs(lf, csv_path)
                 elif artifact_type == "REG_TYPEDURLS": self._add_registry_mru(lf, csv_path, "TypedURLs", "Web_Access")
@@ -103,7 +107,60 @@ class ChaosGrasp:
                 elif artifact_type == "REG_OPENSAVEMRU": self._add_registry_mru(lf, csv_path, "OpenSaveMRU", "File_Access_Dialog")
                 elif artifact_type == "REG_LASTVISITEDMRU": self._add_registry_mru(lf, csv_path, "LastVisitedMRU", "Folder_Access_Dialog")
                 elif artifact_type == "ACTIVITY_TIMELINE": self._add_activity_timeline(lf, csv_path)  # NEW
+                elif artifact_type == "MFT": self._add_mft(lf, csv_path)
+                elif artifact_type == "USN": self._add_usn(lf, csv_path)
             except Exception: pass
+
+    def _add_mft(self, lf, path):
+        schema = lf.collect_schema().names()
+        # MFTECmd standard headers
+        time_col = next((c for c in ["Created0x10", "SI_CreationTime", "StandardInformation_Created"] if c in schema), None)
+        if not time_col: return
+
+        # FileName
+        fname_col = self._get_col(lf, ["FileName", "Name"], "Unknown")
+        # ParentPath
+        ppath_col = self._get_col(lf, ["ParentPath", "ParentFolder"], "")
+        
+        full_path_expr = ppath_col + pl.lit("\\") + fname_col
+        
+        # InUse Check
+        in_use_col = self._get_col(lf, ["InUse", "IsAllocated"], None)
+        action_prefix = pl.lit("[MFT] Created")
+        if in_use_col is not None:
+             action_prefix = pl.when(in_use_col.cast(pl.Boolean)).then(pl.lit("[MFT] Created (Allocated)")).otherwise(pl.lit("[MFT] Created (Deleted)"))
+
+        plan = self._common_transform(
+            lf, time_col, "System", "File_System", 
+            action_prefix + pl.lit(": ") + fname_col, 
+            full_path_expr, "File_Creation"
+        )
+        if plan is not None:
+             self.lazy_plans.append(plan.with_columns([
+                 pl.lit(str(path)).alias("Source_File"),
+                 pl.lit("[FILESYSTEM]").alias("Tag")
+             ]))
+             print(f"    [+] MFT loaded: {path.name}")
+
+    def _add_usn(self, lf, path):
+        schema = lf.collect_schema().names()
+        time_col = next((c for c in ["UpdateTimestamp", "Timestamp"] if c in schema), None)
+        if not time_col: return
+
+        fname_col = self._get_col(lf, ["FileName", "Name"], "Unknown")
+        reason_col = self._get_col(lf, ["UpdateReasons", "UpdateReason", "Reasons"], "Unknown_Reason")
+        
+        plan = self._common_transform(
+            lf, time_col, "System", "USN_Journal", 
+            pl.lit("[USN] ") + reason_col + pl.lit(": ") + fname_col, 
+            fname_col, "File_Journal"
+        )
+        if plan is not None:
+             self.lazy_plans.append(plan.with_columns([
+                 pl.lit(str(path)).alias("Source_File"),
+                 pl.lit("[JOURNAL]").alias("Tag")
+             ]))
+             print(f"    [+] USN loaded: {path.name}")
 
     def _get_col(self, lf, candidates, default=None):
         schema = lf.collect_schema().names()
@@ -117,7 +174,8 @@ class ChaosGrasp:
         raw_time = pl.col(time_col_name)
         parsed_time = pl.coalesce([
             raw_time.str.to_datetime("%Y-%m-%d %H:%M:%S", strict=False),
-            raw_time.str.to_datetime("%Y-%m-%d %H:%M:%S.%f", strict=False),
+            raw_time.str.replace(r"\.\d+$", "").str.to_datetime("%Y-%m-%d %H:%M:%S", strict=False),
+            raw_time.str.to_datetime("%Y-%m-%d %H:%M:%S%.f", strict=False),
             raw_time.str.to_datetime("%m/%d/%Y %H:%M:%S", strict=False),
             raw_time.str.to_datetime("%m/%d/%Y %I:%M:%S %p", strict=False)
         ])
@@ -257,7 +315,7 @@ class ChaosGrasp:
         # User extraction from filename (e.g., IEUser_Activity.csv)
         m = re.search(r'([^_\\/]+)_Activity', str(path), re.IGNORECASE)
         user = m.group(1) if m else "Unknown"
-        
+
         # Required columns check
         if "StartTime" not in schema or "Executable" not in schema:
             return
@@ -288,6 +346,52 @@ class ChaosGrasp:
                 pl.lit("[ACTIVITY]").alias("Tag")
             ]))
             print(f"    [+] Activity Timeline loaded: {path.name}")
+
+    def _add_mft(self, lf, path):
+        """Parse MFT - Use LastModified0x10 (Data Modify)"""
+        schema = lf.collect_schema().names()
+        time_col = next((c for c in ["LastModified0x10", "SI_ModificationTime"] if c in schema), None)
+        if not time_col: return
+
+        # Build Full Path: ParentPath + \ + FileName
+        path_expr = pl.col("FileName")
+        if "ParentPath" in schema:
+             path_expr = pl.col("ParentPath") + pl.lit("\\") + pl.col("FileName")
+
+        plan = self._common_transform(
+            lf, time_col, "System", "MFT", 
+            pl.col("FileName"), path_expr, "FileSystem Activity"
+        )
+        
+        if plan is not None:
+             self.lazy_plans.append(plan.with_columns([
+                 pl.lit(str(path)).alias("Source_File"),
+                 pl.lit("MFT_ENTRY").alias("Tag")
+             ]))
+             print(f"    [+] MFT loaded: {path.name}")
+
+    def _add_usn(self, lf, path):
+        """Parse USN Journal"""
+        schema = lf.collect_schema().names()
+        time_col = "Timestamp"
+        if time_col not in schema: return
+
+        # Path: Check if ParentPath exists
+        display_col = pl.col("FileName")
+        if "ParentPath" in schema:
+             display_col = pl.col("ParentPath") + pl.lit("\\") + pl.col("FileName")
+        
+        plan = self._common_transform(
+            lf, time_col, "System", "USN", 
+            pl.col("FileName"), display_col, action_expr=pl.col("UpdateReasons")
+        )
+
+        if plan is not None:
+             self.lazy_plans.append(plan.with_columns([
+                 pl.lit(str(path)).alias("Source_File"),
+                 pl.lit("USN_ENTRY").alias("Tag")
+             ]))
+             print(f"    [+] USN loaded: {path.name}")
 
     def _enforce_schema(self, lf):
         exprs = []

@@ -1,6 +1,45 @@
 import re
 from datetime import datetime, timedelta
 from tools.lachesis.intel import TEXT_RES
+# [NEW] Correlatorをインポート
+from tools.lachesis.correlator import CrossCorrelationEngine
+
+# System paths: reduce score (but never exclude)
+# Patterns are slash-agnostic (match regardless of \ or /)
+# Penalty should bring score ≤ threshold (50) for typical base scores (300)
+
+# Threat patterns: boost score (always prioritized)
+THREAT_BOOST_PATTERNS = [
+    ("setmace", 300, "CRITICAL_TIMESTOMP"),
+    ("sdelete", 200, "ANTI_FORENSICS"),
+    ("psexec", 250, "LATERAL_MOVEMENT"),
+    ("putty", 300, "REMOTE_ACCESS"),          # Boosted: 100→300 (Phase 6)
+    ("mimikatz", 400, "CREDENTIAL_THEFT"),
+    ("procdump", 150, "CREDENTIAL_DUMP"),
+    ("\\\\\\\\", 150, "UNC_EXECUTION"),  # UNC paths
+]
+
+# [PUBLIC] Garbage Patterns for centralized definition (Module Level)
+GARBAGE_PATTERNS = [
+    r"windows\winsxs", 
+    r"windows\assembly", 
+    r"windows\microsoft.net", 
+    r"windows\servicing",
+    r"windows\systemapps",
+    r"windows\inf",
+    r"windows\driverstore",
+    r"driverstore", # [Aggressive]
+    r"windows\diagtrack",
+    r"windows\biometry",
+    r"windows\softwaredistribution",
+    r"program files\windowsapps",
+    r"windowsapps", # [Aggressive]
+    r"deletedalluserpackages",
+    r"\apprepository",
+    r"\contentdeliverymanager",
+    r"\infusedapps",
+    r"system32\driverstore" # [Explicit]
+]
 
 class LachesisAnalyzer:
     def __init__(self, intel_module, enricher_module, lang="jp"):
@@ -13,51 +52,111 @@ class LachesisAnalyzer:
         self.infra_ips_found = set()
         self.noise_stats = {}
         self.total_events_analyzed = 0
-        self.dynamic_verdict = None  # [C.1] Dynamic Verdict result
+        self.dynamic_verdict = None
+        
+        # [Refactor] Load System Path Penalties from YAML
+        # ハードコーディングされていた SYSTEM_PATH_PENALTIES を削除し、設定からロード
+        context_scoring = self.intel.get('context_scoring', {})
+        self.path_penalties = context_scoring.get('path_penalties', [])
+
     
-    def determine_dynamic_verdict(self):
+    # ═══════════════════════════════════════════════════════════════════════
+    # Context-Aware Scoring (FN/FP Balanced)
+    # Adjusts scores based on path context instead of filtering
+    # ═══════════════════════════════════════════════════════════════════════
+    
+    # System paths: reduce score (but never exclude)
+    # Patterns are slash-agnostic (match regardless of \ or /)
+    # Penalty should bring score ≤ threshold (50) for typical base scores (300)
+    
+    @staticmethod
+    def adjust_score(path: str, base_score: int, penalties=None) -> tuple:
         """
-        [C.1] Determine dynamic verdict based on detected indicators.
-        
-        Analyzes visual_iocs to determine primary threat type and generates
-        an appropriate verdict for the executive summary.
-        
-        Priority: Ransomware > WebShell > Anti-Forensics > Phishing > Standard
-        
-        Returns:
-            dict: {"title": str, "description": str, "severity": str}
+        Adjust score based on path context.
+        Accepts dynamic penalties list from YAML.
         """
-        # Count IOC types
-        ioc_counts = {
-            "ransomware": 0,
-            "webshell": 0,
-            "anti_forensics": 0,
-            "phishing": 0,
-            "timestomp": 0,
-            "persistence": 0,
-            "execution": 0
-        }
+        adjusted = base_score
+        tags = []
+        path_lower = path.lower() if path else ""
         
-        for ioc in self.visual_iocs:
-            ioc_type = str(ioc.get("Type", "")).upper()
-            tags = str(ioc.get("Tags", "")).upper() if "Tags" in ioc else ""
-            combined = ioc_type + " " + tags
-            
-            if "RANSOM" in combined or "RANSOMWARE" in combined:
-                ioc_counts["ransomware"] += 1
-            if "WEBSHELL" in combined:
-                ioc_counts["webshell"] += 1
-            if "ANTI" in combined or "WIPE" in combined or "CCLEANER" in combined or "BCWIPE" in combined:
-                ioc_counts["anti_forensics"] += 1
-            if "PHISHING" in combined or "LNK" in ioc_type:
-                ioc_counts["phishing"] += 1
-            if "TIMESTOMP" in combined:
-                ioc_counts["timestomp"] += 1
-            if "PERSIST" in combined:
-                ioc_counts["persistence"] += 1
-            if "EXEC" in combined:
-                ioc_counts["execution"] += 1
+        # 0. Backward Compatibility / Default
+        if penalties is None:
+            penalties = [] # No penalties if not provided
+
+        # 1. Apply system path penalty (FN prevention: never go below 0)
+        # penalties is list of dicts: {'path': 'windowsapps', 'penalty': -260}
         
+        for rule in penalties:
+            p_pat = rule.get('path', '')
+            p_val = int(rule.get('penalty', 0))
+            if p_pat and p_pat in path_lower:
+                adjusted = max(0, adjusted + p_val)
+                tags.append("SYSTEM_NOISE")
+                break  # Only apply one penalty
+        
+        # 2. Apply threat boost (always takes priority)
+        # Use Global THREAT_BOOST_PATTERNS
+        for pattern, boost, tag in THREAT_BOOST_PATTERNS:
+            if pattern in path_lower:
+                adjusted += boost
+                tags.append(tag)
+        
+        return adjusted, tags
+
+    def _is_noise(self, ioc):
+        # [DEBUG] Trace execution (No try-except, let it crash if fails to prove existence)
+        try:
+             with open("sh_analyzer_debug.log", "a", encoding="utf-8") as f:
+                 f.write(".") 
+        except: pass
+
+        # [PARANOID] Check ALL potential fields
+        v = str(ioc.get('Value', '')).lower()
+        p = str(ioc.get('Path', '')).lower()
+        t = str(ioc.get('Target_Path', '')).lower()
+        c = str(ioc.get('CommandLine', '')).lower()
+        
+        # Combined inspection string (normalized later)
+        check_val = f"{v} | {p} | {t} | {c}"
+        
+        fname = str(ioc.get("Value", "")).lower()
+        tags = str(ioc.get("Tag", "")).upper()
+        score = int(ioc.get("Score", 0))
+
+        # 🛡️ Safety Valve
+        if score >= 500: return False
+        if "LATERAL" in tags or "REMOTE" in tags or "RANSOM" in tags or "WIPER" in tags:
+            return False
+
+        # 🗑️ Path Normalization (強化版)
+        norm_path = check_val.replace("/", "\\").replace(".\\", "").replace("\\\\", "\\")
+        
+        # 🗑️ 1. Garbage Path Filter (Use GLOBAL CONSTANT)
+        for trash in GARBAGE_PATTERNS:
+            if trash in norm_path:
+                try:
+                    with open("sh_analyzer_drop.log", "a", encoding="utf-8") as f:
+                        f.write(f"DROP: {fname} matches {trash}\n")
+                except: pass
+                return True
+
+        # 🗑️ 2. Extension Filter (Manifest等) - Only check File Name
+        noise_exts = [
+            ".manifest", ".mum", ".cat", ".tlb", 
+            ".png", ".jpg", ".ico", ".gif", ".xml",
+            ".pri", ".p7x", ".p7s", ".db", ".dat",
+            ".dll", ".sys", ".mui", ".nls"
+        ]
+        for ext in noise_exts:
+            if fname.endswith(ext):
+                return True
+
+        return False
+    def get_verdict_for_report(self, verdict_flags):
+        """
+        [Presentation Layer] Convert verdict flags to report dictionary.
+        Replaces the old determine_dynamic_verdict logic.
+        """
         # Verdict text by language
         verdicts = {
             "jp": {
@@ -77,41 +176,40 @@ class LachesisAnalyzer:
         }
         
         lang_verdicts = verdicts.get(self.lang, verdicts["jp"])
+        flags = verdict_flags or set()
         
-        # Determine verdict by priority
-        if ioc_counts["ransomware"] > 0:
+        # Determine verdict by flag priority
+        if "RANSOMWARE_ACTIVITY" in flags:
             title, desc = lang_verdicts["ransomware"]
             severity = "CRITICAL"
-        elif ioc_counts["webshell"] > 0:
+        elif "WEBSHELL_INTRUSION" in flags:
             title, desc = lang_verdicts["webshell"]
             severity = "CRITICAL"
-        elif ioc_counts["anti_forensics"] > 0:
+        elif "ANTI_FORENSICS_HEAVY" in flags:
             title, desc = lang_verdicts["anti_forensics"]
             severity = "HIGH"
-        elif ioc_counts["phishing"] > 0:
+        elif "PHISHING_ENTRY" in flags:
             title, desc = lang_verdicts["phishing"]
             severity = "HIGH"
         else:
             title, desc = lang_verdicts["standard"]
             severity = "MEDIUM"
         
-        self.dynamic_verdict = {
+        return {
             "title": title,
             "description": desc,
             "severity": severity,
-            "ioc_counts": ioc_counts
+            "ioc_counts": {}
         }
-        
-        try:
-            print(f"    -> [Analyzer] Dynamic Verdict: {severity} - {title}".encode('cp932', errors='replace').decode('cp932'))
-        except:
-             print(f"    -> [Analyzer] Dynamic Verdict: {severity} - {title}".encode('utf-8', errors='ignore').decode('utf-8'))
-        return self.dynamic_verdict
 
     def process_events(self, analysis_result, dfs):
         raw_events = analysis_result.get("events", [])
         self.total_events_analyzed = len(raw_events)
         self.noise_stats = self.intel.noise_stats # Share stats dict
+        
+        # [DEBUG] Trace Data Loading
+        with open("pipeline_trace.log", "a") as f:
+             f.write(f"[ANALYZER] process_events called. DFS Keys: {list(dfs.keys())}\n")
 
         high_crit_times = []
         critical_events = []
@@ -158,10 +256,27 @@ class LachesisAnalyzer:
         # 2. Extract Visual IOCs
         self.visual_iocs = []
         self._extract_visual_iocs_from_pandora(dfs)
+        self._extract_visual_iocs_from_timeline(dfs) # [New] Independent Timeline Scan
         self._extract_visual_iocs_from_chronos(dfs)
         self._extract_visual_iocs_from_aion(dfs)
         self._extract_visual_iocs_from_plutos_recon(dfs)
         self._extract_visual_iocs_from_events(raw_events)
+        
+        # 2. Correlation & Verdict (Delegated to Correlator)
+        correlator = CrossCorrelationEngine(self.intel)
+        if self.visual_iocs:
+            # Load Evidence
+            correlator.load_evidence(dfs)
+            
+            # Apply Correlation Rules (Boost Scores)
+            self.visual_iocs = correlator.apply_rules(self.visual_iocs)
+            
+            # Calculate Verdict (New!)
+            flags, summary = correlator.determine_verdict(self.visual_iocs)
+            
+            # 結果を AnalysisResult に書き戻す
+            analysis_result["verdict_flags"] = flags
+            analysis_result["lateral_summary"] = summary
         
         # 3. Generate Pivot Seeds
         self._generate_pivot_seeds()
@@ -190,11 +305,13 @@ class LachesisAnalyzer:
         self._correlate_antiforensics_and_user_creation()
 
         return {
+
             "critical_events": critical_events,
             "medium_events": medium_events,
             "time_range": time_range,
             "phases": [critical_events] if critical_events else []
         }
+
 
     # ============================================================
     # [v5.6] Anti-Forensics Causality Correlation
@@ -248,7 +365,169 @@ class LachesisAnalyzer:
                 if "LOG_DELETION" in tag or "EVIDENCE_WIPING" in tag:
                     ioc['Causality_Note'] = gap_note
 
+
+    def _extract_visual_iocs_from_timeline(self, dfs):
+        # [Phase 3 Fix 2] Extract high-value IOCs from Timeline (Independent Scan)
+        timeline_df = dfs.get('Timeline')
+        if timeline_df is not None:
+            HIGH_VALUE_PATTERNS = [
+                ("putty", "REMOTE_ACCESS", 300),
+                ("winscp", "REMOTE_ACCESS", 300), # [v5.3] Added
+                ("setmace", "ANTI_FORENSICS", 400),
+                ("sdelete", "ANTI_FORENSICS", 300),
+                ("dd.exe", "DATA_EXFIL", 200),
+                ("ssh-add", "DATA_EXFIL", 200),   # [v5.3] Added
+            ]
+            
+            for row in timeline_df.iter_rows(named=True):
+                # [Fix] Fallback for multiple column names
+                fname = str(row.get("Target_FileName") or row.get("FileName") or row.get("File_Name") or "").lower()
+                path = str(row.get("Target_Path") or row.get("ParentPath") or "").lower()
+                score = int(row.get("Score", 0))
+                
+                # [Fix] Check High-Value Patterns BEFORE Score Filter
+                matched_pattern = False
+                for pattern, ioc_type, min_score in HIGH_VALUE_PATTERNS:
+                    if pattern in fname or pattern in path:
+                         # [DEBUG] Trace match
+                         if "putty" in pattern:
+                             with open("putty_debug.log", "a") as f:
+                                 f.write(f"MATCH: {fname} Path={path} Score={score} Type={ioc_type}\n")
+
+                         # Check for UNC path (lateral movement)
+                         is_unc = path.startswith("\\\\") and not path.startswith("\\\\?\\")
+                         if is_unc:
+                             ioc_type = "LATERAL_MOVEMENT"
+                             min_score = max(min_score, 200)
+                         
+                         # [v5.3 FIX] Include UNC path context in Value for visibility
+                         display_name = fname if fname else path.split("\\")[-1]
+                         if is_unc and path:
+                             display_name = f"{display_name} [FROM: {path}]"
+                         
+                         self._add_unique_visual_ioc({
+                             "Type": ioc_type,
+                             "Value": display_name,
+                             "Path": path,
+                             "Note": "UNC Execution (Network Share)" if is_unc else "Timeline Artifact",
+                             "Time": str(row.get("Timestamp", "")),
+                             "Score": max(score, min_score),
+                             "Tag": f"{ioc_type},UNC_EXECUTION" if is_unc else ioc_type,
+                             "Reason": "Remote Execution Detected" if is_unc else "High-Value Pattern Detected"
+                         })
+                         matched_pattern = True
+                         break
+                
+                if matched_pattern: continue
+
+                # UNCパス検出用 (Analyzer側でも念のためスキャン)
+                path = str(row.get("Target_Path") or row.get("ParentPath") or "").lower()
+                
+                if path.startswith(r"\\") and not path.startswith(r"\\?\\") and "127.0.0.1" not in path:
+                     # UNCパスを発見！
+                     display_name = path.split("\\")[-1] or "Remote Exec"
+                     self._add_unique_visual_ioc({
+                         "Type": "LATERAL_MOVEMENT",
+                         "Value": f"{display_name} [FROM: {path}]",  # [v5.3 FIX] Full context
+                         "Path": path,
+                         "Note": "UNC Execution (Network Share)",
+                         "Score": 300,
+                         "Tag": "UNC_PATH_EXECUTION,LATERAL_MOVEMENT",
+                         "Reason": "Remote Execution Detected"
+                     })
+
+    def _correlate_cross_evidence(self, dfs):
+        """
+        [Phase 7] Rule-Based Cross-Correlation Engine
+        intel_signatures.yaml の 'correlation_rules' に基づき、
+        異なる証拠ソース（Pandora IOC vs Plutos SRUM等）を突き合わせる。
+        """
+        # 1. 設定のロード
+        rules = self.intel.get('correlation_rules', [])
+        if not rules: return
+
+        # 2. データソースの準備 (今回はSRUMのみ実装だが、拡張可能)
+        # 毎回DataFrameをスキャンすると遅いので、必要なデータは辞書化しておく
+        data_cache = {}
+        
+        # SRUMキャッシュの構築
+        if dfs.get('Plutos_Srum') is not None:
+            srum_map = {}
+            for row in dfs['Plutos_Srum'].iter_rows(named=True):
+                proc = str(row.get("Process", "")).lower().split("\\")[-1]
+                sent = int(row.get("BytesSent", 0) or 0)
+                if proc in srum_map: srum_map[proc] += sent
+                else: srum_map[proc] = sent
+            data_cache['Plutos_Srum'] = srum_map
+
+        # 3. ルール適用ループ
+        for ioc in self.visual_iocs:
+            ioc_tags = str(ioc.get("Tag", "")).upper()
+            ioc_val = str(ioc.get("Value", "")).lower()
+
+            for rule in rules:
+                # --- A. Trigger Check (条件合致) ---
+                triggers = rule.get('triggers', {})
+                target_tags = triggers.get('tags', [])
+                
+                # タグがいずれか一致するか
+                if not any(t in ioc_tags for t in target_tags):
+                    continue
+
+                # --- B. Validation (証拠確認) ---
+                validator = rule.get('validator', {})
+                source_name = validator.get('source')
+                
+                # キャッシュからデータを取得
+                source_data = data_cache.get(source_name)
+                if not source_data: continue
+
+                # 照合 (Process Name matching)
+                # 単純一致だけでなく部分一致も考慮するならロジック拡張が必要
+                metric_val = source_data.get(ioc_val, 0)
+                
+                # 閾値チェック
+                threshold = validator.get('threshold', 0)
+                operator = validator.get('operator', '>')
+                
+                is_hit = False
+                if operator == '>' and metric_val > threshold: is_hit = True
+                elif operator == '>=' and metric_val >= threshold: is_hit = True
+                
+                if not is_hit: continue
+
+                # --- C. Action (評価更新) ---
+                action = rule.get('action', {})
+                
+                # スコア更新
+                if 'score_override' in action:
+                    ioc['Score'] = action['score_override']
+                elif 'score_min' in action:
+                    ioc['Score'] = max(int(ioc.get('Score', 0)), action['score_min'])
+                
+                # タグ追加
+                if 'tag_append' in action:
+                    new_tags = action['tag_append']
+                    if new_tags not in ioc.get('Tag', ''):
+                        ioc['Tag'] = (ioc.get('Tag', '') + "," + new_tags).strip(',')
+
+                # Note/Insight 追加 (テンプレート展開)
+                fmt_data = {"value": metric_val, "value_mb": metric_val // 1024 // 1024}
+                
+                if 'note_append' in action:
+                    ioc['Note'] = (ioc.get('Note', '') + action['note_append'].format(**fmt_data))
+                
+                if 'insight_template' in action:
+                    insight = action['insight_template'].format(**fmt_data)
+                    ioc['Insight'] = (ioc.get('Insight', '') + "\n\n" + insight).strip()
+                
+                print(f"    [!] Correlation Hit ({rule['id']}): {ioc_val} -> Score {ioc['Score']}")
+
     def _extract_visual_iocs_from_chronos(self, dfs):
+        # [DEBUG] Check available keys
+        with open("keys_debug.log", "w") as f:
+            f.write(f"DFS Keys: {list(dfs.keys())}\n")
+            
         if dfs.get('Chronos') is not None:
             df = dfs['Chronos']
             cols = df.columns
@@ -256,6 +535,9 @@ class LachesisAnalyzer:
             if score_col in cols:
                 try:
                     df_sorted = df.sort(score_col, descending=True)
+                    
+                    # [Removed] Timeline logic moved to _extract_visual_iocs_from_timeline
+                    
                     for row in df_sorted.iter_rows(named=True):
                         fname = row.get("FileName") or ""
                         path = row.get("ParentPath") or ""
@@ -281,6 +563,25 @@ class LachesisAnalyzer:
                                 "Action": "Rollback Detected" # [Fix] Fallback Action
                             })
                             continue
+
+                        # ═══════════════════════════════════════════════════════════
+                        # [Phase 6] Context-Aware Enrichment (Chronos)
+                        # Copying logic from Pandora loop to catch items from Timeline
+                        # ═══════════════════════════════════════════════════════════
+                        path_lower = str(path).lower()
+                        fname_lower = str(fname).lower()
+                        tag = str(row.get("Threat_Tag", "")).upper() # Note: Chronos might not have this, uses anomaly_type?
+                        
+                        # Case 2: PuTTY (Boost if found in Timeline)
+                        if "putty" in path_lower or "putty" in fname_lower:
+                            score = max(score, 300)
+                            if "REMOTE_ACCESS" not in tag:
+                                tag += ",REMOTE_ACCESS_CLIENT"
+                                
+                        # Case 1: SetMACE
+                        if "setmace" in path_lower:
+                             score = max(score, 400)
+                             tag += ",CRITICAL_TIMESTOMP"
 
                         extra_info = {}
                         timeline_df = dfs.get('Timeline')
@@ -321,47 +622,131 @@ class LachesisAnalyzer:
         if dfs.get('Pandora') is not None:
             df = dfs['Pandora']
             timeline_df = dfs.get('Timeline') 
+             
+            
+            timeline_df = dfs.get('Timeline') 
             
             if "Threat_Score" in df.columns:
+                pass
+            else:
+                 with open("pipeline_trace.log", "a") as f:
+                     f.write(f"[ANALYZER] Pandora DataFrame missing 'Threat_Score'. Columns: {df.columns}\n")
+            
+            if "Threat_Score" in df.columns:
+
                 try:
-                    df_sorted = df.sort("Threat_Score", descending=True)
-                    for row in df_sorted.iter_rows(named=True):
+                    # [Emergency Fix Phase 2] System Noise Path Filter
+                    SYSTEM_NOISE_PATHS = [
+                        "winsxs", "assembly", "servicing", "manifests", 
+                        "catalogs", "driverstore", "installer"
+                    ]
+                    
+                    # Skip explicit sorting to avoid potential crashes with mixed types
+                    # df_sorted = df.sort("Threat_Score", descending=True)
+                    
+                    for i, row in enumerate(df.iter_rows(named=True)):
+                        
                         fname = row.get("Ghost_FileName", "")
                         path = row.get("ParentPath", "")
                         tag = str(row.get("Threat_Tag", "")).upper()
                         score = int(float(row.get("Threat_Score", 0)))
+                        
+                        # [FIX] Define these early for debug and logic
+                        path_lower = str(path).lower()
+                        fname_lower = str(fname).lower()
+
+                        if "setmace" in path_lower or "setmace" in fname_lower:
+                             pass
+                        
+                        # ═══════════════════════════════════════════════════════════
+                        
+                        # [DEBUG] Trace SetMACE/PuTTY (Enhanced)
+                        # Check Tags too, in case filename is hashed
+                        if "TIMESTOMP" in tag or "REMOTE_ACCESS" in tag or "setmace" in path_lower or "putty" in fname_lower:
+                             with open("pipeline_trace.log", "a") as f:
+                                 f.write(f"[ANALYZER] Found: {fname} Path={path} Score={score} Tag={tag}\n")
+                        
+                        if score == 0 and "TIMESTOMP" in tag:
+                             with open("pipeline_trace.log", "a") as f:
+                                 f.write(f"[ANALYZER] ZERO SCORE TIMESTOMP DETECTED: {fname}\n")
+
+                        # [Phase 4] Context-Aware Enrichment (文脈に基づく評価補正)
+                        # ハッシュ化や低スコアで埋もれているものを「状況証拠」で救済
+                        # ═══════════════════════════════════════════════════════════
+                        
+                        path_lower = str(path).lower()
+                        fname_lower = str(fname).lower()
+                        
+                        # Case 1: SetMACE (ハッシュ化されているが、パスに痕跡あり)
+                        # [Fix] Also check Tag for hashed filenames
+                        if "setmace" in path_lower or "TIMESTOMP_TOOL" in tag: 
+                            fname = "SetMACE.exe (Recovered)"
+                            score = max(score, 400)  # スコアを正当な値に補正
+                            tag += ",CRITICAL_TIMESTOMP"
+                        
+                        # Case 2: PuTTY (スコア不足だが、パスや名前で明白)
+                        elif "putty" in path_lower or "putty" in fname_lower:
+                            if score < 300:
+                                score = 300  # Phase 6: Ensure it passes threshold (was 150)
+                            if "REMOTE_ACCESS" not in tag:
+                                tag += ",REMOTE_ACCESS_CLIENT"
+                        
+                        # Case 3: UNC Path (横展開の痕跡)
+                        elif path.startswith("\\\\") and not path.startswith("\\\\?\\"):
+                            if score < 200:
+                                score = max(score, 200)
+                            if "LATERAL" not in tag:
+                                tag += ",LATERAL_MOVEMENT_EXEC"
+                        
+                        # ═══════════════════════════════════════════════════════════
+                        # 標準フィルタリング (補正されたスコアで判定)
+                        # ═══════════════════════════════════════════════════════════
+                        
+                        # [NEW] Skip system noise paths immediately
+                        if any(noise in path_lower for noise in SYSTEM_NOISE_PATHS):
+                            continue
 
                         bypass_reason = None
                         is_trusted_loc = self.intel.is_trusted_system_path(path)
 
                         if "MASQUERADE" in tag: bypass_reason = "Critical Criteria (CRITICAL_MASQUERADE) [DROP]"
+
+
                         elif "PHISH" in tag: bypass_reason = "Critical Criteria (PHISHING) [DROP]"
                         elif "BACKDOOR" in tag: bypass_reason = "Backdoor Detected [DROP]"
                         elif "CREDENTIALS" in tag and score >= 200: bypass_reason = "Credential Dump [DROP]"
                         
                         elif is_trusted_loc:
                             self.intel.log_noise("Trusted Path (Update)", fname)
+                            if "setmace" in path.lower():
+                                 pass # with open("analyzer_debug.log", "a") as f: f.write(f"[DEBUG] SetMACE skipped as Trusted Path: {path}\n")
                             continue
                         
-                        if self.intel.is_noise(fname, path):
+                        # [Fix] Bypass noise filter for Critical items (SetMACE/PuTTY hashes)
+                        is_crit_bypass = "TIMESTOMP" in tag or "REMOTE_ACCESS" in tag or "CRITICAL" in tag
+                        if not is_crit_bypass and self.intel.is_noise(fname, path):
                              self.intel.log_noise("Explicit Noise Filter", fname)
+                             # if "setmace" in path.lower(): ...
                              continue
 
                         elif self.intel.is_dual_use(fname): bypass_reason = "Dual-Use Tool [DROP]"
+
                         elif "TIMESTOMP" in tag: bypass_reason = "Timestomp [DROP]"
                         elif score >= 250: bypass_reason = "Critical Score [DROP]"
 
                         if bypass_reason: 
                             pass
-                        elif score < 200: continue
+                        elif score < 50: continue # Phase 6: Threshold lowered from 200 to 50
 
                         if not bypass_reason: bypass_reason = "High Confidence"
-                        clean_name = fname.split("] ")[-1]
+                        clean_name = os.path.basename(fname.split("] ")[-1])
                         
                         extra_info = {}
                         final_tag = tag
+
                         
                         if ".lnk" in fname.lower():
+
                             target_path, timeline_tag, args, _ = self.enricher.enrich_from_timeline(fname, timeline_df)
                             
                             if target_path: extra_info["Target_Path"] = target_path
@@ -375,20 +760,30 @@ class LachesisAnalyzer:
                                 merged_tags.discard("")
                                 final_tag = ",".join(list(merged_tags))
                         
+                        # [Emergency Fix Phase 2] Type Field Enhancement for Renderer Categorization
+                        ioc_type = final_tag
+                        if "REMOTE_ACCESS" in tag.upper():
+                            ioc_type = "REMOTE_ACCESS"
+                        elif "LATERAL" in tag.upper():
+                            ioc_type = "LATERAL_MOVEMENT"
+                        
                         self._add_unique_visual_ioc({
-                            "Type": final_tag,
+                            "Type": ioc_type,
                             "Value": clean_name, 
                             "Path": path, 
                             "Note": "File Artifact", 
                             "Time": str(row.get("Ghost_Time_Hint", "")), 
                             "Reason": bypass_reason,
                             "Extra": extra_info,
-                            "Extra": extra_info,
                             "Score": score,
                             "FileName": fname, # [Fix] For Smart Formatting
-                            "Target_Path": path
+                            "Target_Path": path,
+                            "Tag": final_tag
                         })
-                except: pass
+                except Exception as e:
+                     print(f"[ERROR] Pandora IOC Extract Failed: {e} | Row: {row.get('Ghost_FileName')}")
+                     import traceback
+                     traceback.print_exc()
 
     def _extract_visual_iocs_from_aion(self, dfs):
          if dfs.get('AION') is not None:
@@ -522,15 +917,19 @@ class LachesisAnalyzer:
             
             is_dual = self.intel.is_dual_use(ev.get('Summary', ''))
             tag = str(ev.get('Tag', '')).upper()
+            summary_lower = str(ev.get('Summary', '')).lower()
+            
             # [FIX] Match both ANTI_FORENSICS and ANTIFORENSICS patterns
-            is_af = "ANTI_FORENSICS" in tag or "ANTIFORENSICS" in tag
+            is_af = "ANTI_FORENSICS" in tag or "ANTIFORENSICS" in tag or "TIMESTOMP" in tag
+            is_remote = "REMOTE_ACCESS" in tag or "SSH" in tag or "putty" in summary_lower or "winscp" in summary_lower
+            is_lateral = "LATERAL" in tag or ev['Category'].upper() == "LATERAL" or "\\\\" in summary_lower
             is_webshell = "WEBSHELL" in tag or "OBFUSCATION" in tag
             score = ev.get('Criticality', 0)
 
-            # [FIX] Expanded Category Acceptance for File/Lateral/Persist
-            allowed_cats = ['EXEC', 'ANTI', 'FILE', 'LATERAL', 'PERSIST']
+            # [FIX] Expanded Category Acceptance for File/Lateral/Persist and Full Wordings
+            allowed_cats = ['EXEC', 'ANTI', 'FILE', 'LATERAL', 'PERSIST', 'EXECUTION', 'LOG_ENTRY', 'ARTIFACT_WRITE']
             
-            if (score >= 90 or is_dual or is_af or is_webshell) and (ev['Category'] in allowed_cats or "CRITICAL" in tag):
+            if (score >= 90 or is_dual or is_af or is_webshell or is_remote or is_lateral) and ( any(c in ev['Category'].upper() for c in allowed_cats) or "CRITICAL" in tag):
                 kws = ev.get('Keywords', [])
                 # Keyword fallback to Summary/Filename if empty
                 if not kws:
@@ -539,17 +938,19 @@ class LachesisAnalyzer:
 
                 if kws:
                     kw = str(kws[0]).lower()
-                    if not self.intel.is_noise(kw):
+                    # [Fix] Bypass noise check for Critical items (SetMACE/PuTTY hashes)
+                    is_crit_bypass = "TIMESTOMP" in tag or "REMOTE_ACCESS" in tag or "CRITICAL" in tag
+                    if is_crit_bypass or not self.intel.is_noise(kw):
                         if is_af:
                             type_label = "ANTI_FORENSICS"
                             reason_label = "Evidence Destruction"
+                        elif is_remote:
+                            type_label = "REMOTE_ACCESS"
+                            reason_label = "Remote Access Tool"
                         elif is_webshell:
                             type_label = "WEBSHELL"
                             reason_label = "WebShell / Obfuscation"
-                        elif is_dual:
-                            type_label = "DUAL_USE_TOOL"
-                            reason_label = "Dual-Use Tool [DROP]"
-                        elif "LATERAL" in tag or ev['Category'] == "LATERAL":
+                        elif is_lateral:
                             type_label = "LATERAL_MOVEMENT"
                             reason_label = "Lateral Movement"
                         elif "PERSIST" in tag or ev['Category'] == "PERSIST":
@@ -580,11 +981,55 @@ class LachesisAnalyzer:
                             "CommandLine": ev.get('CommandLine')
                         })
 
+    def _is_noise(self, row):
+        """
+        [Safety Valve] Critical threats MUST survive noise filtering.
+        Returns True if the row should be filtered out (Noise).
+        Returns False if it should be kept (Valid or Critical).
+        """
+        # 1. Safety Valve: High Score / Critical Tag Protection
+        score = int(row.get("Score", 0) or 0)
+        tags = str(row.get("Tag", "")).upper()
+        
+        if score >= 200: return False  # High risk is never noise
+        
+        critical_keywords = ["WEBSHELL", "RANSOM", "LATERAL", "CRITICAL", "REMOTE_ACCESS", "TIMESTOMP"]
+        if any(k in tags for k in critical_keywords): return False
+        
+        # 2. Standard Noise Filtering
+        # Delegate to Intel logic but also check local garbage paths if needed
+        # (Intel.is_noise handles hash/path/regex checks)
+        if self.intel.is_noise(row.get("Value", ""), row.get("Path", "")):
+            return True
+            
+        return False
+
     def _add_unique_visual_ioc(self, ioc_dict):
-        if self.intel.is_noise(ioc_dict["Value"], ioc_dict.get("Path", "")): return
+        # [Fix] Restore variables needed for downstream logic
+        tag = str(ioc_dict.get("Tag", "")).upper()
+        path = str(ioc_dict.get("Path", "")).upper()
+        # Re-derive is_critical for debug logic
+        is_critical = "TIMESTOMP" in tag or "CRITICAL" in tag or "REMOTE_ACCESS" in tag or "LATERAL" in tag
+        is_critical = is_critical or "SETMACE" in path or "PUTTY" in path
+
+        # [Refactor] Use centralized _is_noise with Safety Valve
+        if self._is_noise(ioc_dict): return
+        
         for existing in self.visual_iocs:
             if existing["Value"] == ioc_dict["Value"] and existing["Type"] == ioc_dict["Type"]: return
+        
+        if "downloads" in path.lower():
+             print(f"[DEBUG-DL] Path={path} Val={ioc_dict['Value']} Tags={tag}")
+
+        # [DEBUG] Confirm Addition
+        if is_critical or "setmace" in path.lower():
+             print(f"[DEBUG-ADD] Adding IOC: {ioc_dict['Value']} Sc={ioc_dict.get('Score')} Path={ioc_dict.get('Path')} Crit={is_critical}")
+             with open("add_debug.log", "a", encoding="utf-8") as f:
+                 f.write(f"[ADD] Adding IOC: {ioc_dict['Value']} Sc={ioc_dict.get('Score')} Path={ioc_dict.get('Path')}\n")
+                 
         self.visual_iocs.append(ioc_dict)
+
+
 
     def _generate_pivot_seeds(self):
         for ioc in self.visual_iocs:

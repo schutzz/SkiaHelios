@@ -104,16 +104,44 @@ class LachesisRenderer:
             # [User Request] Apply USN Condenser to Timeline Phases (Section 3)
             # This fixes the "USN Storm" in the Detailed Timeline table.
             if analysis_data and 'phases' in analysis_data:
-                new_phases = []
+                # ═══════════════════════════════════════════════════════════
+                # Context-Aware Scoring (Root Cause Fix) - Phase Timeline
+                # Uses unified adjust_score() for FN/FP balanced filtering
+                # ═══════════════════════════════════════════════════════════
+                from tools.lachesis.sh_analyzer import LachesisAnalyzer, GARBAGE_PATTERNS
+                
+                PHASE_DISPLAY_THRESHOLD = 50  # Same as IOC section
+                
+                filtered_phases = []
                 for phase in analysis_data['phases']:
-                    # Apply condensation to each timeline phase
-                    new_phase = self._condense_usn_events(phase)
-                    new_phases.append(new_phase)
-                analysis_data['phases'] = new_phases
+                    filtered_phase = []
+                    for ev in phase:
+                        summary = str(ev.get('Summary', ''))
+                        path = str(ev.get('Path', '')) or summary  # Use summary as fallback
+                        original_score = int(ev.get('Score', 0)) if ev.get('Score') else 0
+                        
+                        # Apply Context-Aware Score Adjustment
+                        adjusted_score, new_tags = LachesisAnalyzer.adjust_score(path, original_score)
+                        
+                        # Update event with adjusted score
+                        ev['Score'] = adjusted_score
+                        
+                        # Keep if above threshold
+                        if adjusted_score >= PHASE_DISPLAY_THRESHOLD:
+                            filtered_phase.append(ev)
+                    
+                    # Only add non-empty phases
+                    if filtered_phase:
+                        # Apply USN condensation after filtering
+                        condensed = self._condense_usn_events(filtered_phase)
+                        filtered_phases.append(condensed)
+                
+                analysis_data['phases'] = filtered_phases
+
 
             # [Optimization] Apply Grouping & Noise Reduction Globally
             # This ensures Section 4 (Detailed Findings), Section 7 (IOCs), and Stats are consistent.
-            refined_iocs = self._group_all_iocs(analyzer.visual_iocs)
+            refined_iocs = self._group_all_iocs(analyzer.visual_iocs, analyzer)
             
             # [Fix] Global Clean of VOID bug (Targeting the typo version specifically)
             # This ensures Tables (Section 7) are clean, not just the diagram.
@@ -128,13 +156,54 @@ class LachesisRenderer:
             high_lnks = [i for i in init_access if i.get("Insight")]
             gen_lnks = [i for i in init_access if not i.get("Insight")]
 
+            # ═══════════════════════════════════════════════════════════════
+            # Context-Aware Scoring (Root Cause Fix)
+            # Applies score adjustments based on path context, then filters
+            # FN Prevention: high-threat patterns are boosted, not excluded
+            # ═══════════════════════════════════════════════════════════════
+            from tools.lachesis.sh_analyzer import LachesisAnalyzer
+            
+            DISPLAY_THRESHOLD = 50  # Unified threshold for all sections
+            
+            scored_iocs = []
+            
+            # [DEBUG] Check Logic Flow
+            print(f"[DEBUG-FLOW] Entering Scoring Loop. refined_iocs count: {len(refined_iocs) if 'refined_iocs' in locals() else 'UNDEFINED'}")
+
+            for ioc in refined_iocs:
+                path = str(ioc.get("Path", ""))
+                value = str(ioc.get("Value", ""))
+                
+                # Use Value as fallback when Path is empty (IOC structure fix)
+                target_path = path if path else value
+                
+                original_score = int(ioc.get("Score", 0) or 0)
+                
+                # Apply Context-Aware Score Adjustment
+                adjusted_score, new_tags = LachesisAnalyzer.adjust_score(target_path, original_score, analyzer.path_penalties)
+
+                # Update IOC with adjusted score
+                ioc["Score"] = adjusted_score
+                ioc["Original_Score"] = original_score  # Keep for debugging
+                
+                # Append new tags if any
+                if new_tags:
+                    existing_tag = str(ioc.get("Tag", ""))
+                    ioc["Tag"] = existing_tag + "," + ",".join(new_tags) if existing_tag else ",".join(new_tags)
+                
+                # Filter by adjusted score
+                if adjusted_score >= DISPLAY_THRESHOLD:
+                    scored_iocs.append(ioc)
+            
+            refined_iocs = scored_iocs
+            
             context = {
                 "txt": self.txt,
                 "hostname": self.hostname,
                 "metadata": metadata,
                 "analysis_data": analysis_data,
                 "now": datetime.now().strftime('%Y-%m-%d'),
-                "dynamic_verdict": analyzer.determine_dynamic_verdict(),
+                "dynamic_verdict": analyzer.get_verdict_for_report(analysis_data.get("verdict_flags")),
                 "attack_methods": self._get_attack_methods(analyzer),
                 
                 # [CHANGE] Replace the old vertical flowchart with the new Sequence Diagram
@@ -150,7 +219,7 @@ class LachesisRenderer:
                 "high_interest_lnks": high_lnks,
                 "generic_lnks": gen_lnks,
                 "attack_chain_mermaid": "",  # [FIX] Removed duplicate - mermaid_timeline already shows in Executive Summary
-                "plutos_section": self._render_plutos_section_text(dfs_for_ioc),
+                "plutos_section": self._render_plutos_section_text(dfs_for_ioc, analyzer),
                 "stats": self._prepare_stats(analyzer, analysis_data, dfs_for_ioc, refined_iocs),
                 "recommendations": self._prepare_recommendations(analyzer),
                 "all_iocs": refined_iocs 
@@ -189,9 +258,68 @@ class LachesisRenderer:
                 log.write(f"[{datetime.now()}] {msg}\n")
                 traceback.print_exc(file=log)
 
-    def _group_all_iocs(self, iocs):
+    def _group_all_iocs(self, iocs, analyzer=None):
+        # [Hybrid Fix] Dynamic Noise Filter Integration (Local Import)
+        from tools.lachesis.sh_analyzer import GARBAGE_PATTERNS
+
         # Flattened grouping for Section 7
         grouped_iocs = []
+        
+        
+        # ═══════════════════════════════════════════════════════════
+        # [Phase 5+] Hybrid Smart Filter (The Safety Valve Edition)
+        # Priority: Remove noise UNLESS score >= 500 (Critical)
+        # Use centralized logic from analyzer._is_noise
+        # AND Redundant Check for safety
+        # ═══════════════════════════════════════════════════════════
+        
+        
+        filtered_iocs = []
+        # Logging removed for production cleanliness, but structure kept for logic clarity
+        
+        # [DEBUG PROBE]
+        try:
+            with open("renderer_probe.log", "w") as f:
+                 f.write(f"PROBE START. Analyzer type: {type(analyzer)}\n")
+                 f.write(f"Has _is_noise? {hasattr(analyzer, '_is_noise')}\n")
+        except: pass
+
+        for ev in iocs:
+            # 1. Trusted Analyzer Logic (Must be robust)
+            if analyzer and hasattr(analyzer, '_is_noise'):
+                if analyzer._is_noise(ev):
+                    try:
+                        with open("renderer_probe.log", "a") as f: f.write("Dropped by Analyzer\n")
+                    except: pass
+                    continue
+            
+            # 2. Redundant Check (Using Shared Pattern List) - Belt & Suspenders
+            # Solves "Logic Execution Failure" if analyzer state is weird
+            # Solves "Double Maintenance" (uses imported constant)
+            v = str(ev.get('Value', '')).lower()
+            p = str(ev.get('Path', '')).lower()
+            t = str(ev.get('Target_Path', '')).lower()
+            c = str(ev.get('CommandLine', '')).lower()
+            check_val = f"{v} | {p} | {t} | {c}"
+            norm_check = check_val.replace("/", "\\").replace(".\\", "").replace("\\\\", "\\")
+            
+            is_noise = False
+            tags = str(ev.get('Tag', '')).upper()
+            score = int(ev.get('Score', 0))
+            
+            if score < 500 and not any(x in tags for x in ["LATERAL", "RANSOM", "WIPER"]):
+                for g in GARBAGE_PATTERNS:
+                    if g in norm_check:
+                         is_noise = True
+                         break
+            
+            if is_noise:
+                 continue
+
+            filtered_iocs.append(ev)
+        
+        # Use filtered list for grouping
+        iocs = filtered_iocs
         
         # Helper: Extract directory path
         def get_parent(path):
@@ -227,12 +355,21 @@ class LachesisRenderer:
                 elif str(ev.get('Note', '')).find(":\\") > 0:
                      filename = str(ev.get('Note', ''))
 
-            # --- PHASE 0: Score Cut (Noise Reduction) ---
-            # User Request: Score < 90 Cut (Drop low confidence items)
-            # Exceptions: CRITICAL, TIMESTOMP tags
+            # --- PHASE 0: Score Adjustment (Context-Aware) ---
+            # Apply penalty/boost BEFORE filtering to ensure WindowsApps gets reduced
+            from tools.lachesis.sh_analyzer import LachesisAnalyzer
+            path_for_adjust = str(ev.get('Value', '') or ev.get('Path', ''))
+            original_score = score
+            score, new_tags = LachesisAnalyzer.adjust_score(path_for_adjust, score)
+            ev['Score'] = score  # Update the event's score permanently
             
             rescue_tags = ["CRITICAL", "TIMESTOMP", "KNOWN_WEBSHELL", "C2", "RANSOM", "ROOTKIT"]
             has_rescue_tag = any(t in tag for t in rescue_tags)
+            
+            # [DEBUG] Trace SetMACE/PuTTY in Renderer
+            if "TIMESTOMP" in tag or "REMOTE_ACCESS" in tag or score >= 300:
+                  with open("renderer_trace.log", "a", encoding="utf-8") as f:
+                       f.write(f"[RENDERER] Validating: {filename} Sc={score} Tag={tag} Rescue={has_rescue_tag}\n")
             
             # [Debug Verbose]
             if "USN" in tag:
@@ -241,8 +378,22 @@ class LachesisRenderer:
                      if os.path.getsize("debug_verbose.log") < 50000: # Increase limit
                          f.write(f"USN Item: Cat={cat} Tag={tag} Val={val} Sc={score} Time={ev.get('Time')}\n")
             
-            # Strict Drop for low scores unless rescued
-            if score < 90 and not has_rescue_tag:
+            # [Phase 6] Category-based Thresholding
+            # Different thresholds for different categories to balance Recall/Precision
+            CATEGORY_THRESHOLDS = {
+                "EXECUTION": 150,        # [Strict] Filter reconnaissance and noise
+                "VULNERABLE APP": 150,   # [Strict] High noise potential
+                "ANTI-FORENSICS": 50,    # [Lenient] Catch all evidence destruction
+                "LATERAL MOVEMENT": 50,  # [Lenient] Ensure lateral movements are seen
+                "TIMESTOMP": 50,         # [Lenient] Time anomalies are critical
+                "DEFAULT": 50            # Base threshold
+            }
+            
+            threshold = CATEGORY_THRESHOLDS.get(cat, CATEGORY_THRESHOLDS["DEFAULT"])
+            if "VULNERABLE" in cat: threshold = CATEGORY_THRESHOLDS["VULNERABLE APP"] # Match partial keys
+
+            # Strict Drop for low scores (using Category Thresholds)
+            if score < threshold and not has_rescue_tag:
                  continue
 
             # --- PHASE 1: Grouping Logic ---
@@ -380,6 +531,8 @@ class LachesisRenderer:
         has_phishing = any("PHISHING" in str(ioc.get('Type', '')) for ioc in visual_iocs)
         has_timestomp = any("TIMESTOMP" in str(ioc.get('Type', '')) for ioc in visual_iocs)
         has_anti = any("ANTI" in str(ioc.get('Type', '')) or "ANTIFORENSICS" in str(ioc.get('Tag', '')) for ioc in visual_iocs)
+        has_lateral = any("LATERAL" in str(ioc.get('Type', '')) or "LATERAL" in str(ioc.get('Tag', '')) or "UNC_EXECUTION" in str(ioc.get('Tag', '')) for ioc in visual_iocs)
+        has_recon = any("RECON" in str(ioc.get('Type', '')) or "INTERNAL_RECON" in str(ioc.get('Tag', '')) for ioc in visual_iocs)
 
         methods = []
         if has_phishing: methods.append(t.get('attack_phishing', "Phishing"))
@@ -387,6 +540,8 @@ class LachesisRenderer:
         if has_timestomp: methods.append(t.get('attack_timestomp', "Timestomping"))
         if has_paradox: methods.append(t.get('attack_paradox', "Time Paradox"))
         if has_anti: methods.append(t.get('attack_anti', "Anti-Forensics"))
+        if has_lateral: methods.append(t.get('attack_lateral', "Lateral Movement"))
+        if has_recon: methods.append(t.get('attack_recon', "Internal Reconnaissance"))
         if not methods: methods.append(t.get('attack_default', "General Intrusion"))
         return methods
 
@@ -399,6 +554,7 @@ class LachesisRenderer:
             row.get("Target_Path"),
             row.get("Target_FileName"), 
             row.get("CommandLine"),
+            row.get("ParentPath"),   # [Fix] Fallback for USN/MFT where FileName is hash
             row.get("Reg_Key"),
             row.get("Service_Name"), # [v5.7.1] Smart Formatting: Service
             row.get("Payload"),
@@ -406,10 +562,19 @@ class LachesisRenderer:
             row.get("Action"),
             row.get("Value")         # [Fix] Fallback to Value (e.g. URL)
         ]
+        fallback_hash = None
         for c in candidates:
-            if c and str(c).strip() not in ["", "None", "N/A"]:
-                return str(c).strip()
-        return "Unknown Activity"
+            val = str(c).strip()
+            if not c or val in ["", "None", "N/A"]: continue
+            
+            # Check if likely hash (32=MD5, 40=SHA1, 64=SHA256) and hex-only
+            if len(val) in [32, 40, 64] and re.match(r"^[a-fA-F0-9]+$", val):
+                if not fallback_hash: fallback_hash = val
+                continue # Skip hash, look for better name
+                
+            return val # Found meaningful name
+            
+        return fallback_hash if fallback_hash else "Unknown Activity"
 
     def _compress_timeline_for_mermaid(self, events, time_window_minutes=5):
         """
@@ -471,7 +636,8 @@ class LachesisRenderer:
             "SYSTEM MANIPULATION": "🚨 System Time Manipulation", "PERSISTENCE": "⚓ Persistence",
             "EXECUTION": "⚡ Execution", "TIMESTOMP (FILE)": "🕒 Timestomp (Files)",
             "WEBSHELL": "🕸️ WebShell Intrusion", "LATERAL MOVEMENT": "🐛 Lateral Movement",
-            "VULNERABLE APP": "🔓 Vulnerable Application"
+            "VULNERABLE APP": "🔓 Vulnerable Application",
+            "REMOTE_ACCESS": "📡 Remote Access"
         }
         
         temp_groups = {}
@@ -789,6 +955,7 @@ class LachesisRenderer:
         if "WIPE" in typ or "ANTI" in typ or "ANTIFORENSICS" in tag: return "ANTI-FORENSICS"
         if "PERSIST" in typ or "SAM_SCAVENGE" in tag or "DIRTY_HIVE" in tag: return "PERSISTENCE"
         if "VULN" in typ or "VULN" in tag: return "VULNERABLE APP"
+        if "REMOTE_ACCESS" in typ: return "REMOTE_ACCESS"
         if "EXEC" in typ or "RUN" in typ: return "EXECUTION"
         if "WEBSHELL" in typ or "WEBSHELL" in tag: return "WEBSHELL"
         if "LATERAL" in typ or "LATERAL" in tag: return "LATERAL MOVEMENT"
@@ -1143,22 +1310,22 @@ class LachesisRenderer:
         return "<br/>".join(lines)
 
 
-    def _render_plutos_section_text(self, dfs):
+    def _render_plutos_section_text(self, dfs, analyzer=None):
         f_mock = []
         class MockFile:
             def write(self, s): f_mock.append(s)
-        self._write_plutos_section(MockFile(), dfs)
+        self._write_plutos_section(MockFile(), dfs, analyzer)
         return "".join(f_mock)
 
     def _render_plutos_section_text_OLD_UNUSED(self, dfs):
         # Kept for reference if needed, but logic moved to _render_plutos_section_text
         pass
 
-    def _write_plutos_section(self, f, dfs):
+    def _write_plutos_section(self, f, dfs, analyzer=None):
         f.write("\n## 🌐 5. 重要ネットワークおよび持ち出し痕跡 (Critical Network & Exfiltration)\n")
         f.write("PlutosGateエンジンにより検出された、**データの持ち出し**、**メールデータの不正コピー**、および**高リスクな外部通信**の痕跡。\n\n")
         f.write("### 🚨 5.1 検出された重大な脅威 (Critical Threats Detected)\n")
-        critical_table = self._generate_critical_threats_table(dfs)
+        critical_table = self._generate_critical_threats_table(dfs, analyzer)
         f.write(critical_table + "\n\n")
         net_map = self._generate_critical_network_map(dfs)
         if net_map:
@@ -1169,8 +1336,10 @@ class LachesisRenderer:
             f.write("※ 視覚化可能なネットワークトポロジーは検出されませんでした。\n\n")
         f.write("---\n")
 
-    def _generate_critical_threats_table(self, dfs):
+    def _generate_critical_threats_table(self, dfs, analyzer=None):
         rows = []
+        
+        # 1. Existing Plutos Logic (SRUM/Exfil) - Kept as is
         srum_df = dfs.get("Plutos_Srum")
         if srum_df is not None and srum_df.height > 0:
             try:
@@ -1198,6 +1367,33 @@ class LachesisRenderer:
                         "Details": f"File: **{fname}**<br>URL: {url}", "Ref": "See: Plutos_Report_exfil_correlation.csv"
                     })
             except: pass
+
+        # 2. [v5.3] Inject Analyzer Findings (Lateral, Recon, Sensitive Doc)
+        if analyzer and analyzer.visual_iocs:
+             for ioc in analyzer.visual_iocs:
+                 tag = str(ioc.get("Tag", "")).upper()
+                 val = str(ioc.get("Value", ""))
+                 score = int(ioc.get("Score", 0) or 0)
+                 
+                 # Criteria for Section 5.1 inclusion
+                 is_target = False
+                 icon = "❓"; verdict = "UNKNOWN"
+                 
+                 if "LATERAL" in tag or "UNC_" in tag:
+                     is_target = True; icon = "🐛"; verdict = "**LATERAL_MOVEMENT**"
+                 elif "INTERNAL_RECON" in tag:
+                     is_target = True; icon = "🔍"; verdict = "**INTERNAL_RECON**"
+                 elif "SENSITIVE" in tag:
+                     is_target = True; icon = "🔐"; verdict = "**SENSITIVE_ACCESS**"
+                 elif "EXFIL" in tag or "DATA_EXFIL" in str(ioc.get("Type", "")):
+                     is_target = True; icon = "📤"; verdict = "**DATA_EXFILTRATION**"
+                 
+                 if is_target:
+                     t_str = str(ioc.get("Time", "")).replace("T", " ")[:19]
+                     rows.append({
+                         "Time": t_str, "Icon": icon, "Verdict": verdict,
+                         "Details": f"{val}", "Ref": "Timeline Analysis"
+                     })
 
         if not rows: return self.txt.get('plutos_no_activity', "No suspicious network activity detected.\n")
 

@@ -3,6 +3,7 @@ import polars as pl
 import os
 import sys
 import json
+import glob
 from pathlib import Path
 from datetime import datetime, timedelta
 
@@ -47,7 +48,8 @@ def main():
 
     # Ensure output directory exists
     if not os.path.exists(args.outdir):
-        os.makedirs(args.outdir)
+        os.makedirs(args.outdir, exist_ok=True)
+
 
     # Priority: Hercules > Timeline
     if args.hercules:
@@ -209,7 +211,8 @@ def main():
                         "Criticality": min(score, 300), 
                         "Tag": ",".join(sorted(set([t.strip() for t in str(tag).split(",") if t.strip()]))), 
                         "Keywords": [file_name],
-                        "FileName": file_name 
+                        "FileName": file_name,
+                        "ParentPath": row.get('ParentPath') # [Fix] Propagate Path for Display Logic
                     }
                     if "MASQUERADE" in tag: 
                         ev['Category'] = "MALWARE"
@@ -247,6 +250,72 @@ def main():
             r'(?i)^current', r'(?i)^local', r'(?i)^machine', r'(?i)^unknown', r'(?i)^account',
             r'(?i)^Name =', r'(?i)^Provider', r'(?i)^Algorithm'
         ] + external_garbage
+        
+        # [4] File Access Integration (ShellBags/LNK) - Case 5 P2
+        if args.csv and os.path.exists(args.csv):
+            print("    [*] Integrating ShellBags & LNK artifacts...")
+            access_events = []
+            
+            # 4.1 LNK Files
+            lnk_files = glob.glob(os.path.join(args.csv, "FileFolderAccess", "*LNK*.csv"))
+            print(f"    [*] Found {len(lnk_files)} LNK logs.")
+            for f in lnk_files:
+                # print(f"      -> Processing LNK: {os.path.basename(f)}") 
+                try:
+                    df = pl.read_csv(f, ignore_errors=True, infer_schema_length=0)
+                    # Filter for Confidential or 192.168
+                    targets = df.filter(
+                        pl.col("Target_Path").str.to_lowercase().str.contains("confidential") |
+                        pl.col("Target_Path").str.contains("192.168")
+                    )
+                    for row in targets.iter_rows(named=True):
+                        ev = {
+                            "Time": row.get("SourceCreated") or row.get("SourceModified"),
+                            "Category": "DATA_ACCESS",
+                            "Summary": f"LNK Access: {row.get('Target_Path')}",
+                            "Source": "LNK",
+                            "Criticality": 80,
+                            "Tag": "CONFIDENTIAL_ACCESS" if "confidential" in str(row.get("Target_Path")).lower() else "LATERAL_MOVEMENT",
+                            "FileName": row.get("SourceFileName"),
+                            "Target_Path": row.get("Target_Path")
+                        }
+                        if "192.168" in str(row.get("Target_Path")):
+                             ev['Category'] = "LATERAL"
+                             ev['Criticality'] = 150
+                             ev['Tag'] = "LATERAL_MOVEMENT"
+                        events.append(ev)
+                except: pass
+
+            # 4.2 ShellBags
+            sb_files = glob.glob(os.path.join(args.csv, "FileFolderAccess", "*ShellBags*.csv"))
+            print(f"    [*] Found {len(sb_files)} ShellBag logs.")
+            for f in sb_files:
+                # print(f"      -> Processing ShellBags: {os.path.basename(f)}")
+                try:
+                    df = pl.read_csv(f, ignore_errors=True, infer_schema_length=0)
+                    # ShellBags often have 'BagPath' or 'AbsolutePath'
+                    path_col = "Absolute_Path" if "Absolute_Path" in df.columns else "BagPath"
+                    if path_col in df.columns:
+                        targets = df.filter(
+                            pl.col(path_col).str.to_lowercase().str.contains("confidential") |
+                            pl.col(path_col).str.contains("192.168")
+                        )
+                        for row in targets.iter_rows(named=True):
+                            ev = {
+                                "Time": row.get("Last_Interacted") or row.get("First_Interacted"), # KAPE ShellBags Explorer?
+                                "Category": "DATA_ACCESS",
+                                "Summary": f"Folder Access: {row.get(path_col)}",
+                                "Source": "ShellBags",
+                                "Criticality": 80,
+                                "Tag": "CONFIDENTIAL_ACCESS" if "confidential" in str(row.get(path_col)).lower() else "LATERAL_MOVEMENT",
+                                "Target_Path": row.get(path_col)
+                            }
+                            if "192.168" in str(row.get(path_col)):
+                                 ev['Category'] = "LATERAL"
+                                 ev['Criticality'] = 150
+                                 ev['Tag'] = "LATERAL_MOVEMENT"
+                            events.append(ev)
+                except: pass
         
         # Apply filter to Target_FileName and Full_Path
         if "Target_FileName" in df_aion.columns:
@@ -424,6 +493,16 @@ def main():
         print(f"    -> Events Filtered: {len(valid_times)} -> {len(events)}")
 
     events.sort(key=lambda x: x['Time'] if x['Time'] else "0000")
+
+    # [DEBUG] Check for SetMACE to FILE
+    try:
+        with open("hekate_debug_events.txt", "w", encoding="utf-8") as f:
+            f.write("Checking Final Events:\n")
+            for e in events:
+                s = str(e)
+                if "SetMACE" in s or "PuTTY" in s or "SetMace" in s:
+                    f.write(f"FOUND EVENT: {e}\n")
+    except: pass
 
     analysis_result = {
         "events": events,

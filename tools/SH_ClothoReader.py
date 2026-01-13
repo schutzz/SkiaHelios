@@ -23,6 +23,8 @@ class ClothoReader:
     def spin_thread(self):
         print("[*] Clotho v2.9 is spinning the threads...")
         self.dfs['Hercules'] = self._safe_load(self.args.input)
+        self.dfs['Timeline'] = self._safe_load(getattr(self.args, 'timeline', None))
+        if self.dfs['Timeline'] is None: self.dfs['Timeline'] = self.dfs['Hercules'] # [FIX] Ensure Timeline exists
         
         self.dfs['Chronos'] = self._safe_load(getattr(self.args, 'chronos', None))
         

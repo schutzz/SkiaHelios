@@ -164,7 +164,11 @@ class LachesisIntel:
         self.loader = ThemisLoader(["rules/triage_rules.yaml"])
         self.dual_use_keywords = self.loader.get_dual_use_keywords()
         self.noise_stats = {}
-        self.intel_sigs, self.lachesis_conf = self._load_intel_signatures()
+        
+        # [Refactor] Load Full Yaml
+        self.full_config = self._load_intel_signatures()
+        self.intel_sigs = self.full_config.get("signatures", [])
+        self.lachesis_conf = self.full_config.get("lachesis_config", {})
         
         # Load Config Values
         self.garbage_paths = self.lachesis_conf.get("garbage_paths", [])
@@ -174,29 +178,21 @@ class LachesisIntel:
         self.force_include_tags = self.lachesis_conf.get("force_include_tags", [])
         self.force_include_types = self.lachesis_conf.get("force_include_types", [])
 
+    def get(self, key, default=None):
+        """Access top-level config keys (e.g., correlation_rules)"""
+        return self.full_config.get(key, default)
+
     def _load_intel_signatures(self):
         """Load Intelligence Signatures from YAML"""
         sig_path = Path(__file__).parent.parent.parent / "rules" / "intel_signatures.yaml"
-        sigs = []
-        conf = {}
         if sig_path.exists():
             try:
                 with open(sig_path, "r", encoding="utf-8") as f:
                     data = yaml.safe_load(f)
-                    if data:
-                        sigs = data # Return full config object for compatibility
-                        if "signatures" in data: sigs = data["signatures"] # Or just list
-                        # Actually keeping same structure as LachesisWriter for safety:
-                        # But wait, match_intel expects list of dicts.
-                        # data structure in yaml is:
-                        # signatures: [...]
-                        # plutos_config: ...
-                        # lachesis_config: ...
-                        sigs = data.get("signatures", [])
-                        conf = data.get("lachesis_config", {})
+                    if data: return data
             except Exception as e:
                 print(f"    [!] Failed to load intel signatures: {e}")
-        return sigs, conf
+        return {}
 
     def match_intel(self, text):
         """Check text against loaded intelligence signatures."""

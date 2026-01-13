@@ -2,7 +2,7 @@ from pathlib import Path
 import traceback
 from tools.lachesis.intel import LachesisIntel
 from tools.lachesis.enricher import LachesisEnricher
-from tools.lachesis.analyzer import LachesisAnalyzer
+from tools.lachesis.sh_analyzer import LachesisAnalyzer
 from tools.lachesis.renderer import LachesisRenderer
 
 try:

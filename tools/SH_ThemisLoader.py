@@ -24,6 +24,7 @@ class ThemisLoader:
             "keywords": [],      # Lachesis/Chronos 用
             "noise_paths": []    # Chronos/Pandora 用
         }
+        self.sensitive_data = {} # [v5.3] For Sensitive Document Detection
         
         # [NEW] Tag Mapping Dictionary
         self.tag_map = {
@@ -57,20 +58,68 @@ class ThemisLoader:
                 with open(p, "r", encoding="utf-8") as f:
                     data = yaml.safe_load(f)
                     if data:
-                        self.noise_rules.extend(data.get("noise_filters", []))
+                        noise_data = data.get("noise_filters", [])
+                        if isinstance(noise_data, list):
+                            self.noise_rules.extend(noise_data)
+                        elif isinstance(noise_data, dict):
+                            # [FIX] Handle intel_signatures.yaml style key-value noise config
+                            paths = noise_data.get("paths", [])
+                            for p in paths:
+                                self.noise_rules.append({
+                                    "target": "Normalized_Path", 
+                                    "condition": "regex", 
+                                    "pattern": p
+                                })
                         self.threat_rules.extend(data.get("threat_signatures", []))
                         self.persistence_targets.extend(data.get("persistence_targets", []))
+                        
+                        # [NEW] Enhanced Intel Loading (for deep intel_signatures.yaml support)
+                        self._load_intel_section(data, "anti_forensics_tools")
+                        self._load_intel_section(data, "remote_access_tools")
                         
                         # [NEW] Load Dual-Use Tools Configuration
                         if "dual_use_tools" in data:
                             for tool in data["dual_use_tools"]:
                                 self.dual_use_config["keywords"].extend([k.lower() for k in tool.get("keywords", [])])
                                 self.dual_use_config["noise_paths"].extend([p.lower() for p in tool.get("noise_paths", [])])
+
+                        # [v5.3] Load Sensitive Data Config
+                        if "sensitive_data" in data:
+                             self.sensitive_data = data["sensitive_data"]
                         
                         total_loaded += 1
             except Exception as e:
                 print(f"[!] Themis Error: Failed to load {p} ({e})")
         # print(f"[*] Themis Logic Assembled: {len(self.noise_rules)} Noise, {len(self.threat_rules)} Threat Rules from {total_loaded} files.")
+
+    def _load_intel_section(self, data, key):
+        """
+        [NEW] Load specialized intel sections (flatten nested structure)
+        """
+        section = data.get(key)
+        if not section: return
+        
+        # Default targets to check for generic patterns if target not specified
+        default_targets = ["FileName", "Ghost_FileName", "Target_Path", "CommandLine", "Image"]
+        
+        for category, rules in section.items():
+            if not isinstance(rules, list): continue
+            for rule in rules:
+                pat = rule.get("pat")
+                if not pat: continue
+                
+                # Use specified target or defaults
+                targets = [rule.get("target")] if rule.get("target") else default_targets
+                
+                for tgt in targets:
+                    new_rule = {
+                        "target": tgt,
+                        "condition": "regex", 
+                        "pattern": pat,
+                        "score": rule.get("score", 0),
+                        "tag": rule.get("tag", "THREAT")
+                    }
+                    self.threat_rules.append(new_rule)
 
     def get_persistence_targets(self, category="Registry"):
         patterns = []
@@ -185,9 +234,6 @@ class ThemisLoader:
             ])
             
         # 最後に重複タグを整理（Pandora側でプレフィックスにする際に綺麗に見せるため）
-        # ※ Polars expression内で文字列操作は複雑なので、ここでは単純結合まで。
-        #   表示側のツール(Pandora/Chronos)で重複排除ロジックを入れるか、
-        #   単純にこれだけでもかなり綺麗になるはずっス。
         return lf
 
     def suggest_new_noise_rules(self, df, threshold_ratio=50):

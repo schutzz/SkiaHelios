@@ -346,6 +346,71 @@ class HerculesReferee:
         # ▼▼▼【追加1.5】Brute Force Detection ▼▼▼
         timeline_df = self._detect_brute_force(timeline_df)
 
+        # ▼▼▼【v5.3 NEW】Sensitive Document Access Detection (LNK/JumpList) ▼▼▼
+        print("    -> [Hercules v5.3] Sensitive Document & Internal Recon Detection...")
+        sens_conf = self.config.get("sensitive_data", {})
+        SENSITIVE_KEYWORDS = sens_conf.get("keywords", ["confidential", "secret", "password", "credential", "private", "internal", "restricted", "classified", "proprietary", "sensitive"])
+        SENSITIVE_EXTENSIONS = sens_conf.get("extensions", [".docx", ".xlsx", ".pdf", ".doc", ".xls", ".pptx", ".txt", ".rtf"])
+        
+        SENSITIVE_KEYWORDS = [k.lower() for k in SENSITIVE_KEYWORDS]
+        
+        # Check Target_Path for sensitive document access
+        if "Target_Path" in timeline_df.columns:
+            sensitive_pattern = "(?i)(" + "|".join(SENSITIVE_KEYWORDS) + ")"
+            ext_pattern = "(?i)(" + "|".join([re.escape(e) for e in SENSITIVE_EXTENSIONS]) + ")$"
+            
+            is_sensitive = (
+                pl.col("Target_Path").str.contains(sensitive_pattern) &
+                pl.col("Target_Path").str.contains(ext_pattern)
+            )
+            
+            timeline_df = timeline_df.with_columns([
+                pl.when(is_sensitive)
+                  .then(pl.col("Threat_Score") + 300)
+                  .otherwise(pl.col("Threat_Score"))
+                  .alias("Threat_Score"),
+                pl.when(is_sensitive)
+                  .then(
+                      pl.when(pl.col("Tag") == "")
+                        .then(pl.lit("SENSITIVE_DATA_ACCESS"))
+                        .otherwise(pl.format("{},SENSITIVE_DATA_ACCESS", pl.col("Tag")))
+                  )
+                  .otherwise(pl.col("Tag"))
+                  .alias("Tag")
+            ])
+        
+        # ▼▼▼【v5.3 NEW】Internal Reconnaissance Detection (Config-Driven) ▼▼▼
+        # Updated to use 'internal_recon' section from intel_signatures.yaml
+        recon_conf = self.config.get("internal_recon", {})
+        recon_pats = recon_conf.get("patterns", [])
+        
+        if recon_pats:
+            recon_pattern = "(?i)(" + "|".join(recon_pats) + ")"
+            recon_tag = recon_conf.get("tag", "INTERNAL_RECON")
+            recon_score = recon_conf.get("score", 200)
+            
+            target_cols = [c for c in ["Target_Path", "Message", "Action", "Payload"] if c in timeline_df.columns]
+            
+            if target_cols:
+                is_recon = pl.lit(False)
+                for col in target_cols:
+                    is_recon = is_recon | pl.col(col).str.contains(recon_pattern)
+                
+                timeline_df = timeline_df.with_columns([
+                    pl.when(is_recon)
+                      .then(pl.col("Threat_Score") + recon_score)
+                      .otherwise(pl.col("Threat_Score"))
+                      .alias("Threat_Score"),
+                    pl.when(is_recon)
+                      .then(
+                          pl.when((pl.col("Tag").is_null()) | (pl.col("Tag") == ""))
+                            .then(pl.lit(recon_tag))
+                            .otherwise(pl.format("{},{}", pl.col("Tag"), pl.lit(recon_tag)))
+                      )
+                      .otherwise(pl.col("Tag"))
+                      .alias("Tag")
+                ])
+
         # Run Detectors Pipeline
         for detector in self.detectors:
             try:
