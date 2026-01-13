@@ -34,4 +34,7 @@ class NetworkDetector(BaseDetector):
                     pl.when(is_lateral).then(pl.format("{},LATERAL_MOVEMENT_DETECTED", pl.col("Tag"))).otherwise(pl.col("Tag")).alias("Tag")
                 ])
                 
+        # 🚀 Universal Signatures Call
+        df = self.apply_threat_signatures(df)
+        
         return df

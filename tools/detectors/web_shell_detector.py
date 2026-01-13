@@ -17,6 +17,8 @@ class WebShellDetector(BaseDetector):
         indicators = web_config.get("indicators", [])
 
         if not web_dirs:
+            # 🚀 Universal Signatures
+            df = self.apply_threat_signatures(df)
             return df
             
         web_dirs_combined = "|".join(web_dirs)

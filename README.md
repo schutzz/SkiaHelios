@@ -1,4 +1,4 @@
-# SkiaHelios v6.2 - The Decoder (Obfuscation & ADS Hunter)
+# SkiaHelios v6.4 - Grimoire Engine (Evidence Shield & Image Hygiene)
 
 ![SkiaHelios CI](https://github.com/schutzz/SkiaHelios/actions/workflows/test.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
@@ -15,7 +15,7 @@
 
 Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** orchestrated by **"Hekate"**, supported by **"Chronos" (The Time Lord feat. Icarus Paradox)**, **"Hercules" (The Referee)**, the **"PlutosGate" (Network & Recon Hunter)**, and the **"YARA WebShell Scanner"** to detect advanced threats including **Account Takeover**, **Privilege Escalation**, **Evidence Wiping**, **Web Intrusion Chains**, and **Cross-Artifact Tampering**.
 
-**Current Version:** v6.2 (The Decoder: Obfuscation & ADS Detection)
+**Current Version:** v6.4 (Grimoire Engine: Evidence Shield & Image Hygiene)
 
 ---
 
@@ -66,19 +66,21 @@ graph TD
     Plutos --- Plutos_Engine
 
     %% Reporting Stage (Modular Lachesis)
-    subgraph Lachesis_Module ["🕸️ Lachesis v6.1 (The Weaver)"]
+    subgraph Lachesis_Module ["🕸️ Lachesis v6.4 (Grimoire Engine)"]
         direction TB
         L_Core[("Core Controller")]:::report
         L_Intel["Intel (YAML Rules)"]:::submod
         L_Enrich["Enricher (Data Fusion)"]:::submod
         L_Analyzer["Analyzer (Event Scoring)"]:::submod
+        L_Correlator["Correlator (Temporal Boost)"]:::submod
         L_Render["Renderer (Jinja2 Engine)"]:::submod
         L_Midas["MidasTouch (Docx/PDF)"]:::submod
         
         L_Core --> L_Intel
         L_Core --> L_Enrich
         L_Core --> L_Analyzer
-        L_Analyzer --> L_Render
+        L_Analyzer --> L_Correlator
+        L_Correlator --> L_Render
         L_Render --> L_Midas
     end
 
@@ -216,6 +218,40 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
 ---
 
 ## 📜 Complete Changelog
+
+### v6.4 - Grimoire Engine (Evidence Shield & Image Hygiene) 🛡️
+* **[NEW]** **Evidence Shield (v6.4):** Recon keyword protection for images.
+    * **Sanctuary Keywords:** `xampp`, `phpmyadmin`, `admin`, `dashboard`, `kibana`, `phishing`, `c2`, `login`, `webshell`, `backdoor`, `exploit`.
+    * **Protection Logic:** Images (`.png`, `.jpg`, `.gif`, `.ico`) containing sanctuary keywords are boosted to Score 600 and tagged `INTERNAL_RECON`.
+    * **Effect:** Prevents accidental deletion of reconnaissance evidence screenshots.
+* **[NEW]** **Image Hygiene (v6.3):** Smart image noise filtering.
+    * **Extended System Paths:** `windows\web\`, `windows\branding\`, `program files\windowsapps`, `programdata\microsoft\windows\systemdata`.
+    * **Browser Cache Paths:** `INetCache`, `Content.IE5`, `Temporary Internet Files`, Chrome cache.
+    * **Effect:** System wallpapers (`img104.jpg`), icons, and browser cache images are automatically dropped.
+* **[NEW]** **Silence Patch (v6.2):** Resource Killer priority reordering.
+    * **Logic Change:** `.mui`, `.nls`, `.dll`, `.sys` files in System32/SysWOW64 are dropped **before** Safety Valve score check.
+    * **Effect:** `cipher.exe.mui` (Score 900) now correctly filtered as noise.
+* **[NEW]** **EID 4728/4732 Enhancement:** Member and Group name extraction.
+    * **Output Format:** `Member Added (Global): JokerUser → Administrators (EID:4728)`.
+    * **Effect:** Privilege escalation events are now immediately actionable.
+
+### v6.3 - Grimoire Improvements (Temporal & Display) 🕰️
+* **[NEW]** **Temporal Proximity Boost:** Anti-forensics correlation.
+    * **Logic:** Events within 5 minutes of `ANTI_FORENSICS` (Score ≥ 600) are boosted 1.5x and tagged `PROXIMITY_BOOST`.
+    * **Effect:** `cipher.exe` execution near `SetMACE.exe` is now flagged as part of cleanup operation.
+* **[NEW]** **IOC Category Separation:** Report clarity improvement.
+    * **Section 7.1:** High-Confidence IOCs (Score ≥ 500) - Critical Threats.
+    * **Section 7.2:** Contextual Artifacts (Score 300-499) - Investigation Leads.
+* **[NEW]** **Toolkit Grouping:** Parent-child artifact clustering.
+    * **Detected Toolkits:** `setmace`, `mimikatz`, `sdelete`, `psexec`, `lazagne`, `wce`.
+    * **Effect:** `setmace.exe`, `setmace.au3`, `readme.txt` grouped as `TOOLKIT|SETMACE`.
+* **[NEW]** **CommandLine Extraction:** Impact column enhancement.
+    * **Display:** `cipher.exe /w:C:\Users\...` shown in Key Indicators table.
+* **[NEW]** **Ghost Source Display:** Artifact recovery source.
+    * **New Column:** "Source" in IOC table (`Live`, `🔍 Recovered (USN)`).
+* **[NEW]** **Timeline Path Display:** Disambiguation of duplicates.
+    * **Format:** `**cipher.exe** (\`...system32\cipher.exe\`)`.
+    * **Effect:** System32 vs SysWOW64 artifacts clearly distinguished.
 
 ### v6.2 - The Decoder (Obfuscation & ADS Hunter) 🦁
 * **[NEW]** **ADSDetector v1.2:** NTFS Alternate Data Streams attack detection module.
@@ -383,6 +419,9 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
 * [x] **v5.9:** **The Ghost Hunter (USN Condenser & Strict Demotion)**
 * [x] **v6.1:** **The Hunter (SysInternals & LotL Detection)**
 * [x] **v6.2:** **The Decoder (Obfuscation & ADS Hunter)**
+* [x] **v6.3:** **Grimoire Improvements (Temporal Boost & IOC Separation)**
+* [x] **v6.4:** **Grimoire Engine (Evidence Shield & Image Hygiene)**
+* [ ] **v6.5:** **Deep Exfil & Recon (Batch Access Detection & phpMyAdmin Hunter)** - *Planned*
 * [ ] **v7.0:** **The Oracle (LLM Auto-Summarization & Chat)** - *Planned*
 
 ---

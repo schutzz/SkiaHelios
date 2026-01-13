@@ -85,8 +85,22 @@ dual_use_tools:
       - "screenconnect"
       - "radmin"
       - "vnc"
+      - "vnc"
       - "mstsc"
+      - "sync"       # Sysinternals Sync (Flush file buffers)
+      - "handle"     # Sysinternals Handle
+      - "sdelete"    # Sysinternals SDelete
     noise_paths: ["teamviewer/version", "anydesk/ad_printer"]
+
+  # [NEW] Anti-Forensics & Timestomp Tools
+  - name: "Time Manipulation"
+    keywords:
+      - "dcode"
+      - "timestomp"
+      - "setmace"
+      - "nircmd"
+      - "attributechanger"
+    noise_paths: []
 
   # [4] ネットワークツール & トンネリング
   - name: "Net Tool / Tunneling"
@@ -153,6 +167,24 @@ dual_use_tools:
       - "perl/lib"
       - "ruby/lib"
     
+      - "ruby/lib"
+    
+
+
+# ==========================================
+# 📂 LNK / Shortcut Analysis Rules (Update)
+# ==========================================
+lnk_threats:
+  - name: "WordPad Usage (Manual Access)"
+    tag: "MANUAL_DOC_ACCESS"
+    score: 100
+    pat: "(?i)wordpad.exe"
+
+  - name: "RecentDocs Access"
+    tag: "RECENT_DOCS"
+    score: 50
+    pat: "(?i)Recent"
+
 # ==========================================
 # 🛡️ NOISE FILTERS (Ignored Artifacts)
 # ==========================================
@@ -644,6 +676,22 @@ threat_signatures:
     condition: "regex"
     pattern: "(?i)\\\\Users\\\\[^\\\\]+\\\\Downloads\\\\.*\\.exe$"
 
+  # 🚀 [NEW] UNC Path Execution (High Risk)
+  - name: "Tool Execution from UNC Share"
+    tag: "CRITICAL_LATERAL_EXECUTION"
+    score: 400
+    target: "Target_Path" # または Full_Path, Command_Line
+    condition: "regex"
+    pattern: "(?i)^\\\\\\\\[a-z0-9-._]+\\\\[a-z0-9-._$]+\\\\.*\\.(exe|bat|ps1|cmd)$"
+
+  # [NEW] DCode Specific Alert (Critical Anti-Forensics)
+  - name: "DCode Timestamp Identifier Detected"
+    tag: "CRITICAL_ANTIFORENSICS_TOOL"
+    score: 500
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)dcode.*\\.exe"
+
   - name: "Execution from Temp Folder"
     tag: "SUSPICIOUS_PATH_EXEC"
     score: 180
@@ -661,9 +709,57 @@ threat_signatures:
     condition: "regex"
     pattern: "(?i)^taskmgr\\.exe$"
 
-  - name: "Run Dialog Usage"
     tag: "RECON_INDICATOR"
     score: 40
     target: "Target_Path"
     condition: "regex"
     pattern: "(?i)Microsoft\\.Windows\\.Shell\\.RunDialog"
+
+# ==========================================
+# 🚀 Universal Threat Signatures (BaseDetector)
+# ==========================================
+threat_signatures:
+  # [1] Reconnaissance Inference (Web History & Cache)
+  - name: "Web Recon: XAMPP Dashboard"
+    tag: "INTERNAL_RECON_WEB"
+    score: 350
+    target: "Target_Path"
+    condition: "regex"
+    pattern: "(?i)(xampp-logo|bitnami-xampp)"
+
+  - name: "Web Recon: phpMyAdmin"
+    tag: "CRITICAL_DB_ACCESS"
+    score: 350
+    target: "Target_Path"
+    condition: "regex"
+    pattern: "(?i)(pma_logo|logo_left|phpmyadmin)"
+
+  # [2] Sensitive Data Access (Exfiltration)
+  - name: "Sensitive File Access (Confidential)"
+    tag: "SENSITIVE_DATA_ACCESS"
+    score: 800
+    target: "Target_Path"
+    condition: "regex"
+    pattern: "(?i).*(confidential|secret|password|機密|社外秘).*\\.(rtf|docx?|xlsx?|pdf|txt)$"
+
+  - name: "Sensitive File Access (General)"
+    tag: "SENSITIVE_DATA_ACCESS"
+    score: 500
+    target: "Target_Path"
+    condition: "regex"
+    pattern: "(?i)(passwords?|accounts?|credentials?)\\.(txt|xlsx?|docx?)$"
+
+  # [3] UNC Execution & Tools
+  - name: "UNC Path Execution Enforcement"
+    tag: "UNC_EXECUTION"
+    score: 200
+    target: "Target_Path"
+    condition: "regex"
+    pattern: "(?i)^\\\\\\\\[a-z0-9-._]+\\\\[a-z0-9-._$]+\\\\.*\\.(exe|bat|ps1|cmd)$"
+
+  - name: "DCode Timestamp Identifier"
+    tag: "CRITICAL_ANTIFORENSICS_TOOL"
+    score: 500
+    target: "Target_Path"
+    condition: "regex"
+    pattern: "(?i)dcode.*\\.exe"

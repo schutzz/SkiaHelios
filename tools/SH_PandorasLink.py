@@ -7,9 +7,9 @@ from datetime import datetime, timedelta
 from tools.SH_ThemisLoader import ThemisLoader
 
 # ============================================================
-#  SH_PandorasLink v18.24 [List Cast Fix]
+#  SH_PandorasLink v18.20 [Ransomware Hunter]
 #  Mission: Surgical removal, Cross-Correlation & Ransomware Detection.
-#  Update: Fixed "List<String> to String" cast error in Pass 2
+#  Update: A.1 Encryption Burst Detection (Polars集計)
 # ============================================================
 
 # Ransomware Extension List (Configurable)
@@ -32,7 +32,7 @@ def print_logo():
     * \_/    \__\______/__/    \_/   *
       .     * /______\     .     .
     
-      [ SH_PandorasLink v18.24 ]
+      [ SH_PandorasLink v18.17 ]
      "The Trinity: Normalized & Focused."
     """
     print(logo)
@@ -44,7 +44,7 @@ class PandoraEngine:
         self.mft_vss_path = mft_vss
         self.triage_mode = triage_mode
         self.loader = ThemisLoader(["rules/triage_rules.yaml", "rules/sigma_file_event.yaml", "rules/intel_signatures.yaml"])
-        print(f"[*] Initializing Engine with Themis Rules...", flush=True)
+        print(f"[*] Initializing Engine with Themis Rules...")
         self.lf_live = self._load_mft(mft_live).lazy()
         self.lf_usn = self._load_usn(usn).lazy()
         self.lf_vss = self._load_mft(mft_vss).lazy() if mft_vss else None
@@ -87,7 +87,7 @@ class PandoraEngine:
             if fsize is not None: exprs.append(fsize.cast(pl.Int64))
             return lf_schema.select(exprs)
         except Exception as e:
-            print(f"[!] Error loading MFT {path}: {e}", flush=True)
+            print(f"[!] Error loading MFT {path}: {e}")
             raise RuntimeError(f"Failed to load MFT")
 
     def _load_usn(self, path):
@@ -111,118 +111,87 @@ class PandoraEngine:
             if ppath is not None: exprs.append(ppath)
             return lf_schema.select(exprs)
         except Exception as e:
-            print(f"[!] Error loading USN {path}: {e}", flush=True)
+            print(f"[!] Error loading USN {path}: {e}")
             raise RuntimeError(f"Failed to load USN")
 
-    def _ensure_string_tag(self, df):
-        """Helper to flatten List<String> tags to String"""
-        try:
-            # Check schema for List type on Threat_Tag
-            schema = df.schema
-            if "Threat_Tag" in schema:
-                dtype = schema["Threat_Tag"]
-                if isinstance(dtype, pl.List):
-                    # print("    [i] Flattening Threat_Tag list...", flush=True)
-                    return df.with_columns(pl.col("Threat_Tag").list.join(","))
-        except Exception as e:
-            # Fallback: blind try
-            pass
-        return df
-
     def correlate_cross_evidence(self, df_ghosts, chronos_csv, hercules_csv):
-        print("[*] Phase 3.5: Cross-Correlating with The Trinity...", flush=True)
+        print("[*] Phase 3.5: Cross-Correlating with The Trinity...")
         
-        # [Fix] Ensure Threat_Tag is String before string operations
-        df_ghosts = self._ensure_string_tag(df_ghosts)
+        df_ghosts = df_ghosts.with_columns(
+            pl.concat_str([pl.col("ParentPath"), pl.lit("/"), pl.col("Ghost_FileName")])
+            .str.to_lowercase().str.replace_all(r"\\", "/").str.replace(r"^\./", "")
+            .alias("Ghost_Key")
+        )
 
-        try:
-            df_ghosts = df_ghosts.with_columns(
-                pl.concat_str([pl.col("ParentPath"), pl.lit("/"), pl.col("Ghost_FileName")])
-                .str.to_lowercase().str.replace_all(r"\\", "/").str.replace(r"^\./", "")
-                .alias("Ghost_Key")
-            )
+        df_ghosts = df_ghosts.with_columns([
+            pl.lit(0).alias("Chronos_Boost"),
+            pl.lit(0).alias("Herc_Boost")
+        ])
 
-            df_ghosts = df_ghosts.with_columns([
-                pl.lit(0).alias("Chronos_Boost"),
-                pl.lit(0).alias("Herc_Boost")
-            ])
+        if chronos_csv and os.path.exists(chronos_csv):
+            try:
+                print(f"    -> Correlating with Chronos: {chronos_csv}")
+                df_chronos = pl.read_csv(chronos_csv, ignore_errors=True, infer_schema_length=0)
+                if "FileName" in df_chronos.columns:
+                    df_chronos = df_chronos.filter(pl.col("Chronos_Score").cast(pl.Int64, strict=False) > 50)
+                    df_chronos = df_chronos.with_columns(
+                        pl.concat_str([pl.col("ParentPath"), pl.lit("/"), pl.col("FileName")])
+                        .str.to_lowercase().str.replace_all(r"\\", "/").str.replace(r"^\./", "")
+                        .alias("Chronos_Key")
+                    ).select(["Chronos_Key"]).unique()
+                    
+                    df_ghosts = df_ghosts.join(df_chronos, left_on="Ghost_Key", right_on="Chronos_Key", how="left")
+                    df_ghosts = df_ghosts.with_columns(
+                        pl.when(pl.col("Chronos_Key").is_not_null())
+                        .then(150).otherwise(pl.col("Chronos_Boost")).alias("Chronos_Boost")
+                    ).drop("Chronos_Key")
+            except: pass
 
-            if chronos_csv and os.path.exists(chronos_csv):
-                try:
-                    print(f"    -> Correlating with Chronos: {chronos_csv}", flush=True)
-                    df_chronos = pl.read_csv(chronos_csv, ignore_errors=True, infer_schema_length=0)
-                    if "FileName" in df_chronos.columns:
-                        df_chronos = df_chronos.filter(pl.col("Chronos_Score").cast(pl.Int64, strict=False) > 50)
-                        df_chronos = df_chronos.with_columns(
-                            pl.concat_str([pl.col("ParentPath"), pl.lit("/"), pl.col("FileName")])
-                            .str.to_lowercase().str.replace_all(r"\\", "/").str.replace(r"^\./", "")
-                            .alias("Chronos_Key")
-                        ).select(["Chronos_Key"]).unique()
-                        
-                        df_ghosts = df_ghosts.join(df_chronos, left_on="Ghost_Key", right_on="Chronos_Key", how="left")
-                        df_ghosts = df_ghosts.with_columns(
-                            pl.when(pl.col("Chronos_Key").is_not_null())
-                            .then(150).otherwise(pl.col("Chronos_Boost")).alias("Chronos_Boost")
-                        ).drop("Chronos_Key")
-                except Exception as e:
-                    print(f"    [!] Chronos correlation skipped: {e}", flush=True)
+        if hercules_csv and os.path.exists(hercules_csv):
+            try:
+                print(f"    -> Correlating with Hercules: {hercules_csv}")
+                df_herc = pl.read_csv(hercules_csv, ignore_errors=True, infer_schema_length=0)
+                if "Target_Path" in df_herc.columns:
+                    df_herc = df_herc.filter(pl.col("Judge_Verdict").str.contains("CRITICAL"))
+                    df_herc = df_herc.with_columns(
+                        pl.col("Target_Path").str.to_lowercase().str.replace_all(r"\\", "/").alias("Herc_Key")
+                    ).select(["Herc_Key"]).unique()
+                    
+                    df_ghosts = df_ghosts.join(df_herc, left_on="Ghost_Key", right_on="Herc_Key", how="left")
+                    df_ghosts = df_ghosts.with_columns(
+                        pl.when(pl.col("Herc_Key").is_not_null())
+                        .then(200).otherwise(pl.col("Herc_Boost")).alias("Herc_Boost")
+                    ).drop("Herc_Key")
+            except: pass
 
-            if hercules_csv and os.path.exists(hercules_csv):
-                try:
-                    print(f"    -> Correlating with Hercules: {hercules_csv}", flush=True)
-                    df_herc = pl.read_csv(hercules_csv, ignore_errors=True, infer_schema_length=0)
-                    if "Target_Path" in df_herc.columns:
-                        # Ensure string match
-                        df_herc = df_herc.filter(pl.col("Judge_Verdict").str.contains("CRITICAL"))
-                        df_herc = df_herc.with_columns(
-                            pl.col("Target_Path").str.to_lowercase().str.replace_all(r"\\", "/").alias("Herc_Key")
-                        ).select(["Herc_Key"]).unique()
-                        
-                        df_ghosts = df_ghosts.join(df_herc, left_on="Ghost_Key", right_on="Herc_Key", how="left")
-                        df_ghosts = df_ghosts.with_columns(
-                            pl.when(pl.col("Herc_Key").is_not_null())
-                            .then(200).otherwise(pl.col("Herc_Boost")).alias("Herc_Boost")
-                        ).drop("Herc_Key")
-                except Exception as e:
-                    print(f"    [!] Hercules correlation skipped: {e}", flush=True)
+        df_ghosts = df_ghosts.with_columns(
+            (pl.col("Threat_Score") + pl.col("Chronos_Boost") + pl.col("Herc_Boost")).alias("Threat_Score")
+        )
+        
+        df_ghosts = df_ghosts.with_columns(
+            pl.when((pl.col("Chronos_Boost") > 0) | (pl.col("Herc_Boost") > 0))
+            .then(pl.concat_str([pl.col("Threat_Tag"), pl.lit(",CORRELATED")]))
+            .otherwise(pl.col("Threat_Tag"))
+            .alias("Threat_Tag")
+        )
+        
+        # Zone of Death
+        is_web_trash = pl.col("Ghost_Key").str.contains(r"/inetcache/|/inetcookies/|/history/|/temp/")
+        is_hash_suite_noise = (pl.col("Ghost_Key").str.contains("hash_suite_free") & (~pl.col("Ghost_Key").str.ends_with(".exe")))
+        
+        has_correlation = (pl.col("Chronos_Boost") > 0) | (pl.col("Herc_Boost") > 0)
+        should_die = (is_web_trash | is_hash_suite_noise) & (~has_correlation)
+        
+        df_ghosts = df_ghosts.with_columns([
+            pl.when(should_die).then(pl.lit("NOISE_ARTIFACT")).otherwise(pl.col("Threat_Tag")).alias("Threat_Tag"),
+            pl.when(should_die).then(0).otherwise(pl.col("Threat_Score")).alias("Threat_Score")
+        ])
 
-            df_ghosts = df_ghosts.with_columns(
-                (pl.col("Threat_Score") + pl.col("Chronos_Boost") + pl.col("Herc_Boost")).alias("Threat_Score")
-            )
-            
-            # This is where List error occurred. Now it should be safe.
-            df_ghosts = df_ghosts.with_columns(
-                pl.when((pl.col("Chronos_Boost") > 0) | (pl.col("Herc_Boost") > 0))
-                .then(pl.concat_str([pl.col("Threat_Tag"), pl.lit(",CORRELATED")]))
-                .otherwise(pl.col("Threat_Tag"))
-                .alias("Threat_Tag")
-            )
-            
-            # Zone of Death
-            is_web_trash = pl.col("Ghost_Key").str.contains(r"/inetcache/|/inetcookies/|/history/|/temp/")
-            is_hash_suite_noise = (pl.col("Ghost_Key").str.contains("hash_suite_free") & (~pl.col("Ghost_Key").str.ends_with(".exe")))
-            
-            has_correlation = (pl.col("Chronos_Boost") > 0) | (pl.col("Herc_Boost") > 0)
-            should_die = (is_web_trash | is_hash_suite_noise) & (~has_correlation)
-            
-            df_ghosts = df_ghosts.with_columns([
-                pl.when(should_die).then(pl.lit("NOISE_ARTIFACT")).otherwise(pl.col("Threat_Tag")).alias("Threat_Tag"),
-                pl.when(should_die).then(0).otherwise(pl.col("Threat_Score")).alias("Threat_Score")
-            ])
-
-            return df_ghosts.drop(["Ghost_Key", "Chronos_Boost", "Herc_Boost"])
-        except Exception as e:
-            print(f"    [!] Correlation Engine Error: {e}", flush=True)
-            import traceback
-            traceback.print_exc()
-            return df_ghosts
+        return df_ghosts.drop(["Ghost_Key", "Chronos_Boost", "Herc_Boost"])
 
     def _apply_logic_layer(self, df):
-        print("    -> [Pandora] Applying Masquerade & Noise Logic (Inverted Tool Filter)...", flush=True)
+        print("    -> [Pandora] Applying Masquerade & Noise Logic (Inverted Tool Filter)...")
         
-        # [Fix] Ensure Threat_Tag is String
-        df = self._ensure_string_tag(df)
-
         df = df.with_columns([
             pl.col("ParentPath").fill_null("").str.to_lowercase().alias("_pp"),
             pl.col("Ghost_FileName").fill_null("").str.to_lowercase().alias("_fn")
@@ -244,14 +213,16 @@ class PandoraEngine:
             "gdipfontcache", "ntuser.dat", "usrclass.dat"
         ]
         
+        # [NEW] Triage Mode Extension (Cleaner)
         if self.triage_mode:
-            print("       >> [!] Triage Mode: Aggressive Junk Killing Active", flush=True)
+            print("       >> [!] Triage Mode: Aggressive Junk Killing Active")
             file_kill_list.extend([
                 ".ldb", "-journal", ".sys", ".lst", ".cab", ".pyd", 
                 "0000", ".lock", ".log",
                 ".aux", ".bmp", ".gif", ".rbf", ".ni.dll", "mcafee.truekey"
             ])
         
+        # [Fix] AppX Noise Filter (Global) - Moved from Triage block
         file_kill_list.extend([
             "microsoft_ppiprojection", "appup.intelgraphicsexperience", "microsoft.windows.cortana",
              "{1ac14e77-02e7-4e5d-b744-2eb1ae5198b7}_windowspowershell_v1_0_powershell_ise_exe",
@@ -267,6 +238,9 @@ class PandoraEngine:
             "templates" # Office junk
         ]
 
+        # ==========================================
+        # ⚡ DUAL-USE TRAP (Inverted Logic)
+        # ==========================================
         dual_use_folders = [
             "nmap", "wireshark", "python", "tcl", "ruby", "perl", "java", "jdk", "jre"
         ]
@@ -284,10 +258,12 @@ class PandoraEngine:
             is_noise = is_noise | pl.col("_fn").str.contains(kw, literal=True)
             
         for kw in path_kill_list:
+            # 救済措置: Pathがマッチしても、拡張子が .exe, .crx, .lnk なら殺さない
             is_match = pl.col("_full_path").str.contains(kw, literal=True)
             is_protected = pl.col("_fn").str.ends_with(".exe") | pl.col("_fn").str.ends_with(".crx") | pl.col("_fn").str.ends_with(".lnk") | pl.col("_fn").str.ends_with(".bat")
             is_noise = is_noise | (is_match & ~is_protected)
 
+        # Apply Inverted Logic
         is_tool_folder = pl.lit(False)
         for tool in dual_use_folders:
             is_tool_folder = is_tool_folder | pl.col("_full_path").str.contains(tool, literal=True)
@@ -295,6 +271,7 @@ class PandoraEngine:
         is_protected_binary = pl.col("_fn").is_in(protected_binaries)
         is_noise = is_noise | (is_tool_folder & (~is_protected_binary))
 
+        # 既存のロジック用 Normalized Path
         df = df.with_columns(
             pl.concat_str([pl.col("ParentPath"), pl.lit("/"), pl.col("Ghost_FileName")])
             .str.to_lowercase()
@@ -309,6 +286,7 @@ class PandoraEngine:
         is_hash_cracker = (pl.col("Normalized_Path").str.contains("hash_suite_free") & pl.col("Normalized_Path").str.ends_with(".exe"))
         is_wiper = ((pl.col("Normalized_Path").str.contains("bcwipe") | pl.col("Normalized_Path").str.contains("jetico")) & pl.col("Normalized_Path").str.ends_with(".exe"))
 
+        # [NEW] YAML Noise Rules Integration
         dynamic_noise_expr = self.loader.get_noise_filter_expr(df.collect_schema().names())
         
         should_kill = (is_noise | dynamic_noise_expr) & (~is_adobe_masquerade) & (~is_lnk_phish) & (~is_skype_xml) & (~is_hash_cracker) & (~is_wiper)
@@ -334,36 +312,84 @@ class PandoraEngine:
         tag_expr = pl.when(is_skype_xml).then(pl.lit("SUSPICIOUS_XML")).otherwise(tag_expr)
         score_expr = pl.when(is_skype_xml).then(50).otherwise(score_expr)
 
+        # ==========================================
+        # 📚 1. Resource File Strict Path Verification
+        # ==========================================
+        # Use regex for efficiency instead of loop
+        is_resource = pl.col("Normalized_Path").str.contains(r"\.(mui|nls|lng|template|provxml)$")
+        # Check if in System32 or SysWOW64 (Authorized Zones)
+        is_sys_path = pl.col("Normalized_Path").str.contains(r"windows/system32", literal=True) | pl.col("Normalized_Path").str.contains(r"windows/syswow64", literal=True)
+        
+        # Logic: Kill resource files in System paths (noise). Do NOT boost non-system resources.
+        should_kill_resource = is_resource & is_sys_path
+        
+        tag_expr = pl.when(should_kill_resource).then(pl.lit("NOISE_RESOURCE")).otherwise(tag_expr)
+        score_expr = pl.when(should_kill_resource).then(0).otherwise(score_expr)
+        
+        # [FIX] Also kill resource files from common app locations (not DLL sideloading)
+        is_app_resource = is_resource & (
+            pl.col("Normalized_Path").str.contains("program files", literal=True) |
+            pl.col("Normalized_Path").str.contains("programdata", literal=True) |
+            pl.col("Normalized_Path").str.contains("appdata/local/", literal=True)
+        )
+        tag_expr = pl.when(is_app_resource).then(pl.lit("NOISE_RESOURCE")).otherwise(tag_expr)
+        score_expr = pl.when(is_app_resource).then(0).otherwise(score_expr)
+
+        # ==========================================
+        # 🌐 2. Browser Cache Isolation
+        # ==========================================
+        is_browser_cache = pl.col("Normalized_Path").str.contains(r"/cache/|/inetcache/|/temporary internet files/")
+        # Use regex for efficiency
+        is_web_content = pl.col("Normalized_Path").str.contains(r"\.(jpg|png|gif|css|js|json|txt|ico)$")
+        recon_keywords = ["phishing", "admin", "dashboard", "c2", "payload", "setup", "install"]
+        is_recon = pl.col("Normalized_Path").str.contains("|".join(recon_keywords))
+        
+        should_kill_browser = is_browser_cache & is_web_content & (~is_recon)
+        
+        tag_expr = pl.when(should_kill_browser).then(pl.lit("NOISE_BROWSER")).otherwise(tag_expr)
+        score_expr = pl.when(should_kill_browser).then(0).otherwise(score_expr)
+        
+        tag_expr = pl.when(is_browser_cache & is_recon).then(pl.lit("INTERNAL_RECON_WEB")).otherwise(tag_expr)
+        score_expr = pl.when(is_browser_cache & is_recon).then(600).otherwise(score_expr)
+
+        # ==========================================
+        # 💀 3. Dictionary of Doom (Dual-Use Floor)
+        # ==========================================
+        # [DISABLED for performance - v6.2 logic moved to sh_analyzer.py THREAT_BOOST_PATTERNS]
+        # The boost is now applied at Analyzer level, not Polars expression level.
+
+        # ==========================================
+        # 🔎 4. Sensitive Data Heuristics
+        # ==========================================
+        # [DISABLED for performance - v6.2 logic moved to sh_analyzer.py SENSITIVE_KEYWORDS]
+        # The boost is now applied at Analyzer level.
+
+
         # [NEW] Network Share / Lateral Movement Detection (Case 5 Enhanced)
+        # 1. UNC Paths - Exclude local \\?\ and \\.\ prefixes and localhost
         is_unc_path = (
             pl.col("ParentPath").str.starts_with(r"\\") & 
-            (~pl.col("ParentPath").str.starts_with("\\\\?\\")) & 
-            (~pl.col("ParentPath").str.starts_with("\\\\.\\")) & 
-            (~pl.col("ParentPath").str.contains(r"\\localhost")) & 
+            (~pl.col("ParentPath").str.starts_with("\\\\?\\")) &
+            (~pl.col("ParentPath").str.starts_with("\\\\.\\")) &
+            (~pl.col("ParentPath").str.contains(r"\\localhost")) &
             (~pl.col("ParentPath").str.contains(r"\\127.0.0.1"))
         )
         
-        if "Target_Path" in df.columns:
-             is_unc_target = (
-                pl.col("Target_Path").str.starts_with(r"\\") & 
-                (~pl.col("Target_Path").str.starts_with("\\\\?\\"))
-             )
-             is_unc_path = is_unc_path | is_unc_target
-        else:
-             is_unc_target = pl.lit(False)
+        # [NEW] Target_Path Check (for LNKs)
+        cols = df.collect_schema().names()
+        is_unc_target = pl.col("Target_Path").str.starts_with(r"\\") if "Target_Path" in cols else pl.lit(False)
         
+        # 2. Mapped Drives
         is_mapped_drive = pl.col("Normalized_Path").str.contains(r"^[a-z]:/").and_(~pl.col("Normalized_Path").str.starts_with("c:/"))
         
+        # 3. Specific Threat: Putty/SSH/SetMACE in User Folders
         is_putty = pl.col("Normalized_Path").str.contains(r"putty|winscp|ssh|pscp") & pl.col("Normalized_Path").str.ends_with(".exe")
         is_setmace = pl.col("Normalized_Path").str.contains("setmace")
         is_choco = pl.col("Normalized_Path").str.contains("chocolatey") & pl.col("Normalized_Path").str.ends_with(".exe")
-        
-        SENSITIVE_KEYWORDS = ["confidential", "secret", "password", "credential", "private", "internal", "restricted"]
-        SENSITIVE_EXTENSIONS_REGEX = r"(?i)\.(docx|xlsx|pdf|txt|doc|xls)$"
-        is_sensitive_doc = pl.col("Normalized_Path").str.to_lowercase().str.contains("|".join(SENSITIVE_KEYWORDS)) & pl.col("Normalized_Path").str.contains(SENSITIVE_EXTENSIONS_REGEX)
 
         is_remote_lateral = (is_unc_path | is_unc_target | is_mapped_drive) & (pl.col("Normalized_Path").str.ends_with(".exe") | pl.col("Normalized_Path").str.ends_with(".lnk"))
 
+        # Scoring & Tagging
         tag_expr = pl.when(is_remote_lateral).then(pl.concat_str([pl.lit("LATERAL_MOVEMENT_EXEC"), tag_expr], separator=",")).otherwise(tag_expr)
         score_expr = pl.when(is_remote_lateral).then(score_expr + 150).otherwise(score_expr)
         
@@ -375,9 +401,6 @@ class PandoraEngine:
 
         tag_expr = pl.when(is_choco).then(pl.concat_str([pl.lit("PKG_MANAGER_ABUSE"), tag_expr], separator=",")).otherwise(tag_expr)
         score_expr = pl.when(is_choco).then(score_expr + 50).otherwise(score_expr)
-        
-        tag_expr = pl.when(is_sensitive_doc).then(pl.concat_str([pl.lit("SENSITIVE_DATA_ACCESS"), tag_expr], separator=",")).otherwise(tag_expr)
-        score_expr = pl.when(is_sensitive_doc).then(score_expr + 300).otherwise(score_expr)
 
         return df.with_columns([
             tag_expr.alias("Threat_Tag"),
@@ -385,7 +408,7 @@ class PandoraEngine:
         ]).drop(["Normalized_Path", "_pp", "_fn", "_full_path"])
 
     def run_gap_analysis_full(self, start_date, end_date):
-        print("[*] Phase 1: Running Physical Gap Analysis...", flush=True)
+        print("[*] Phase 1: Running Physical Gap Analysis...")
         try:
             start_dt = datetime.strptime(start_date, "%Y-%m-%d")
             end_dt = datetime.strptime(end_date, "%Y-%m-%d")
@@ -430,22 +453,48 @@ class PandoraEngine:
     def run_necromancer(self, lf_ghosts, pf_csv=None, shim_csv=None, chaos_csv=None): return lf_ghosts 
 
     def detect_encryption_burst(self, threshold_count: int = 50, threshold_seconds: int = 60):
-        print(f"[*] Ransomware Burst Detection: Scanning for {threshold_count}+ files in {threshold_seconds}s...", flush=True)
+        """
+        [A.1] Ransomware Encryption Burst Detection
+        
+        MFT/USNデータフレームから暗号化バースト（短時間での大量ファイル生成）を検知する。
+        
+        Args:
+            threshold_count: バーストとみなす最小ファイル数 (default: 50)
+            threshold_seconds: バーストとみなす最大継続時間（秒） (default: 60)
+            
+        Returns:
+            pl.DataFrame with detected burst events
+        """
+        print(f"[*] Ransomware Burst Detection: Scanning for {threshold_count}+ files in {threshold_seconds}s...")
+        
         results = []
+        
+        # User領域パスフィルタ (システム領域のノイズ除去)
         user_path_regex = r"(?i)(\\Users\\[^\\]+\\(Documents|Desktop|Pictures|Music|Downloads|Videos|OneDrive|Dropbox))"
         
         try:
+            # USN Journal を使用（リアルタイムに近いタイムスタンプ）
             lf_usn = self.lf_usn.with_columns(
                 self._robust_date_parse(pl.col("TimeStamp")).alias("Parsed_Timestamp")
             )
+            
+            # 拡張子を抽出
             lf_usn = lf_usn.with_columns(
                 pl.col("FileName").str.to_lowercase().str.extract(r"(\.[a-z0-9]+)$", 1).alias("Extension")
             )
-            ransom_entries = lf_usn.filter(pl.col("Extension").is_in(RANSOMWARE_EXTENSIONS))
             
+            # ランサムウェア拡張子にマッチするエントリを抽出
+            ransom_entries = lf_usn.filter(
+                pl.col("Extension").is_in(RANSOMWARE_EXTENSIONS)
+            )
+            
+            # ParentPath がある場合、ユーザー領域でフィルタ
             if "ParentPath" in lf_usn.collect_schema().names():
-                ransom_entries = ransom_entries.filter(pl.col("ParentPath").str.contains(user_path_regex))
+                ransom_entries = ransom_entries.filter(
+                    pl.col("ParentPath").str.contains(user_path_regex)
+                )
             
+            # 集計: 拡張子ごとに最初と最後のタイムスタンプ、ファイル数をカウント
             burst_candidates = (
                 ransom_entries
                 .group_by("Extension")
@@ -457,6 +506,7 @@ class PandoraEngine:
                 ])
             ).collect()
             
+            # バースト判定: Naive Approach (全体の時間差でチェック)
             for row in burst_candidates.iter_rows(named=True):
                 file_count = row["file_count"]
                 start_time = row["start_time"]
@@ -464,7 +514,9 @@ class PandoraEngine:
                 extension = row["Extension"]
                 sample_files = row["sample_files"]
                 
-                if start_time is None or end_time is None: continue
+                if start_time is None or end_time is None:
+                    continue
+                    
                 duration = (end_time - start_time).total_seconds()
                 
                 if file_count >= threshold_count and duration <= threshold_seconds:
@@ -475,10 +527,12 @@ class PandoraEngine:
                         "Duration_Seconds": duration,
                         "Sample_Files": ", ".join(sample_files) if sample_files else "",
                         "Verdict": "CRITICAL_RANSOMWARE_BURST",
-                        "Score": min(file_count * 10, 1000),
+                        "Score": min(file_count * 10, 1000),  # Cap at 1000
                         "Description": f"Detected {file_count} files with extension {extension} created in {duration:.1f}s"
                     })
+                    print(f"    [!] BURST DETECTED: {file_count} x '{extension}' in {duration:.1f}s")
                 elif file_count >= threshold_count // 2:
+                    # Low Burst: Half threshold (still worth noting)
                     results.append({
                         "Timestamp": str(start_time),
                         "Extension": extension,
@@ -489,15 +543,16 @@ class PandoraEngine:
                         "Score": min(file_count * 5, 500),
                         "Description": f"Detected {file_count} files with extension {extension}"
                     })
+                    print(f"    [~] Suspicious activity: {file_count} x '{extension}'")
                     
         except Exception as e:
-            print(f"    [-] Burst Detection Error: {e}", flush=True)
+            print(f"    [-] Burst Detection Error: {e}")
             
         if results:
-            print(f"    [+] Ransomware Burst Detection: {len(results)} events found!", flush=True)
+            print(f"    [+] Ransomware Burst Detection: {len(results)} events found!")
             return pl.DataFrame(results)
         else:
-            print(f"    [-] Ransomware Burst Detection: No bursts detected.", flush=True)
+            print(f"    [-] Ransomware Burst Detection: No bursts detected.")
             return pl.DataFrame()
 
 def auto_detect_ntfs(target_dir):
@@ -511,7 +566,7 @@ def auto_detect_ntfs(target_dir):
 
 def main(argv=None):
     print_logo()
-    parser = argparse.ArgumentParser(description="SH_PandorasLink v18.24")
+    parser = argparse.ArgumentParser(description="SH_PandorasLink v18.17")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("-d", "--dir", help="Auto-detect CSVs")
     group.add_argument("--manual", action="store_true")
@@ -520,7 +575,7 @@ def main(argv=None):
     parser.add_argument("--chaos"); parser.add_argument("--pf"); parser.add_argument("--shim")
     parser.add_argument("--chronos", help="Chronos CSV for Correlation")
     parser.add_argument("--hercules", help="Hercules CSV for Correlation")
-    parser.add_argument("--out", default="pandora_result_v18.24.csv")
+    parser.add_argument("--out", default="pandora_result_v18.17.csv")
     
     # [NEW] Triage Flag
     parser.add_argument("--triage", action="store_true", help="Enable Aggressive Junk Killer")
@@ -539,27 +594,23 @@ def main(argv=None):
         lf_ghosts = engine.run_gap_analysis_full(args.start, args.end)
         
         if lf_ghosts is not None:
-            print(f"[*] Gap Analysis Complete. Collecting Results...", flush=True)
             df_ghosts = lf_ghosts.collect()
-            print(f"[*] Starting Correlation (Hercules/Chronos)...", flush=True)
             df_ghosts = engine.correlate_cross_evidence(df_ghosts, args.chronos, args.hercules)
             df_ghosts = df_ghosts.with_columns(pl.col("Threat_Tag").alias("Risk_Tag"))
 
-            print(f"[*] Final Filtering (Threshold > 50)...", flush=True)
+            print(f"[*] Final Filtering (Threshold > 50)...")
             df_result = df_ghosts.filter(pl.col("Threat_Score") > 50)
             df_result = df_result.sort("Threat_Score", descending=True)
             
             if df_result.height > 0:
                 df_result.write_csv(args.out)
-                print(f"[+] GHOSTS: {df_result.height} records (Cleaned).", flush=True)
+                print(f"[+] GHOSTS: {df_result.height} records (Cleaned).")
             else:
-                print("[-] No ghosts found.", flush=True)
+                print("[-] No ghosts found.")
                 df_ghosts.head(0).write_csv(args.out)
-        else:
-            print("[-] No ghosts found (LazyFrame is None).", flush=True)
                 
     except Exception as e:
-        print(f"[!] Critical Error in Main Loop: {e}", flush=True)
+        print(f"[!] Error: {e}")
         import traceback
         traceback.print_exc()
 

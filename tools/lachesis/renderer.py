@@ -117,8 +117,44 @@ class LachesisRenderer:
                     filtered_phase = []
                     for ev in phase:
                         summary = str(ev.get('Summary', ''))
-                        path = str(ev.get('Path', '')) or summary  # Use summary as fallback
+                        # [FIX] Populate Path from multiple possible sources
+                        path = str(ev.get('Path', '')) or str(ev.get('Full_Path', '')) or str(ev.get('Value', '')) or summary
+                        ev['Path'] = path  # Ensure Path is set on the event for template
                         original_score = int(ev.get('Score', 0)) if ev.get('Score') else 0
+                        
+                        # [Grimoire v6.3/v6.4] Image Hygiene for Timeline
+                        path_lower = path.lower().replace("/", "\\")
+                        fname = path_lower.split("\\")[-1]
+                        tags = str(ev.get('Tag', '')).upper()
+                        
+                        # Extended noise extensions
+                        noise_exts = [".mui", ".nls", ".dll", ".sys", ".jpg", ".png", ".gif", ".ico", ".xml", ".dat"]
+                        
+                        # Extended system paths
+                        system_resource_paths = [
+                            "windows\\system32", "windows\\syswow64", "windows\\web\\",
+                            "windows\\branding\\", "program files\\windowsapps",
+                        ]
+                        browser_cache_paths = [
+                            "appdata\\local\\microsoft\\windows\\inetcache",
+                            "temporary internet files", "content.ie5",
+                        ]
+                        
+                        # Evidence Shield keywords
+                        RECON_KEYWORDS = ["xampp", "phpmyadmin", "admin", "dashboard", "kibana", "phishing", "c2", "login"]
+                        
+                        if any(fname.endswith(ext) for ext in noise_exts):
+                            # Recon keywords protect images
+                            if any(fname.endswith(ie) for ie in [".png", ".jpg", ".gif", ".ico"]):
+                                if any(kw in path_lower for kw in RECON_KEYWORDS):
+                                    pass  # Keep as evidence
+                                elif any(sp in path_lower for sp in system_resource_paths):
+                                    continue  # Drop
+                                elif any(bp in path_lower for bp in browser_cache_paths):
+                                    continue  # Drop
+                            # MUI/NLS/DLL/SYS files in system paths
+                            elif any(sp in path_lower for sp in system_resource_paths) and "RECON" not in tags:
+                                continue  # Skip this event
                         
                         # Apply Context-Aware Score Adjustment
                         adjusted_score, new_tags = LachesisAnalyzer.adjust_score(path, original_score)
@@ -285,28 +321,58 @@ class LachesisRenderer:
         except: pass
 
         for ev in iocs:
-            # 1. Trusted Analyzer Logic (Must be robust)
-            if analyzer and hasattr(analyzer, '_is_noise'):
-                if analyzer._is_noise(ev):
-                    try:
-                        with open("renderer_probe.log", "a") as f: f.write("Dropped by Analyzer\n")
-                    except: pass
-                    continue
-            
-            # 2. Redundant Check (Using Shared Pattern List) - Belt & Suspenders
-            # Solves "Logic Execution Failure" if analyzer state is weird
-            # Solves "Double Maintenance" (uses imported constant)
+            # [Grimoire v6.3/v6.4] Image Hygiene + Evidence Shield
             v = str(ev.get('Value', '')).lower()
             p = str(ev.get('Path', '')).lower()
             t = str(ev.get('Target_Path', '')).lower()
             c = str(ev.get('CommandLine', '')).lower()
             check_val = f"{v} | {p} | {t} | {c}"
             norm_check = check_val.replace("/", "\\").replace(".\\", "").replace("\\\\", "\\")
-            
-            is_noise = False
             tags = str(ev.get('Tag', '')).upper()
             score = int(ev.get('Score', 0))
+            fname = v.split("\\")[-1].split("/")[-1]
             
+            # [v6.4] Evidence Shield - Recon keywords protect images
+            RECON_KEYWORDS = ["xampp", "phpmyadmin", "admin", "dashboard", "kibana", 
+                              "phishing", "c2", "login", "webshell", "backdoor", "exploit"]
+            image_exts = [".png", ".jpg", ".gif", ".ico", ".bmp"]
+            if any(fname.endswith(ext) for ext in image_exts):
+                if any(kw in norm_check for kw in RECON_KEYWORDS):
+                    ev['Score'] = max(score, 600)
+                    if "INTERNAL_RECON" not in tags:
+                        ev['Tag'] = (tags + ",INTERNAL_RECON").strip(',')
+                    filtered_iocs.append(ev)
+                    continue  # Protected - keep and skip noise checks
+            
+            # [v6.3] Image Hygiene - Extended system/cache paths
+            noise_exts = [".mui", ".nls", ".dll", ".sys", ".jpg", ".png", ".gif", ".ico", ".xml", ".dat"]
+            system_resource_paths = [
+                "windows\\system32", "windows\\syswow64", "windows\\web\\",
+                "windows\\branding\\", "program files\\windowsapps",
+                "programdata\\microsoft\\windows\\systemdata",
+            ]
+            browser_cache_paths = [
+                "appdata\\local\\microsoft\\windows\\inetcache",
+                "appdata\\local\\google\\chrome\\user data\\default\\cache",
+                "temporary internet files", "content.ie5",
+            ]
+            
+            if any(fname.endswith(ext) for ext in noise_exts):
+                # Critical tags protect
+                if any(t in tags for t in ["RECON", "EXFIL", "MASQUERADE", "SCREENSHOT", "LATERAL"]):
+                    pass  # Keep
+                elif any(sp in norm_check for sp in system_resource_paths):
+                    continue  # Drop
+                elif any(bp in norm_check for bp in browser_cache_paths):
+                    continue  # Drop
+            
+            # 1. Trusted Analyzer Logic (Must be robust)
+            if analyzer and hasattr(analyzer, '_is_noise'):
+                if analyzer._is_noise(ev):
+                    continue
+            
+            # 2. Redundant Check (Using Shared Pattern List) - Belt & Suspenders
+            is_noise = False
             if score < 500 and not any(x in tags for x in ["LATERAL", "RANSOM", "WIPER"]):
                 for g in GARBAGE_PATTERNS:
                     if g in norm_check:
@@ -361,7 +427,28 @@ class LachesisRenderer:
             path_for_adjust = str(ev.get('Value', '') or ev.get('Path', ''))
             original_score = score
             score, new_tags = LachesisAnalyzer.adjust_score(path_for_adjust, score)
+            
+            # [Grimoire v6.1] Sensitive & Recon Keyword Boost (Aggressive)
+            # Check Full Path for critical keywords that might be missed by simple filename checks
+            normalized_val = path_for_adjust.lower().replace("\\", "/")
+            critical_keywords = [
+                "password", "secret", "confidential", "credentials", "login", 
+                "shadow", "kimitachi", "topsecret", "機密", "社外秘"
+            ]
+            if any(k in normalized_val for k in critical_keywords):
+                score = 800
+                new_tags.append("SENSITIVE_DATA_ACCESS")
+                
+            # [Grimoire v6.1] Context Injection for 'readme.txt'
+            # If readme.txt is found in a suspicious folder (e.g. SetMACE), annotate it
+            if "readme.txt" in normalized_val and "setmace" in normalized_val:
+                ev['Note'] = f"{ev.get('Note', '')} (Associated with SetMACE)"
+
             ev['Score'] = score  # Update the event's score permanently
+            if new_tags:
+                existing_tags = tag.split(",") if tag else []
+                ev['Tag'] = ",".join(list(set(existing_tags + new_tags)))
+                tag = ev['Tag'] # Update local var for filtering
             
             rescue_tags = ["CRITICAL", "TIMESTOMP", "KNOWN_WEBSHELL", "C2", "RANSOM", "ROOTKIT"]
             has_rescue_tag = any(t in tag for t in rescue_tags)
@@ -378,20 +465,28 @@ class LachesisRenderer:
                      if os.path.getsize("debug_verbose.log") < 50000: # Increase limit
                          f.write(f"USN Item: Cat={cat} Tag={tag} Val={val} Sc={score} Time={ev.get('Time')}\n")
             
-            # [Phase 6] Category-based Thresholding
-            # Different thresholds for different categories to balance Recall/Precision
+            # [Phase 6] Category-based Thresholding (Grimoire Engine v6.0)
+            # High-Confidence Filtering: Only show Score >= 300 unless critical context
             CATEGORY_THRESHOLDS = {
-                "EXECUTION": 150,        # [Strict] Filter reconnaissance and noise
-                "VULNERABLE APP": 150,   # [Strict] High noise potential
-                "ANTI-FORENSICS": 50,    # [Lenient] Catch all evidence destruction
-                "LATERAL MOVEMENT": 50,  # [Lenient] Ensure lateral movements are seen
-                "TIMESTOMP": 50,         # [Lenient] Time anomalies are critical
-                "DEFAULT": 50            # Base threshold
+                "EXECUTION": 300,        # [Strict] Filter reconnaissance and noise (was 150)
+                "VULNERABLE APP": 300,   # [Strict] High noise potential (was 150)
+                "ANTI-FORENSICS": 300,   # [Strict] Now relying on boosted scores for real findings (was 50)
+                "LATERAL MOVEMENT": 300, # [Strict] (was 50)
+                "TIMESTOMP": 300,        # [Strict] (was 50)
+                "DEFAULT": 300           # Base threshold (was 50)
             }
             
             threshold = CATEGORY_THRESHOLDS.get(cat, CATEGORY_THRESHOLDS["DEFAULT"])
             if "VULNERABLE" in cat: threshold = CATEGORY_THRESHOLDS["VULNERABLE APP"] # Match partial keys
 
+            # Rescue Tags: Keep these even if score is low (Contextual Importance)
+            # [Grimoire v6.1] Force Merge: Added LATERAL, RECON, SENSITIVE, EXFIL to rescue list
+            rescue_tags = [
+                "CRITICAL", "KNOWN_WEBSHELL", "C2", "RANSOM", "ROOTKIT", "MANUAL_REVIEW",
+                "LATERAL", "UNC_", "INTERNAL_RECON", "SENSITIVE", "EXFIL", "DATA_EXFIL" 
+            ]
+            has_rescue_tag = any(t.upper() in tag.upper() for t in rescue_tags)
+            
             # Strict Drop for low scores (using Category Thresholds)
             if score < threshold and not has_rescue_tag:
                  continue
@@ -401,8 +496,22 @@ class LachesisRenderer:
             should_group = False
             group_key = ""
             
+            # [Grimoire v6.2] Toolkit Grouping (Parent-Child)
+            # If a directory contains a high-score tool (>= 700), group all files in that directory
+            parent_dir = get_parent(val).lower()
+            well_known_tool_dirs = ["setmace", "mimikatz", "sdelete", "psexec", "lazagne", "wce"]
+            is_tooldir = any(t in parent_dir for t in well_known_tool_dirs)
+            
+            if is_tooldir:
+                should_group = True
+                # Extract tool name from path
+                tool_name = "Unknown Toolkit"
+                for t in well_known_tool_dirs:
+                    if t in parent_dir: tool_name = t.upper(); break
+                group_key = f"TOOLKIT|{tool_name}"
+            
             # 1.1 VULNERABLE APP (Bulk Grouping)
-            if "VULNERABLE APP" in cat:
+            elif "VULNERABLE APP" in cat:
                 should_group = True
                 group_key = f"VULN|{tag}" 
 
@@ -649,7 +758,13 @@ class LachesisRenderer:
             impact = "-"
             extra = ev.get('Extra', {})
             tag = str(ev.get('Tag', ''))
-            if "SYSTEM_TIME" in tag or "4616" in tag or "TIME_PARADOX" in str(ev.get('Type', '')):
+            
+            # [Grimoire v6.2] CommandLine Argument Extraction
+            # Check for CommandLine in various locations
+            cmd_line = ev.get('CommandLine') or ev.get('Payload') or extra.get('CommandLine', '')
+            if cmd_line and len(str(cmd_line)) > 3:
+                impact = f"`{str(cmd_line)[:50]}...`" if len(str(cmd_line)) > 50 else f"`{cmd_line}`"
+            elif "SYSTEM_TIME" in tag or "4616" in tag or "TIME_PARADOX" in str(ev.get('Type', '')):
                 impact = "**System Clock Altered**"
             elif cat == "INITIAL ACCESS":
                 tgt = extra.get('Target_Path', 'Unknown')

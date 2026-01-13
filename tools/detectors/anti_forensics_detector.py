@@ -67,4 +67,7 @@ class AntiForensicsDetector(BaseDetector):
                     pl.when(is_wipe).then(pl.format("{},EVIDENCE_WIPING,ANTI_FORENSICS", pl.col("Tag"))).otherwise(pl.col("Tag")).alias("Tag")
                 ])
 
+        # 🚀 Universal Signatures
+        df = self.apply_threat_signatures(df)
+
         return df

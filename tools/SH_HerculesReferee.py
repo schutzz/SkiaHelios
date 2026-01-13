@@ -312,6 +312,12 @@ class HerculesReferee:
             # Create an expression for EID extraction
             eid_expr = pl.col(src_col).str.extract(r"(?i)EID:(\d+)", 1)
             
+            # [NEW] Extract MemberName and GroupName for EID 4728/4732
+            # These are typically in format: "Member: user | Group: groupname | ..."
+            member_expr = pl.col(src_col).str.extract(r"(?i)Member[:\s]+([^|,]+)", 1).str.strip_chars()
+            group_expr = pl.col(src_col).str.extract(r"(?i)Group[:\s]+([^|,]+)", 1).str.strip_chars()
+            user_expr = pl.col(src_col).str.extract(r"(?i)TargetUserName[:\s]+([^|,\s]+)", 1).str.strip_chars()
+            
             # Create the replacement logic
             base_replacement = pl.col(src_col).str.split("|").list.get(0).str.strip_chars() + " (EventLog)"
             
@@ -320,11 +326,30 @@ class HerculesReferee:
             
             # Apply EID mappings dynamically
             for eid, name in eid_map.items():
-                refined_replacement = (
-                    pl.when(eid_expr == eid)
-                    .then(pl.lit(f"{name} (EID:{eid})"))
-                    .otherwise(refined_replacement)
-                )
+                # For 4728/4732, try to include member/group info
+                if eid in ["4728", "4732"]:
+                    detailed_name = (
+                        pl.when(member_expr.is_not_null() & group_expr.is_not_null())
+                        .then(pl.concat_str([
+                            pl.lit(f"{name}: "),
+                            member_expr.fill_null(user_expr.fill_null(pl.lit("?"))),
+                            pl.lit(" → "),
+                            group_expr.fill_null(pl.lit("?")),
+                            pl.lit(f" (EID:{eid})")
+                        ]))
+                        .otherwise(pl.lit(f"{name} (EID:{eid})"))
+                    )
+                    refined_replacement = (
+                        pl.when(eid_expr == eid)
+                        .then(detailed_name)
+                        .otherwise(refined_replacement)
+                    )
+                else:
+                    refined_replacement = (
+                        pl.when(eid_expr == eid)
+                        .then(pl.lit(f"{name} (EID:{eid})"))
+                        .otherwise(refined_replacement)
+                    )
             
             # specific handling for Time Rollback
             refined_replacement = (

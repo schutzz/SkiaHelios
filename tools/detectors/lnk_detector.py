@@ -8,8 +8,7 @@ class LnkDetector(BaseDetector):
         if "Target_Path" not in cols: return df
 
         lnk_threats = self.config.get("lnk_threats", [])
-        if not lnk_threats: return df
-
+        
         msg_col = None
         for c in ["Message", "Action", "Description"]:
             if c in cols: msg_col = c; break
@@ -35,27 +34,29 @@ class LnkDetector(BaseDetector):
         msg_expr = pl.col(msg_col).str.to_lowercase() if msg_col else pl.lit("")
         is_lnk = pl.col(fname_col).str.to_lowercase().str.contains(r"\.lnk")
 
-        for item in lnk_threats:
-            pat = item["pat"]
-            tag = item["tag"]
-            score = item["score"]
+        if lnk_threats:
+            for item in lnk_threats:
+                pat = item.get("pat", "")
+                tag = item.get("tag", "SUSPICIOUS_LNK")
+                score = item.get("score", 50)
+                if not pat: continue
+                
+                match_expr = is_lnk & (target_expr.str.contains(pat) | msg_expr.str.contains(pat))
+                
+                df = df.with_columns([
+                    pl.when(match_expr).then(pl.col("Threat_Score") + score).otherwise(pl.col("Threat_Score")).alias("Threat_Score"),
+                    pl.when(match_expr).then(pl.format("{},{}", pl.col("Tag"), pl.lit(tag))).otherwise(pl.col("Tag")).alias("Tag")
+                ])
             
-            match_expr = is_lnk & (target_expr.str.contains(pat) | msg_expr.str.contains(pat))
-            
-            df = df.with_columns([
-                pl.when(match_expr).then(pl.col("Threat_Score") + score).otherwise(pl.col("Threat_Score")).alias("Threat_Score"),
-                pl.when(match_expr).then(pl.format("{},{}", pl.col("Tag"), pl.lit(tag))).otherwise(pl.col("Tag")).alias("Tag")
-            ])
-            
-        # (C) Suspicious CMDLine Generic
-        combined_malicious = "|".join([item["pat"] for item in lnk_threats])
-        has_malicious = is_lnk & (target_expr.str.contains(combined_malicious) | msg_expr.str.contains(combined_malicious))
-        
-        df = df.with_columns(
-            pl.when(has_malicious)
-              .then(pl.format("{},SUSPICIOUS_CMDLINE", pl.col("Tag")))
-              .otherwise(pl.col("Tag"))
-              .alias("Tag")
-        )
+            # (C) Suspicious CMDLine Generic
+            combined_malicious = "|".join([item.get("pat") for item in lnk_threats if item.get("pat")])
+            if combined_malicious:
+                has_malicious = is_lnk & (target_expr.str.contains(combined_malicious) | msg_expr.str.contains(combined_malicious))
+                df = df.with_columns(
+                    pl.when(has_malicious).then(pl.format("{},SUSPICIOUS_CMDLINE", pl.col("Tag"))).otherwise(pl.col("Tag")).alias("Tag")
+                )
+
+        # 🚀 Universal Signatures Call
+        df = self.apply_threat_signatures(df)
         
         return df

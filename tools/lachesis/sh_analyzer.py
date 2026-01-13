@@ -1,4 +1,7 @@
+
 import re
+import os
+import polars as pl
 from datetime import datetime, timedelta
 from tools.lachesis.intel import TEXT_RES
 # [NEW] Correlatorをインポート
@@ -9,14 +12,21 @@ from tools.lachesis.correlator import CrossCorrelationEngine
 # Penalty should bring score ≤ threshold (50) for typical base scores (300)
 
 # Threat patterns: boost score (always prioritized)
+# [FIX] Use stricter patterns: match exe but NOT .mui/.nls
 THREAT_BOOST_PATTERNS = [
     ("setmace", 300, "CRITICAL_TIMESTOMP"),
-    ("sdelete", 200, "ANTI_FORENSICS"),
+    ("sdelete", 300, "ANTI_FORENSICS"),      # Boosted to ensure >500 total
     ("psexec", 250, "LATERAL_MOVEMENT"),
-    ("putty", 300, "REMOTE_ACCESS"),          # Boosted: 100→300 (Phase 6)
-    ("mimikatz", 400, "CREDENTIAL_THEFT"),
+    ("putty", 300, "REMOTE_ACCESS"),
+    ("mimikatz", 500, "CREDENTIAL_THEFT"),
     ("procdump", 150, "CREDENTIAL_DUMP"),
-    ("\\\\\\\\", 150, "UNC_EXECUTION"),  # UNC paths
+    ("\\\\\\\\", 150, "UNC_EXECUTION"),
+    # --- [NEW] Universal Dual-Use Tools (Strict: exclude .mui/.nls) ---
+    ("dd.exe", 900, "DATA_EXFIL_TOOL"),           # Exact match OK
+    ("cipher.exe$", 600, "WIPING_TOOL"),          # [FIX] $ anchor to exclude .mui
+    ("vssadmin.exe$", 600, "SHADOW_COPY_KILLER"), # [FIX] $ anchor 
+    ("wbadmin.exe$", 600, "BACKUP_DESTRUCTION"),  # [FIX] $ anchor
+    ("attributedialog", 800, "ADS_CREATION"),
 ]
 
 # [PUBLIC] Garbage Patterns for centralized definition (Module Level)
@@ -79,6 +89,20 @@ class LachesisAnalyzer:
         tags = []
         path_lower = path.lower() if path else ""
         
+        # [NEW] Sensitive Keyword Boost (Universal)
+        # どんなファイル形式でも、この名前なら調査対象にする
+        SENSITIVE_KEYWORDS = [
+            "password", "secret", "confidential", "credentials", "login", 
+            "shadow", "kimitachi", "topsecret", "機密", "社外秘", "pass.txt"
+        ]
+        
+        # パス区切りでファイル名だけを取得してチェック（誤検知防止）
+        filename = path_lower.split("\\")[-1]
+        
+        if any(k in filename for k in SENSITIVE_KEYWORDS):
+            adjusted = max(adjusted, 800) # 強制的にCRITICALへ
+            tags.append("SENSITIVE_DATA_ACCESS")
+        
         # 0. Backward Compatibility / Default
         if penalties is None:
             penalties = [] # No penalties if not provided
@@ -104,51 +128,93 @@ class LachesisAnalyzer:
         return adjusted, tags
 
     def _is_noise(self, ioc):
-        # [DEBUG] Trace execution (No try-except, let it crash if fails to prove existence)
-        try:
-             with open("sh_analyzer_debug.log", "a", encoding="utf-8") as f:
-                 f.write(".") 
-        except: pass
-
-        # [PARANOID] Check ALL potential fields
+        """
+        [Grimoire v6.3 Image Hygiene + v6.4 Evidence Shield]
+        システム画像はノイズとして削除、Recon証拠画像は保護。
+        """
+        # 0. Pre-Fetch Values
+        fname = str(ioc.get("Value", "")).lower()
         v = str(ioc.get('Value', '')).lower()
         p = str(ioc.get('Path', '')).lower()
         t = str(ioc.get('Target_Path', '')).lower()
         c = str(ioc.get('CommandLine', '')).lower()
-        
-        # Combined inspection string (normalized later)
         check_val = f"{v} | {p} | {t} | {c}"
         
-        fname = str(ioc.get("Value", "")).lower()
         tags = str(ioc.get("Tag", "")).upper()
-        score = int(ioc.get("Score", 0))
+        score = int(ioc.get("Score", 0) or 0)
+        norm_path = check_val.replace("/", "\\").replace(".\\", "").replace("\\\\", "\\")
 
-        # 🛡️ Safety Valve
-        if score >= 500: return False
+        # ---------------------------------------------------------
+        # [v6.4] Evidence Shield - 聖域キーワード保護
+        # ---------------------------------------------------------
+        RECON_KEYWORDS = ["xampp", "phpmyadmin", "admin", "dashboard", "kibana", 
+                          "phishing", "c2", "login", "webshell", "backdoor", "exploit"]
+        
+        # 画像ファイルの場合、ReconキーワードがあればScore 600にブーストして保護
+        image_exts = [".png", ".jpg", ".gif", ".ico", ".bmp"]
+        if any(fname.endswith(ext) for ext in image_exts):
+            is_recon_evidence = any(kw in norm_path for kw in RECON_KEYWORDS)
+            if is_recon_evidence:
+                ioc['Score'] = max(score, 600)
+                if "INTERNAL_RECON" not in tags:
+                    ioc['Tag'] = (tags + ",INTERNAL_RECON").strip(',')
+                return False  # 証拠として保護！
+
+        # ---------------------------------------------------------
+        # [v6.3] Image Hygiene - システム/キャッシュ画像削除
+        # ---------------------------------------------------------
+        noise_exts = [".mui", ".nls", ".dll", ".sys", ".jpg", ".png", ".gif", ".ico", ".xml", ".dat"]
+        
+        # システムリソース領域の定義拡張
+        system_resource_paths = [
+            "windows\\system32", 
+            "windows\\syswow64",
+            "windows\\web\\",           # 壁紙 (img104.jpg対策)
+            "windows\\branding\\",      # ロゴ等
+            "program files\\windowsapps",  # ストアアプリアイコン
+            "programdata\\microsoft\\windows\\systemdata",  # ロック画面キャッシュ
+        ]
+        
+        # ブラウザキャッシュ領域の定義
+        browser_cache_paths = [
+            "appdata\\local\\microsoft\\windows\\inetcache",
+            "appdata\\local\\google\\chrome\\user data\\default\\cache",
+            "temporary internet files",
+            "content.ie5",
+        ]
+        
+        # 拡張子が対象の場合のみ詳細チェック
+        if any(fname.endswith(ext) for ext in noise_exts):
+            
+            # A. 重要なタグが付いている場合は守る
+            critical_tags = ["RECON", "EXFIL", "MASQUERADE", "SCREENSHOT", "LATERAL"]
+            if any(t in tags for t in critical_tags):
+                return False  # 証拠なので残す
+            
+            # B. システム領域にある → ノイズとして即削除
+            if any(sp in norm_path for sp in system_resource_paths):
+                return True
+            
+            # C. ブラウザキャッシュ内 → ノイズ（ReconキーワードなしならDROP）
+            if any(bp in norm_path for bp in browser_cache_paths):
+                return True
+
+        # ---------------------------------------------------------
+        # 🛡️ Safety Valve: High Score / Critical Tag Protection
+        # ---------------------------------------------------------
+        if score >= 200: return False
         if "LATERAL" in tags or "REMOTE" in tags or "RANSOM" in tags or "WIPER" in tags:
             return False
 
-        # 🗑️ Path Normalization (強化版)
-        norm_path = check_val.replace("/", "\\").replace(".\\", "").replace("\\\\", "\\")
-        
-        # 🗑️ 1. Garbage Path Filter (Use GLOBAL CONSTANT)
+        # 🗑️ Garbage Path Filter
         for trash in GARBAGE_PATTERNS:
             if trash in norm_path:
-                try:
-                    with open("sh_analyzer_drop.log", "a", encoding="utf-8") as f:
-                        f.write(f"DROP: {fname} matches {trash}\n")
-                except: pass
                 return True
 
-        # 🗑️ 2. Extension Filter (Manifest等) - Only check File Name
-        noise_exts = [
-            ".manifest", ".mum", ".cat", ".tlb", 
-            ".png", ".jpg", ".ico", ".gif", ".xml",
-            ".pri", ".p7x", ".p7s", ".db", ".dat",
-            ".dll", ".sys", ".mui", ".nls"
-        ]
-        for ext in noise_exts:
-            if fname.endswith(ext):
+        # 🗑️ Extension Filter (Manifest等)
+        other_noise_exts = [".manifest", ".mum", ".cat", ".tlb", ".pri", ".p7x", ".p7s", ".db"]
+        for ext in other_noise_exts:
+            if fname.endswith(ext) and "RECON" not in tags:
                 return True
 
         return False
@@ -270,6 +336,9 @@ class LachesisAnalyzer:
             
             # Apply Correlation Rules (Boost Scores)
             self.visual_iocs = correlator.apply_rules(self.visual_iocs)
+            
+            # [Grimoire v6.2] Apply Temporal Proximity Boost
+            self.visual_iocs = correlator.apply_temporal_proximity_boost(self.visual_iocs)
             
             # Calculate Verdict (New!)
             flags, summary = correlator.determine_verdict(self.visual_iocs)

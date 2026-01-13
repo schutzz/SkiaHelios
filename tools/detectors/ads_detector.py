@@ -227,4 +227,7 @@ class ADSDetector(BaseDetector):
         if masq_count + rsvd_count + write_count > 0:
             print(f"       >> [!] ADS Threats Found: Masquerade={masq_count}, Reserved={rsvd_count}, StreamWrite={write_count}")
         
+        # 🚀 Universal Signatures (Engine v5.4)
+        df = self.apply_threat_signatures(df)
+        
         return df

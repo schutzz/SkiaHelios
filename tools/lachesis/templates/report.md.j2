@@ -74,10 +74,10 @@
 
 {% for phase in analysis_data.phases %}
 ### 📅 Phase {{ loop.index }} ({{ phase[0].Time.split('T')[0] if phase else 'Unknown' }})
-| Time (UTC) | Category | Event Summary | Source |
+| Time (UTC) | Category | Event / Path | Source |
 |---|---|---|---|
 {% for ev in phase -%}
-| {{ ev.Time.replace('T', ' ').split('.')[0] }} | {{ txt.cats.get(ev.Category, ev.Category) }} | **{{ ev.Summary }}** | {{ ev.Source }} |
+| {{ ev.Time.replace('T', ' ').split('.')[0] }} | {{ txt.cats.get(ev.Category, ev.Category) }} | **{{ ev.Summary }}**{% if ev.Path %} (`{{ ev.Path[-40:] }}`){% endif %} | {{ ev.Source }} |
 {% endfor %}
 {% endfor %}
 
@@ -185,11 +185,20 @@
 
 ## {{ txt.h1_app }}
 {{ txt.ioc_header }}
-| Type | Value | Score | Tag |
-|---|---|---|---|
-{% for ioc in all_iocs %}
-| {{ ioc.Type }} | `{{ ioc.Value }}` | {{ ioc.Score }} | {{ ioc.Tag }} |
-{% endfor %}
+
+### 7.1 🔥 High-Confidence IOCs (Score ≥ 500 - Critical Threats)
+| Type | Value | Score | Tag | Source |
+|---|---|---|---|---|
+{% for ioc in all_iocs %}{% if ioc.Score|int >= 500 %}
+| {{ ioc.Type }} | `{{ ioc.Value }}` | {{ ioc.Score }} | {{ ioc.Tag }} | {{ ioc.Source|default('Live', true)|replace('USN_Trace', '🔍 Recovered (USN)') }} |
+{% endif %}{% endfor %}
+
+### 7.2 📋 Contextual Artifacts (Score 300-499 - Investigation Leads)
+| Type | Value | Score | Tag | Source |
+|---|---|---|---|---|
+{% for ioc in all_iocs %}{% if ioc.Score|int >= 300 and ioc.Score|int < 500 %}
+| {{ ioc.Type }} | `{{ ioc.Value }}` | {{ ioc.Score }} | {{ ioc.Tag }} | {{ ioc.Source|default('Live', true)|replace('USN_Trace', '🔍 Recovered (USN)') }} |
+{% endif %}{% endfor %}
 
 
 ---

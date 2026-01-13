@@ -236,6 +236,9 @@ class ObfuscationDetector(BaseDetector):
         df = df.drop(["_obf_combined_text", "_b64_result", "_seed_result", 
                       "_entropy_result", "_norm_result", "_xor_result"])
         
+        # 🚀 Universal Signatures
+        df = self.apply_threat_signatures(df)
+        
         return df
     
     @staticmethod

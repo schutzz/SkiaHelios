@@ -83,6 +83,66 @@ class CrossCorrelationEngine:
         
         return visual_iocs
 
+    def apply_temporal_proximity_boost(self, visual_iocs, window_minutes=5, boost_factor=1.5):
+        """
+        [Grimoire v6.2] Temporal Proximity Boost
+        ANTI_FORENSICS イベント (Score > 600) の前後5分間にあるイベントのスコアを1.5倍にブースト。
+        目的: 単体では弱いイベントでも、証拠隠滅と同時刻ならば「隠滅作業の一環」として重要視する。
+        """
+        from datetime import datetime, timedelta
+        
+        def parse_time(t_str):
+            try:
+                if 'T' in str(t_str):
+                    return datetime.fromisoformat(str(t_str).replace('Z', ''))
+                elif len(str(t_str)) >= 19:
+                    return datetime.strptime(str(t_str)[:19], '%Y-%m-%d %H:%M:%S')
+            except: pass
+            return None
+        
+        # 1. Find all ANTI_FORENSICS anchor events
+        anchor_times = []
+        for ioc in visual_iocs:
+            tags = str(ioc.get("Tag", "")).upper()
+            score = int(ioc.get("Score", 0) or 0)
+            if ("ANTI_FORENSICS" in tags or "TIMESTOMP" in tags or "WIPE" in tags) and score >= 600:
+                t = parse_time(ioc.get("Time"))
+                if t: anchor_times.append(t)
+        
+        if not anchor_times:
+            return visual_iocs
+        
+        # 2. Boost events within proximity of anchors
+        boosted_count = 0
+        window = timedelta(minutes=window_minutes)
+        
+        for ioc in visual_iocs:
+            t = parse_time(ioc.get("Time"))
+            if not t: continue
+            
+            # Skip if already high score
+            current_score = int(ioc.get("Score", 0) or 0)
+            if current_score >= 700: continue
+            
+            # Check proximity to any anchor
+            for anchor in anchor_times:
+                if abs((t - anchor).total_seconds()) <= window.total_seconds():
+                    new_score = int(current_score * boost_factor)
+                    ioc['Score'] = new_score
+                    
+                    # Append tag
+                    existing_tags = ioc.get('Tag', '')
+                    if 'PROXIMITY_BOOST' not in existing_tags:
+                        ioc['Tag'] = f"{existing_tags},PROXIMITY_BOOST"
+                    
+                    boosted_count += 1
+                    break
+        
+        if boosted_count > 0:
+            print(f"    [+] Temporal Proximity: Boosted {boosted_count} events near anti-forensics activity.")
+        
+        return visual_iocs
+
     def _apply_action(self, ioc, action, metric_val, rule_id):
         # スコア更新
         if 'score_override' in action:
