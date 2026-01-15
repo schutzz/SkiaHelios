@@ -30,11 +30,16 @@ class NoiseFilter(BaseDetector):
             # Additional column check for Judge_Verdict
             if "Judge_Verdict" not in cols:
                 df = df.with_columns(pl.lit("").alias("Judge_Verdict"))
+            
+            # [FIX] Protect critical forensic tags from noise filtering
+            # If Tag contains NEW_USER_CREATION or other critical tags, don't treat as noise
+            has_critical_tag = pl.col("Tag").fill_null("").str.contains("(?i)NEW_USER_CREATION|CRITICAL|ANTI_FORENSICS|LATERAL_MOVEMENT")
+            is_noise_final = is_noise & ~has_critical_tag
 
             df = df.with_columns([
-                pl.when(is_noise).then(0).otherwise(pl.col("Threat_Score")).alias("Threat_Score"),
-                pl.when(is_noise).then(pl.lit("NOISE_FILTERED")).otherwise(pl.col("Tag")).alias("Tag"),
-                pl.when(is_noise).then(pl.lit("False Positive (Cache)")).otherwise(pl.col("Judge_Verdict")).alias("Judge_Verdict")
+                pl.when(is_noise_final).then(0).otherwise(pl.col("Threat_Score")).alias("Threat_Score"),
+                pl.when(is_noise_final).then(pl.lit("NOISE_FILTERED")).otherwise(pl.col("Tag")).alias("Tag"),
+                pl.when(is_noise_final).then(pl.lit("False Positive (Cache)")).otherwise(pl.col("Judge_Verdict")).alias("Judge_Verdict")
             ])
             
         # 2. Context Filtering (System File Whitelisting & Time Sync)

@@ -526,14 +526,15 @@ class PlutosGate:
         return None
 
     # ============================================================
-    # [v6.0] Browser Reconnaissance Hunter
+    # [v6.0] Browser Reconnaissance Hunter (Updated for Feature 2)
     # ============================================================
     def analyze_browser_recon(self):
         """
         Analyze browser history for reconnaissance activities.
-        Detects: Hacking tools research, exfiltration methods, security conference downloads
+        Detects: Hacking tools research, exfiltration methods, security conference downloads,
+        AND [Feature 2] Internal Recon (phpMyAdmin, etc.)
         """
-        print("[*] Phase 6: Hunting Browser Reconnaissance (Kali, Metasploit, Exfiltration)...")
+        print("[*] Phase 6: Hunting Browser Reconnaissance (Internal & External)...")
         
         lf_hist = self._load_csv("Browser_History*.csv")
         if lf_hist is None:
@@ -545,6 +546,9 @@ class PlutosGate:
         susp_terms = recon_conf.get("suspicious_search_terms", [])
         susp_downloads = recon_conf.get("suspicious_downloads", {}).get("patterns", [])
         
+        # [Feature 2] Internal Recon Keywords
+        internal_recon_kws = ["phpmyadmin", "phpinfo", "adminer", "webmin", "kibana", "/admin/", "/dashboard/"]
+        
         # Fallback if config unavailable (Safety Net)
         if not susp_domains:
              susp_domains = ["kali.org", "metasploit.com", "exploit-db.com", "packetstorm"]
@@ -554,39 +558,57 @@ class PlutosGate:
             url_col = next((c for c in ["URL", "ValueData", "Url"] if c in schema), "URL")
             title_col = next((c for c in ["Title", "ValueName"] if c in schema), "Title")
             time_col = next((c for c in ["VisitTime", "LastWriteTimestamp"] if c in schema), "VisitTime")
+            tag_col = next((c for c in ["Tag"] if c in schema), None)  # Check if ClioGet added Tags
             
-            # 1. Domain & Search Term Matching (Regex Construction)
+            # 1. Regex Construction
             domain_pattern = "|".join([re.escape(d) for d in susp_domains])
-            term_pattern = "|".join(susp_terms) if susp_terms else r"(?!)" # Match nothing if empty
+            term_pattern = "|".join(susp_terms) if susp_terms else r"(?!)" 
             download_pattern = "|".join(susp_downloads) if susp_downloads else r"(?!)"
+            internal_pattern = "|".join([re.escape(k) for k in internal_recon_kws])
+
+            # Build Filter Expression - Match URL/Title patterns OR ClioGet Tag
+            filter_expr = (
+                pl.col(url_col).str.contains(f"(?i)({domain_pattern}|{term_pattern}|{download_pattern}|{internal_pattern})") |
+                pl.col(title_col).str.contains(f"(?i)({term_pattern}|{internal_pattern})")
+            )
             
+            if tag_col:
+                filter_expr = filter_expr | pl.col(tag_col).str.contains("INTERNAL_RECON_WEB")
+
             # Combine all recon patterns for filtering
             recon_hits = (
                 lf_hist
-                .filter(
-                    pl.col(url_col).str.contains(f"(?i)({domain_pattern}|{term_pattern}|{download_pattern})") |
-                    pl.col(title_col).str.contains(f"(?i)({term_pattern})")
-                )
+                .filter(filter_expr)
                 .with_columns([
                     # Timestamp normalization
                     pl.col(time_col).alias("Timestamp"),
                     pl.col(url_col).alias("URL"),
                     pl.col(title_col).alias("Title"),
                     
-                    # Verdict Determination
-                    pl.when(pl.col(url_col).str.contains(f"(?i)({domain_pattern})"))
+                    # Verdict Determination - Internal Recon takes priority
+                    pl.when(
+                        pl.col(url_col).str.contains(f"(?i)({internal_pattern})") | 
+                        (pl.col(tag_col).str.contains("INTERNAL_RECON_WEB") if tag_col else pl.lit(False))
+                    )
+                    .then(pl.lit("INTERNAL_RECON_WEB"))
+                    .when(pl.col(url_col).str.contains(f"(?i)({domain_pattern})"))
                     .then(pl.lit("RECON_ACTIVITY"))
                     .when(pl.col(url_col).str.contains(f"(?i)({download_pattern})"))
                     .then(pl.lit("RECON_SECTOOLS"))
                     .otherwise(pl.lit("RECON_EXFILTRATION"))
                     .alias("Plutos_Verdict"),
                     
-                    # Score Assignment
-                    pl.when(pl.col(url_col).str.contains(f"(?i)({download_pattern})"))
-                    .then(150) # Tool Download is Critical
+                    # Score Assignment - [Feature 2] Internal Recon = 600 (High Priority)
+                    pl.when(
+                        pl.col(url_col).str.contains(f"(?i)({internal_pattern})") | 
+                        (pl.col(tag_col).str.contains("INTERNAL_RECON_WEB") if tag_col else pl.lit(False))
+                    )
+                    .then(600)  # [Feature 2] Internal Recon is High Priority
+                    .when(pl.col(url_col).str.contains(f"(?i)({download_pattern})"))
+                    .then(150) 
                     .when(pl.col(url_col).str.contains("(?i)exfiltrat"))
-                    .then(120) # Exfiltration Research is High
-                    .otherwise(100) # General Recon is Medium
+                    .then(120) 
+                    .otherwise(100) 
                     .alias("Heat_Score"),
                     
                     pl.lit("RECONNAISSANCE").alias("Tags")
@@ -596,11 +618,16 @@ class PlutosGate:
             )
             
             if recon_hits.height > 0:
+                internal_count = recon_hits.filter(pl.col("Plutos_Verdict") == "INTERNAL_RECON_WEB").height
                 print(f"[!] BROWSER RECONNAISSANCE DETECTED: {recon_hits.height} events")
+                if internal_count > 0:
+                    print(f"    [!] INTERNAL RECON (phpMyAdmin/phpinfo/admin): {internal_count} events - HIGH PRIORITY")
                 return recon_hits
                 
         except Exception as e:
             print(f"[!] Browser Recon Analysis Error: {e}")
+            import traceback
+            traceback.print_exc()
             
         return None
 

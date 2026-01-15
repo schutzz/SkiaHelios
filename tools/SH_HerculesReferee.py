@@ -261,6 +261,141 @@ class HerculesReferee:
             
         return df.drop("__bf_idx")
 
+    def _detect_created_users(self, df):
+        """
+        [Feature 4 Fix] Robust User Detection (CN= Support)
+        """
+        if "User" not in df.columns: return df
+        
+        # 検索対象カラムの優先順位: Payload(生データ) > Event_Summary > Message > Action
+        target_cols = [c for c in ["Payload", "Event_Summary", "Message", "Action"] if c in df.columns]
+        if not target_cols: return df
+        search_col = target_cols[0] 
+
+        # 1. ターゲットEIDの絞り込み
+        # 4720: User Created, 4728: Member Added to Global Group
+        # 4732: Member Added to Local Group, 4756: Member Added to Universal Group
+        creation_events = df.filter(
+            pl.col(search_col).fill_null("").str.contains("4720|4728|4732|4756") | 
+            pl.col("Action").fill_null("").str.contains("4720|4728|4732|4756")
+        )
+        
+        created_users = []
+        system_accounts = [
+            "SYSTEM", "LOCAL SERVICE", "NETWORK SERVICE", "DWM", "UMFD", 
+            "ANONYMOUS", "GUEST", "DEFAULTACCOUNT", "ADMINISTRATOR", 
+            "PUBLIC", "DEFAULT", "ALL USERS", "APPDATA", "DESKTOP",
+            "IEUSER", "SSHD_SERVER", "SSHD", "-", "WIN-", "CN"
+        ]
+        
+        # PRIMARY: Always extract from Target_Path (most reliable source)
+        print("    -> [Hercules v6.5] Analyzing User Profiles from Target_Path...")
+        try:
+            users_from_path = df.select(
+                pl.col("Target_Path").fill_null("").str.extract(r"(?i)[\\./]+users[\\./]+([a-zA-Z0-9_-]+)[\\./]", 1).alias("NewUser")
+            ).drop_nulls().unique()
+            
+            path_users = users_from_path["NewUser"].to_list() if users_from_path.height > 0 else []
+            created_users = [u for u in path_users if u and u.upper() not in system_accounts and len(u) > 2]
+            
+            if created_users:
+                print(f"       >> [INFO] Unique users from paths: {set(created_users)}")
+                
+        except Exception as e:
+            print(f"       >> [!] Path user extraction error: {e}")
+        
+        # SECONDARY: Augment with EID-based extraction if available
+        if creation_events.height > 0:
+            print(f"    -> [Hercules v6.5] Augmenting with User Creation/Group Add Events...")
+            
+            try:
+                # [FIX] Enhanced Regex for DN formats (CN=Joker,...) and standard formats
+                user_regex = r"(?i)(?:TargetUserName|Member Name|Member|Account Name)[:\s]+(?:CN=)?([a-zA-Z0-9_\-\.]+)"
+                
+                users = creation_events.select(
+                    pl.col(search_col).str.extract(user_regex, 1).alias("NewUser")
+                ).drop_nulls().unique()
+                
+                raw_users = users["NewUser"].to_list()
+                eid_users = [u for u in raw_users if u and u.upper() not in system_accounts and len(u) > 2]
+                
+                # Merge with path users (deduplicate)
+                created_users = list(set(created_users + eid_users))
+                
+            except Exception as e:
+                print(f"       >> [!] EID extraction error: {e}")
+
+        if created_users:
+            print(f"       >> [ALERT] New/Added Users Identified: {created_users}")
+            
+            # 2. Tag all activity by these users
+            # Use broader search to catch cases where "User" column is empty but Path has it
+            
+            # Create a combined text column for searching (only use existing columns)
+            search_cols = ["User", "Target_Path", "FileName", "ParentPath", "Source_File"]
+            existing_cols = [c for c in search_cols if c in df.columns]
+            
+            df = df.with_columns(
+                pl.concat_str(
+                    [pl.col(c).fill_null("") for c in existing_cols], 
+                    separator="|"
+                ).str.to_lowercase().alias("_search_blob")
+            )
+
+            user_pattern = "|".join([re.escape(u.lower()) for u in created_users])
+            is_new_user = pl.col("_search_blob").str.contains(user_pattern)
+            
+            # Apply Tag
+            df = df.with_columns(
+                pl.when(is_new_user)
+                .then(
+                    pl.when((pl.col("Tag").is_null()) | (pl.col("Tag") == ""))
+                    .then(pl.lit("NEW_USER_CREATION"))
+                    .otherwise(pl.format("{},NEW_USER_CREATION", pl.col("Tag")))
+                )
+                .otherwise(pl.col("Tag"))
+                .alias("Tag")
+            )
+            
+            # 3. Weighted Score Boost (Quality over Quantity)
+            # Critical: exe, ps1, bat, confidential, password, credential
+            # Medium: downloads, desktop, documents, lnk, rtf, docx
+            # Noise: AppData\Local\Packages, Temp, Cache, mui, dll (no boost)
+            path_col = pl.col("Target_Path").fill_null("")
+            
+            is_critical_path = path_col.str.contains(r"(?i)(confidential|password|credential|secret|\.exe$|\.ps1$|\.bat$|\.cmd$)")
+            is_medium_path = path_col.str.contains(r"(?i)(downloads|desktop|documents|\.lnk$|\.rtf$|\.docx?$|\.xlsx?$|\.pdf$)")
+            is_noise_path = path_col.str.contains(r"(?i)(appdata\\local\\packages|\\temp\\|\\cache\\|\.mui$|\.dll$|\.log$|onedrive)")
+            
+            # Calculate boost: Critical +300, Medium +150, Noise +0, Default +50
+            score_boost = (
+                pl.when(is_noise_path).then(pl.lit(0))
+                .when(is_critical_path).then(pl.lit(300))
+                .when(is_medium_path).then(pl.lit(150))
+                .otherwise(pl.lit(50))
+            )
+            
+            df = df.with_columns(
+                pl.when(is_new_user)
+                .then(pl.col("Threat_Score").cast(pl.Int64, strict=False).fill_null(0) + score_boost)
+                .otherwise(pl.col("Threat_Score").cast(pl.Int64, strict=False).fill_null(0))
+                .alias("Threat_Score")
+            )
+            
+            # 4. Critical Boost for the Origin Event (EID 4720/4728/4732/4756)
+            df = df.with_columns(
+                pl.when(pl.col(search_col).fill_null("").str.contains("4720|4728|4732|4756"))
+                .then(pl.lit(800))  # High but not overwhelming
+                .otherwise(pl.col("Threat_Score"))
+                .alias("Threat_Score")
+            )
+            
+            # Cleanup temporary column
+            if "_search_blob" in df.columns:
+                df = df.drop("_search_blob")
+            
+        return df
+
     def judge(self, timeline_df):
         print("    -> [Hercules] Judging events with Modular Detectors...")
         
@@ -371,6 +506,9 @@ class HerculesReferee:
         # ▼▼▼【追加1.5】Brute Force Detection ▼▼▼
         timeline_df = self._detect_brute_force(timeline_df)
 
+        # ▼▼▼【Feature 4】New User Creation Tracking ▼▼▼
+        timeline_df = self._detect_created_users(timeline_df)
+
         # ▼▼▼【v5.3 NEW】Sensitive Document Access Detection (LNK/JumpList) ▼▼▼
         print("    -> [Hercules v5.3] Sensitive Document & Internal Recon Detection...")
         sens_conf = self.config.get("sensitive_data", {})
@@ -401,8 +539,93 @@ class HerculesReferee:
                         .otherwise(pl.format("{},SENSITIVE_DATA_ACCESS", pl.col("Tag")))
                   )
                   .otherwise(pl.col("Tag"))
-                  .alias("Tag")
+                  .alias("Tag"),
+                # Mark sensitive files for batch detection
+                pl.when(is_sensitive).then(pl.lit(True)).otherwise(pl.lit(False)).alias("_is_sensitive_file")
             ])
+            
+            # ▼▼▼【NEW v6.5】Batch Access Detection (Exfil Deep Dive) ▼▼▼
+            # [FIX] Use DISTINCT file count to avoid false positives from repeated edits
+            print("    -> [Hercules v6.5] Sensitive Data Batch Access Detection...")
+            
+            # Filter to sensitive files only
+            sensitive_files = timeline_df.filter(pl.col("_is_sensitive_file"))
+            
+            if len(sensitive_files) >= 3:
+                # Sort by time and user
+                if "Time" in sensitive_files.columns and "User" in sensitive_files.columns:
+                    sensitive_files = sensitive_files.sort(["User", "Time"])
+                    
+                    # Convert to pandas for time window analysis (Rolling Window approach)
+                    import pandas as pd
+                    from datetime import timedelta
+                    
+                    df_pd = sensitive_files.select(["Time", "User", "Target_Path"]).to_pandas()
+                    df_pd["Time"] = pd.to_datetime(df_pd["Time"], errors='coerce')
+                    df_pd = df_pd.dropna(subset=["Time"])
+                    
+                    # [FIX] Extract filename for deduplication (same file accessed multiple times = 1 count)
+                    df_pd["FileName"] = df_pd["Target_Path"].str.extract(r"([^\\\/]+)$", expand=False).str.lower()
+                    
+                    # Group by user and detect 3+ UNIQUE files within 5 minutes (Rolling Window)
+                    batch_users = set()
+                    batch_details = {}  # Store details for logging
+                    
+                    for user in df_pd["User"].unique():
+                        if pd.isna(user):
+                            continue
+                        user_files = df_pd[df_pd["User"] == user].sort_values("Time")
+                        
+                        # Rolling window: check from each event as starting point
+                        for i in range(len(user_files)):
+                            window_start = user_files.iloc[i]["Time"]
+                            window_end = window_start + timedelta(minutes=5)
+                            
+                            # Files in 5-minute rolling window
+                            files_in_window = user_files[
+                                (user_files["Time"] >= window_start) & 
+                                (user_files["Time"] <= window_end)
+                            ]
+                            
+                            # [CRITICAL FIX] Count UNIQUE filenames, not total accesses
+                            unique_files = files_in_window["FileName"].nunique()
+                            
+                            if unique_files >= 3:
+                                batch_users.add(user)
+                                batch_details[user] = {
+                                    "unique_count": unique_files,
+                                    "files": list(files_in_window["FileName"].unique()[:5])  # Top 5 for display
+                                }
+                                print(f"      [!] BATCH ACCESS: User '{user}' accessed {unique_files} UNIQUE sensitive files within 5 minutes")
+                                print(f"          Files: {batch_details[user]['files']}")
+                                break
+                    
+                    # Apply BATCH tag and score boost
+                    if batch_users:
+                        timeline_df = timeline_df.with_columns([
+                            pl.when(
+                                pl.col("_is_sensitive_file") & 
+                                pl.col("User").is_in(list(batch_users))
+                            )
+                            .then(pl.col("Threat_Score") + 400)  # Total: 300 (individual) + 400 (batch) = 700
+                            .otherwise(pl.col("Threat_Score"))
+                            .alias("Threat_Score"),
+                            
+                            pl.when(
+                                pl.col("_is_sensitive_file") & 
+                                pl.col("User").is_in(list(batch_users))
+                            )
+                            .then(
+                                pl.when(pl.col("Tag").str.contains("SENSITIVE_DATA_ACCESS"))
+                                .then(pl.col("Tag").str.replace("SENSITIVE_DATA_ACCESS", "SENSITIVE_DATA_BATCH_ACCESS"))
+                                .otherwise(pl.format("{},SENSITIVE_DATA_BATCH_ACCESS", pl.col("Tag")))
+                            )
+                            .otherwise(pl.col("Tag"))
+                            .alias("Tag")
+                        ])
+            
+            # Remove temporary column
+            timeline_df = timeline_df.drop("_is_sensitive_file")
         
         # ▼▼▼【v5.3 NEW】Internal Reconnaissance Detection (Config-Driven) ▼▼▼
         # Updated to use 'internal_recon' section from intel_signatures.yaml
@@ -501,7 +724,10 @@ class HerculesReferee:
         if group_cols:
             timeline_df = timeline_df.group_by(group_cols).agg([
                 pl.col("Threat_Score").max(),
-                pl.col("Tag").map_elements(lambda x: ",".join(sorted(set(",".join([str(v) for v in x if v]).split(",")))), return_dtype=pl.Utf8).first(),
+                pl.col("Tag").fill_null("").str.concat(",").map_elements(
+                    lambda x: ",".join(sorted(set([t.strip() for t in str(x).split(",") if t.strip()]))),
+                    return_dtype=pl.Utf8
+                ),
                 pl.exclude("Threat_Score", "Tag", *group_cols).first()
             ])
 
@@ -515,7 +741,7 @@ class HerculesReferee:
 
         # 3. Score Cap (0-300)
         timeline_df = timeline_df.with_columns(
-            pl.col("Threat_Score").cast(pl.Int64).clip(0, 300).alias("Threat_Score")
+            pl.col("Threat_Score").cast(pl.Int64).alias("Threat_Score")
         )
 
         # 4. Final Verdict Formatting

@@ -186,11 +186,12 @@ class CrossCorrelationEngine:
         # 集計
         counts = {
             "TIMESTOMP": 0, "WIPER": 0, "RANSOM": 0, "LATERAL": 0, 
-            "EXFIL": 0, "MASQUERADE": 0, "PHISHING": 0
+            "EXFIL": 0, "MASQUERADE": 0, "PHISHING": 0, "USER_CREATION": 0  # [Feature 4] Added
         }
         
         for ioc in iocs:
             tags = str(ioc.get("Tag", "")).upper()
+            ioc_type = str(ioc.get("Type", "")).upper()
             score = int(ioc.get("Score", 0))
             
             if "TIMESTOMP" in tags: counts["TIMESTOMP"] += 1
@@ -200,6 +201,8 @@ class CrossCorrelationEngine:
             if "DATA_EXFIL" in tags: counts["EXFIL"] += 1
             if "MASQUERADE" in tags: counts["MASQUERADE"] += 1
             if "PHISHING" in tags: counts["PHISHING"] += 1
+            # [Feature 4] New User Creation Detection
+            if "NEW_USER_CREATION" in tags or "USER_CREATION" in ioc_type: counts["USER_CREATION"] += 1
 
         # 判定ロジック (Logic)
         if counts["RANSOM"] > 0:
@@ -221,6 +224,11 @@ class CrossCorrelationEngine:
         if counts["PHISHING"] >= 1:
             verdict_flags.add("PHISHING_ENTRY")
             summary.append("フィッシングによる初期侵入")
+
+        # [Feature 4] New User Creation Verdict
+        if counts["USER_CREATION"] > 0:
+            verdict_flags.add("SUSPICIOUS_ACCOUNT_CREATION")
+            summary.append(f"不正なユーザー作成 ({counts['USER_CREATION']} accounts)")
 
         # 最終サマリー生成
         # lateral_summary という変数名が不自然(User Request snippet used it).

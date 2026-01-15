@@ -43,6 +43,18 @@
 {% endfor %}
 {% endfor %}
 
+<details>
+<summary>📊 スコア基準 (Score Legend)</summary>
+
+| Score | 意味 | 例 |
+|-------|------|-----|
+| 800+ | 🔴 Critical | WebShell, 認証情報アクセス, Anti-Forensics |
+| 500-799 | 🟠 High | 不審なツール実行, Lateral Movement |
+| 300-499 | 🟡 Medium | 偵察活動, 設定ファイルアクセス |
+| <300 | ⚪ Low | ノイズ候補 (自動フィルタ対象) |
+
+</details>
+
 ---
 
 ## {{ txt.h1_origin }}
@@ -67,19 +79,47 @@
 {{ txt.no_vector_found }}
 {% endif %}
 
+{# [P3'] Hypothesis Injection for CTF/Missing Trace #}
+{% if drop_items and not phishing_lnks %}
+### 🕵️‍♂️ Initial Access Hypothesis (No Direct Trace Found)
+明確な流入経路（LNK/Zone.Identifier）が確認できませんでしたが、検出されたアーティファクトから以下の可能性が強く推測されます：
+
+1.  **Public Exploit (XAMPP/DVWA)**: 
+    - 検出された `dvwa`, `xampp`, `webshell.php` の存在から、公開されている脆弱性（SQLi, File Upload）を悪用した可能性があります。
+2.  **RDP Brute Force**: 
+    - `Event ID 4625 (Logon Failure)` や `Change Password` の痕跡が確認されている場合、総当たり攻撃による管理者権限奪取の可能性があります。
+3.  **Lateral Movement (SMB/Admin Share)**:
+    - `dsadd.exe` や `ftk imager.exe` のようなツールが確認されている場合、既に侵害された他端末からの横展開も疑われます。
+
+> **Recommendation:** `Event ID 4688` (Process Creation) の欠損を確認し、Webサーバーのアクセスログ（Apache access.log）を重点的に調査してください。
+{% endif %}
+
 ---
 
 ## {{ txt.h1_time }}
-(Detailed Timeline)
+(Detailed Timeline - High-priority events only. Score < 400 are aggregated.)
 
-{% for phase in analysis_data.phases %}
-### 📅 Phase {{ loop.index }} ({{ phase[0].Time.split('T')[0] if phase else 'Unknown' }})
-| Time (UTC) | Category | Event / Path | Source |
-|---|---|---|---|
-{% for ev in phase -%}
-| {{ ev.Time.replace('T', ' ').split('.')[0] }} | {{ txt.cats.get(ev.Category, ev.Category) }} | **{{ ev.Summary }}**{% if ev.Path %} (`{{ ev.Path[-40:] }}`){% endif %} | {{ ev.Source }} |
+{% set sorted_iocs = all_iocs | sort(attribute='Time') %}
+{% set current_date = namespace(val='') %}
+{% set current_minute = namespace(val='') %}
+{% set minute_buffer = namespace(count=0, first_val='') %}
+{% for ev in sorted_iocs if ev.Score|int >= 400 %}
+{% set ev_date = ev.Time.split('T')[0] if ev.Time else 'Unknown' %}
+{% set ev_minute = ev.Time[:16] if ev.Time else 'Unknown' %}
+{% if ev_date != current_date.val %}
+{% set current_date.val = ev_date %}
+
+### 📅 {{ ev_date }}
+| Time (UTC) | Category | Event Summary | Path | Score |
+|---|---|---|---|---|
+{% endif %}
+{# P2: Show primary tag only (first tag before comma) #}
+{% set primary_tag = ev.Tag.split(',')[0] if ev.Tag else ev.Type %}
+| {{ ev.Time.replace('T', ' ')[:16] if ev.Time else '-' }} | {{ primary_tag[:20] }} | **{{ ev.Value.split('\\')[-1][-40:] }}** | `{{ ev.Path[-35:] if ev.Path else '-' }}` | {{ ev.Score }} |
 {% endfor %}
-{% endfor %}
+
+> 📦 **低スコアイベント (Score < 400)** は可読性のため省略されています。詳細は `Timeline_Full.csv` を参照してください。
+
 
 ---
 
@@ -186,20 +226,20 @@
 ## {{ txt.h1_app }}
 {{ txt.ioc_header }}
 
-### 7.1 🔥 High-Confidence IOCs (Score ≥ 500 - Critical Threats)
-| Type | Value | Score | Tag | Source |
-|---|---|---|---|---|
-{% for ioc in all_iocs %}{% if ioc.Score|int >= 500 %}
-| {{ ioc.Type }} | `{{ ioc.Value }}` | {{ ioc.Score }} | {{ ioc.Tag }} | {{ ioc.Source|default('Live', true)|replace('USN_Trace', '🔍 Recovered (USN)') }} |
-{% endif %}{% endfor %}
+### 7.1 🔥 High-Confidence IOCs (Score ≥ 500 - Critical Threats) (Top 15)
+| Type | Artifact | Score | Tags |
+|---|---|---|---|
+{% for ioc in iocs_section_7_1 %}
+| {{ ioc.Type }} | `{{ ioc.Value }}` | {{ ioc.Score }} | {{ ioc.Tag }} |
+{% endfor %}
 
-### 7.2 📋 Contextual Artifacts (Score 300-499 - Investigation Leads)
-| Type | Value | Score | Tag | Source |
-|---|---|---|---|---|
-{% for ioc in all_iocs %}{% if ioc.Score|int >= 300 and ioc.Score|int < 500 %}
-| {{ ioc.Type }} | `{{ ioc.Value }}` | {{ ioc.Score }} | {{ ioc.Tag }} | {{ ioc.Source|default('Live', true)|replace('USN_Trace', '🔍 Recovered (USN)') }} |
-{% endif %}{% endfor %}
+### 7.2 📋 Contextual Artifacts (Top 50 Relevant)
+| Type | Artifact | Score | Tags |
+|---|---|---|---|
+{% for ioc in iocs_section_7_2 %}
+| {{ ioc.Type }} | `{{ ioc.Value }}` | {{ ioc.Score }} | {{ ioc.Tag }} |
+{% endfor %}
 
 
 ---
-*Report woven by SkiaHelios (The Triad v5.2 Perfection)* 🦁
+*Report woven by SkiaHelios (Grimoire Engine v6.4)* 🦁🛡️

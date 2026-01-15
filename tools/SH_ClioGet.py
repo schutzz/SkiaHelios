@@ -8,9 +8,9 @@ import shutil
 from datetime import datetime, timedelta
 
 # ============================================================
-#  SH_ClioGet v2.1 [Broad Hunter]
+#  SH_ClioGet v2.2 [Recon Hunter]
 #  Mission: Directly extract History from SQLite DBs
-#  Update: Improved file hunting (*History*) & Path logic
+#  Update: Feature 2 - Internal Recon Tagging
 # ============================================================
 
 def print_logo():
@@ -20,12 +20,16 @@ def print_logo():
     | |    | |_  __| |  __  ___| |_ 
     | |    | | |/ _` | |  |/ _ \ __|
     | |____| | | (_| | |__|  __/ |_ 
-     \_____|_|_|\__,_|\_____\___|\__|  v2.1 (Broad Hunter)
+     \_____|_|_|\__,_|\_____\___|\__|  v2.2 (Recon Hunter)
     """)
 
 class ClioGet:
     def __init__(self):
-        pass
+        # [Feature 2] Internal Recon Keywords
+        self.RECON_KEYWORDS = [
+            "phpmyadmin", "phpinfo", "adminer", "webmin", "kibana", 
+            "/admin/", "/dashboard/", "c2", "webshell"
+        ]
 
     def _convert_chrome_time(self, webkit_timestamp):
         """WebKit Timestamp to ISO String"""
@@ -72,12 +76,24 @@ class ClioGet:
             rows = []
             for row in cursor.execute(query):
                 ts = self._convert_chrome_time(row[2])
+                url = str(row[0]) if row[0] else ""
+                title = str(row[1]) if row[1] else ""
+                
+                # [Feature 2] Recon Tagging Logic
+                tags = []
+                check_str = (url + " " + title).lower()
+                for kw in self.RECON_KEYWORDS:
+                    if kw in check_str:
+                        tags.append("INTERNAL_RECON_WEB")
+                        break # One tag is enough for trigger
+                
                 rows.append({
                     "LastWriteTimestamp": ts,
-                    "URL": row[0],
-                    "Title": row[1],
+                    "URL": url,
+                    "Title": title,
                     "Duration_Sec": float(row[3])/1000000.0 if row[3] else 0,
-                    "VisitCount": row[4]
+                    "VisitCount": row[4],
+                    "Tag": ",".join(tags) # New Column
                 })
 
             if rows:
@@ -105,7 +121,6 @@ class ClioGet:
 
     def hunt_and_parse(self, target_dir, output_dir):
         print(f"[*] ClioGet: Hunting for '*History*' artifacts in: {target_dir}")
-        # 修正: "History" 完全一致ではなく "*History*" で広く探す
         candidates = list(Path(target_dir).rglob("*History*"))
         
         if not candidates:
@@ -116,9 +131,8 @@ class ClioGet:
         for hist in candidates:
             if not hist.is_file(): continue
             if hist.stat().st_size == 0: continue
-            if hist.suffix.lower() in ['.csv', '.txt', '.json', '.html']: continue # Skip logs
+            if hist.suffix.lower() in ['.csv', '.txt', '.json', '.html']: continue
 
-            # 修正: パスチェックを緩和し、SQLiteヘッダーチェックを優先
             if not self._is_sqlite(hist):
                 continue
 
@@ -134,10 +148,8 @@ class ClioGet:
                 elif "firefox" in path_str: browser = "Firefox"
                 else: browser = "UnknownBrowser"
 
-                # Attempt to find Username
                 user = "Unknown"
                 if "users" in path_str:
-                    # simplistic extraction
                     for i, p in enumerate(parts):
                         if p.lower() == "users" and i+1 < len(parts):
                             user = parts[i+1]
@@ -146,7 +158,6 @@ class ClioGet:
                 profile = "Default"
                 if "default" in path_str: profile = "Default"
                 elif "profile" in path_str: 
-                    # Try to grab "Profile X"
                     import re
                     match = re.search(r"(profile\s*\d+)", path_str)
                     if match: profile = match.group(1).replace(" ", "")

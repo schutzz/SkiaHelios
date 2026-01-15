@@ -84,6 +84,8 @@ try:
     from SH_ThemisLoader import ThemisLoader
     # [NEW] Import Chronos for direct injection
     from SH_ChronosSift import ChronosEngine
+    # [NEW] Import UserReporter for per-user reports
+    from lachesis.user_reporter import UserReporter
 except ImportError as e:
     # 万が一これでもダメな場合のデバッグ表示
     print(f"[!] Hekate Import Critical Error: {e}")
@@ -222,6 +224,19 @@ def main(argv=None):
         print("\n[*] Phase 3: Lachesis is writing the fate...")
         lachesis = LachesisWriter(lang=args.lang, hostname=hostname, case_name=args.case)
         lachesis.weave_report(analysis_result, args.out, dfs, hostname, os_info, primary_user)
+
+        # ----------------------------------------------------
+        # 4. UserReporter: Generate per-user activity reports
+        # ----------------------------------------------------
+        print("\n[*] Phase 4: Generating per-user activity reports...")
+        try:
+            if "hercules" in dfs and dfs["hercules"] is not None:
+                reporter = UserReporter(dfs["hercules"], args.out)
+                user_reports = reporter.generate_all_reports()
+                if user_reports:
+                    print(f"    [+] Generated {len(user_reports)} user report(s)")
+        except Exception as e:
+            print(f"    [!] UserReporter warning: {e}")
 
         print(f"\n[+] Operation Complete. The fate has been woven into: {args.out}")
 

@@ -15,7 +15,7 @@
 
 Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** orchestrated by **"Hekate"**, supported by **"Chronos" (The Time Lord feat. Icarus Paradox)**, **"Hercules" (The Referee)**, the **"PlutosGate" (Network & Recon Hunter)**, and the **"YARA WebShell Scanner"** to detect advanced threats including **Account Takeover**, **Privilege Escalation**, **Evidence Wiping**, **Web Intrusion Chains**, and **Cross-Artifact Tampering**.
 
-**Current Version:** v6.4 (Grimoire Engine: Evidence Shield & Image Hygiene)
+**Current Version:** v6.4 (Operation Truth & Masquerade Hunter)
 
 ---
 
@@ -351,6 +351,16 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
 * **[Lachesis]** Full refactoring of the Renderer module for stability, localization support (JP/EN), and modularity.
 * **[Feature]** **Automated Remediation:** Introduced "Recommended Actions" table with Priority (P0/P1) and Timeline.
 
+### v6.4 - Operation Truth & Masquerade Hunter 🎭
+* **[Critical]** **Masquerade Detection (Case 7):**
+    * **Fake Tool Detection:** `sysinternals.exe` flagged as `CRITICAL_MASQUERADE` (Score 600).
+    * **Location Anomaly:** `vmtoolsio.exe` in non-standard paths (e.g. `C:\Windows`) detected as `SUSPICIOUS_LOCATION`.
+    * **Security Tool Policy:** Known tools (Wireshark, Procexp) in `Downloads`/`Temp` trigger alerts.
+* **[Critical]** **SRUM Integration (Case 2):** High-volume transfers (>1MB) extracted as `DATA_EXFIL` (High Heat).
+* **[Critical]** **Anti-Wiper Logic:** `BCWipe` artifacts boosted to Score 600 (`ANTI_FORENSICS`).
+* **[Visualization]** **Mermaid Refinement:** Aggressive note compression, coalesced gaps (>30 days), and zero visual noise for low-priority groups.
+* **[Logic]** **Joker Detection:** Boosted Webshell (`c99`, `r57`) scores to Critical (800).
+
 ### v4.55 - Operation Omniscience & Modular Lachesis 👁️
 * **[Architecture]** **Modular Lachesis:** Decomposition of the massive `SH_LachesisWriter.py` into scalable sub-modules (`Core`, `Intel`, `Enricher`, `Analyzer`, `Renderer`).
 * **[Critical]** **Adaptive Origin Tracing (Tartaros v4.1):** Implemented logic to match artifacts with browser history even with significant time gaps (up to 3 hours) if a unique ID is present.
@@ -420,7 +430,7 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
 * [x] **v6.1:** **The Hunter (SysInternals & LotL Detection)**
 * [x] **v6.2:** **The Decoder (Obfuscation & ADS Hunter)**
 * [x] **v6.3:** **Grimoire Improvements (Temporal Boost & IOC Separation)**
-* [x] **v6.4:** **Grimoire Engine (Evidence Shield & Image Hygiene)**
+* [x] **v6.4:** **Operation Truth (Masquerade Hunter, SRUM Heat, & Anti-Wiper)**
 * [ ] **v6.5:** **Deep Exfil & Recon (Batch Access Detection & phpMyAdmin Hunter)** - *Planned*
 * [ ] **v7.0:** **The Oracle (LLM Auto-Summarization & Chat)** - *Planned*
 

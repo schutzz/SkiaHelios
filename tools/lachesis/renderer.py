@@ -7,6 +7,7 @@ from pathlib import Path
 from tools.lachesis.intel import TEXT_RES
 
 from tools.lachesis.narrator import NarrativeGenerator
+from tools.lachesis.user_reporter import UserActivityReporter
 
 # [NEW] Jinja2 Integration
 try:
@@ -78,6 +79,51 @@ class LachesisRenderer:
 
         return narrative
 
+    # ═══════════════════════════════════════════════════════════
+    # [NEW] Display Data Beautification
+    # ═══════════════════════════════════════════════════════════
+    def _clean_display_data(self, iocs):
+        """
+        [Fix] Beautify data for reporting.
+        - Deduplicate tags
+        - Remove internal system tags (MFT, USN, Single Letters)
+        - Truncate long paths to fit in markdown tables
+        """
+        cleaned = []
+        # Tags to hide from the final report
+        HIDDEN_TAGS = [
+            "MFT_ENTRY", "USN_ENTRY", "PROXIMITY_BOOST", "CORRELATED", "LIVE", 
+            "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", 
+            "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "_"
+        ]
+        
+        for ioc in iocs:
+            new_ioc = ioc.copy()
+            
+            # 1. Clean Tags
+            raw_tags = str(new_ioc.get('Tag', '')).replace(' ', '').split(',')
+            # Filter, Deduplicate, and Sort
+            visible_tags = sorted(list(set([t for t in raw_tags if t and t not in HIDDEN_TAGS and len(t) > 1])))
+            
+            if visible_tags:
+                new_ioc['Tag'] = ", ".join(visible_tags[:3])  # Limit to top 3
+            else:
+                new_ioc['Tag'] = "-"
+            
+            # 2. Smart Truncate Path/Value
+            val = str(new_ioc.get('Value', ''))
+            # Only truncate if extremely long
+            if len(val) > 60:
+                parts = val.replace('/', '\\').split('\\')
+                if len(parts) > 3:
+                    # Keep ellipsis, parent folder, filename
+                    new_ioc['Value'] = f"...\\{parts[-2]}\\{parts[-1]}"
+                else:
+                    new_ioc['Value'] = val[:30] + "..." + val[-25:]
+            
+            cleaned.append(new_ioc)
+        return cleaned
+
     def render_report(self, analysis_data, analyzer, enricher, origin_stories, dfs_for_ioc, metadata):
         """
         Render report using Jinja2 template.
@@ -91,7 +137,7 @@ class LachesisRenderer:
         with open(log_file, "a", encoding="utf-8") as log:
             log.write(f"\n[{datetime.now()}] Starting render_report for {out_file}\n")
         
-        print(f"[*] Lachesis v5.5 (Templated) is weaving the Grimoire into {out_file}...")
+        print(f"[*] Lachesis v6.4 (Operation Truth) is weaving the Grimoire into {out_file}...")
 
         if not self.template_env:
             msg = "    [!] Critical: Jinja2 environment not initialized."
@@ -258,7 +304,14 @@ class LachesisRenderer:
                 "plutos_section": self._render_plutos_section_text(dfs_for_ioc, analyzer),
                 "stats": self._prepare_stats(analyzer, analysis_data, dfs_for_ioc, refined_iocs),
                 "recommendations": self._prepare_recommendations(analyzer),
-                "all_iocs": refined_iocs 
+                "all_iocs": refined_iocs,
+                
+                # ═══════════════════════════════════════════════════════════════
+                # [Feature 5] Noise Zero Implementation + Display Beautification
+                # Split IOCs into Section 7.1 (Top 15 Critical) and 7.2 (Contextual + Overflow)
+                # ═══════════════════════════════════════════════════════════════
+                "iocs_section_7_1": self._clean_display_data(self._split_iocs_top15(refined_iocs)[0]),
+                "iocs_section_7_2": self._clean_display_data(self._split_iocs_top15(refined_iocs)[1][:50])  # Limit to 50
             }
             with open(log_file, "a", encoding="utf-8") as log: 
                 log.write(f"[{datetime.now()}] Context Prepared. Keys: {list(context.keys())}\n")
@@ -293,14 +346,32 @@ class LachesisRenderer:
             with open(log_file, "a", encoding="utf-8") as log:
                 log.write(f"[{datetime.now()}] {msg}\n")
                 traceback.print_exc(file=log)
+        
+        # 4. Generate per-user activity reports
+        try:
+            events_source = context.get('all_iocs', analyzer.visual_iocs if analyzer else [])
+            user_reporter = UserActivityReporter(self.hostname)
+            user_reporter.generate(events_source, self.output_path)
+        except Exception as e:
+            print(f"    [!] UserReporter warning: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _group_all_iocs(self, iocs, analyzer=None):
         # [Hybrid Fix] Dynamic Noise Filter Integration (Local Import)
         from tools.lachesis.sh_analyzer import GARBAGE_PATTERNS
+        # [Refactor] Load patterns from Intel module
+        from tools.lachesis.intel import IntelManager
 
         # Flattened grouping for Section 7
         grouped_iocs = []
         
+        # ═══════════════════════════════════════════════════════════
+        # [Fix] Ultra-Hard Noise Filter (WinSxS / Store Apps / Updates)
+        # ═══════════════════════════════════════════════════════════
+        # Get patterns from Intel (Not Hardcoded here)
+        HARD_NOISE_PATTERNS = IntelManager.get_renderer_noise_patterns()
+        RESCUE_TAGS = IntelManager.get_rescue_tags()
         
         # ═══════════════════════════════════════════════════════════
         # [Phase 5+] Hybrid Smart Filter (The Safety Valve Edition)
@@ -331,6 +402,133 @@ class LachesisRenderer:
             tags = str(ev.get('Tag', '')).upper()
             score = int(ev.get('Score', 0))
             fname = v.split("\\")[-1].split("/")[-1]
+            
+            # ═══════════════════════════════════════════════════════════
+            # [Fix] Hard Noise Filter Check
+            # ═══════════════════════════════════════════════════════════
+            
+            # EXTREME NOISE: Always filter, even if rescued (component hashes, UWP apps, etc.)
+            EXTREME_NOISE = [
+                "_none_", "_10.0.", "_amd64_", "_x86_",  # WinSxS component hashes
+                "~31bf3856ad364e35~",  # Microsoft SxS catalog hash signature
+                "windows\\winsxs", 
+                "windowsapps\\",      # UWP Store Apps
+                "infusedapps\\",      # Pre-installed UWP
+                "8wekyb3d8bbwe",      # Microsoft Store app SID pattern
+                "deletedalluserpackages",
+                "nativeimages_",      # .NET Native Images (GAC cache)
+                "\\assembly\\gac",    # .NET GAC assemblies
+                "microsoft.windows.cortana",  # Cortana UWP
+                "appmodel-runtime",           # AppX Runtime logs
+                "contentdeliverymanager",     # Windows CDM
+                "devicesearchcache",          # Cortana search cache
+                # XAMPP Legitimate Components (non-threat library files)
+                "xampp\\php\\pear",
+                "xampp\\apache\\manual",
+                "xampp\\tomcat\\webapps\\docs",
+                "xampp\\tomcat\\webapps\\examples",
+                "xampp\\src\\",
+                "xampp\\licenses",
+                "xampp\\locale",
+                "xampp\\php\\docs",
+                "xampp\\cgi-bin",
+                "\\pear\\docs",
+                "\\pear\\tests",
+                # XAMPP Extended Noise (Perl/PHP/Apache/MySQL)
+                "xampp\\perl\\lib",
+                "xampp\\perl\\vendor",
+                "filezillaftp\\source",
+                "apache\\icons",
+                "mercurymail\\",
+                "mysql\\data\\",
+                "phpmyadmin\\js\\",
+                "phpmyadmin\\libraries\\",
+                "phpmyadmin\\themes\\",
+                "webalizer\\",
+                "sendmail\\",
+                # XAMPP Additional Noise (Tomcat, Static, Sessions)
+                "xampp\\tmp\\sess_",
+                "tomcat\\webapps\\manager",
+                "tomcat\\webapps\\host-manager",
+                "tomcat\\webapps\\root",
+                "phpmyadmin\\doc\\",
+                "htdocs\\img\\",
+                "security\\htdocs\\",
+                # XAMPP Dashboard & Docs (Web Resources)
+                "htdocs\\dashboard\\",
+                "htdocs\\docs\\",
+                "dashboard\\images\\",
+                "dashboard\\css\\",
+                "dashboard\\docs\\",
+                # XAMPP Libraries & Extras
+                "php\\extras\\",
+                "php\\tests\\",
+                "perl\\bin\\",
+                "perl\\site\\",
+                # XAMPP Apache/MySQL Config & Locales
+                "apache\\include\\",
+                "apache\\modules\\",
+                "mysql\\share\\",
+                "phpmyadmin\\locale\\",
+                # XAMPP Test & Misc
+                "webdav\\",
+                "\\flags\\",
+                "\\install\\",
+                "phpids\\tests\\",
+                # Browser Cache & DVWA Static Resources
+                "content.ie5\\",
+                "dvwa\\dvwa\\images\\",
+                "dvwa\\dvwa\\css\\",
+                "dvwa\\external\\",
+                # XAMPP System Libraries (Loader noise)
+                "apache\\bin\\iconv\\",
+                "php\\ext\\",
+                "tomcat\\lib\\",
+                # MySQL Metadata (Running service artifacts)
+                ".frm",
+                ".myd",
+                ".myi",
+                "performance_schema\\",
+                # XAMPP Icons & Static Assets
+                "xampp\\img\\",
+                "hackable\\users\\",
+                "favicon.ico",
+                # AGGRESSIVE NOISE FILTERS (95%+ FP in INTERNAL_RECON)
+                "xampp\\apache\\bin\\",
+                "xampp\\mysql\\bin\\",
+                "xampp\\php\\",
+                "xampp\\tomcat\\bin\\",
+                # Library/Binary extensions (service loading)
+                ".dll",
+                ".jar",
+                ".so",
+                # Help & Documentation noise
+                ".chm",
+                ".hlp",
+                "readme.txt",
+                "license.txt",
+                "install.txt",
+                "changes.txt",
+                # MySQL system tables
+                "information_schema\\",
+                "mysql\\mysql\\",
+                # Tomcat/Java artifacts
+                "catalina\\",
+                ".class",
+            ]
+            if any(xp in norm_check for xp in EXTREME_NOISE):
+                continue  # Unconditionally drop system noise
+            
+            is_rescued = any(rt in tags for rt in RESCUE_TAGS)
+            
+            if not is_rescued:
+                # Hard Filter Check
+                if any(np in norm_check for np in HARD_NOISE_PATTERNS):
+                    continue  # Drop noisy artifact
+                
+                # AppData Packages check (common noise source)
+                if "appdata\\local\\packages" in norm_check and score < 500:
+                    continue
             
             # [v6.4] Evidence Shield - Recon keywords protect images
             RECON_KEYWORDS = ["xampp", "phpmyadmin", "admin", "dashboard", "kibana", 
@@ -629,6 +827,37 @@ class LachesisRenderer:
                 grouped_iocs.extend(bucket)
         
         return sorted(grouped_iocs, key=lambda x: str(x.get('Score', 0)), reverse=True)
+
+    def _split_iocs_top15(self, refined_iocs):
+        """
+        [Feature 5] Noise Zero: Split IOCs into Top 15 Critical and Overflow/Contextual.
+        
+        Returns:
+            tuple: (section_7_1, section_7_2)
+                - section_7_1: Top 15 IOCs with Score >= 500
+                - section_7_2: Overflow (16+) + Contextual (300-499), sorted by score
+        """
+        # ═══════════════════════════════════════════════════════════════
+        # [Fix] Ensure Sorting BEFORE Slicing - Critical Bug Fix!
+        # ═══════════════════════════════════════════════════════════════
+        
+        # まず全体をスコア降順でソート（超重要！）
+        refined_iocs.sort(key=lambda x: int(x.get('Score', 0)), reverse=True)
+
+        # 1. Extract candidates (Score >= 500 and 300-499)
+        high_conf_candidates = [i for i in refined_iocs if int(i.get('Score', 0)) >= 500]
+        context_candidates = [i for i in refined_iocs if 300 <= int(i.get('Score', 0)) < 500]
+        
+        # 2. Top 15 slicing (now guaranteed to be highest scores first)
+        section_7_1 = high_conf_candidates[:15]
+        overflow_high = high_conf_candidates[15:]  # 16th onwards
+        
+        # 3. Merge overflow with contextual and re-sort
+        # This ensures Score 1000 at position 16 appears at top of Section 7.2
+        section_7_2 = overflow_high + context_candidates
+        section_7_2.sort(key=lambda x: int(x.get('Score', 0)), reverse=True)
+        
+        return (section_7_1, section_7_2)
 
     # --- Context Helper Methods ---
 
@@ -1348,25 +1577,54 @@ class LachesisRenderer:
         sorted_dates = sorted(date_groups.keys())
         
         # Render each date group
-        last_dt_obj = None
+        last_displayed_dt_obj = None
         
         for d in sorted_dates:
             group_evs = date_groups[d]
-            
-            # [Feature] Timeline Gap Visualization
-            try:
-                curr_dt_obj = datetime.strptime(d, "%Y-%m-%d")
-                if last_dt_obj:
-                    delta = (curr_dt_obj - last_dt_obj).days
-                    if delta > 1:
-                        # Insert Gap Note
-                        f.append(f"    Note over Download,Cleanup: ⏳ ... {delta} Days Gap ...")
-                last_dt_obj = curr_dt_obj
+            curr_dt_obj = None
+            try: curr_dt_obj = datetime.strptime(d, "%Y-%m-%d")
             except: pass
 
-            # Create a summary for this date group
-            summary_html = self._summarize_with_time_simple(group_evs)
-            f.append(f"    Note right of {target_participant}: {summary_html}")
+            # [P4] Filter: Only show high-score or critical events in Mermaid notes
+            CRITICAL_TAGS = ["WEBSHELL", "LATERAL", "ANTI", "EXFIL", "C2", "TIMESTOMP"]
+            high_priority_evs = [e for e in group_evs if 
+                int(e.get('Score', 0) or 0) >= 500 or 
+                any(ct in str(e.get('Tag', '')).upper() for ct in CRITICAL_TAGS)]
+            
+            note_content = None
+
+            # Determine if we display detailed notes, summary, or nothing
+            if high_priority_evs:
+                 # [Final Polish] Aggressive Note Compression
+                 DISPLAY_LIMIT = 3
+                 display_evs = high_priority_evs[:DISPLAY_LIMIT]
+                 remain_count = len(high_priority_evs) - DISPLAY_LIMIT
+                 
+                 summary_html = self._summarize_with_time_simple(display_evs, max_items=DISPLAY_LIMIT)
+                 if remain_count > 0:
+                      summary_html += f"<br/>(...and {remain_count} more)"
+                 note_content = summary_html
+
+
+            
+            # If no content to display, skip this date entirely (and don't update last_displayed_dt_obj)
+            if not note_content:
+                continue
+
+            # [Feature] Timeline Gap Visualization (Coalesced)
+            # Only visualize gap if we are about to display a new note
+            if curr_dt_obj and last_displayed_dt_obj:
+                delta = (curr_dt_obj - last_displayed_dt_obj).days
+                # [Final Polish 3] Only show gaps > 30 days to reduce noise
+                if delta > 30:
+                     f.append(f"    Note over Download,Cleanup: ⏳ ... {delta} Days Gap ...")
+            
+            # Render the note
+            f.append(f"    Note right of {target_participant}: {note_content}")
+            
+            # Update last displayed tracker
+            if curr_dt_obj:
+                 last_displayed_dt_obj = curr_dt_obj
 
     def _summarize_with_time_simple(self, evs, max_items=2):
         if not evs: return ""
@@ -1442,7 +1700,7 @@ class LachesisRenderer:
         f.write("### 🚨 5.1 検出された重大な脅威 (Critical Threats Detected)\n")
         critical_table = self._generate_critical_threats_table(dfs, analyzer)
         f.write(critical_table + "\n\n")
-        net_map = self._generate_critical_network_map(dfs)
+        net_map = self._generate_critical_network_map(dfs, analyzer)
         if net_map:
             f.write("### 🗺️ 5.2 ネットワーク相関図 (Critical Activity Map)\n")
             f.write(net_map + "\n\n")
@@ -1485,10 +1743,60 @@ class LachesisRenderer:
 
         # 2. [v5.3] Inject Analyzer Findings (Lateral, Recon, Sensitive Doc)
         if analyzer and analyzer.visual_iocs:
+             # [Fix] Reuse EXTREME_NOISE patterns for filtering this section too
+             EXTREME_NOISE = [
+                "_none_", "_10.0.", "_amd64_", "_x86_", "~31bf3856ad364e35~",
+                "windows\\winsxs", "windowsapps\\", "infusedapps\\", 
+                "8wekyb3d8bbwe", "deletedalluserpackages", "nativeimages_", 
+                "\\assembly\\gac", "microsoftsolitaire", "mspaint_", "microsoftedge_8wekyb3d8bbwe",
+                "microsoft.windows.cortana", "appmodel-runtime", "contentdeliverymanager", "devicesearchcache",
+                # XAMPP Legitimate Components
+                "xampp\\php\\pear", "xampp\\apache\\manual", "xampp\\tomcat\\webapps\\docs",
+                "xampp\\tomcat\\webapps\\examples", "xampp\\src\\", "xampp\\licenses", "xampp\\locale",
+                "xampp\\php\\docs", "xampp\\cgi-bin", "\\pear\\docs", "\\pear\\tests",
+                # XAMPP Extended Noise
+                "xampp\\perl\\lib", "xampp\\perl\\vendor", "filezillaftp\\source",
+                "apache\\icons", "mercurymail\\", "mysql\\data\\",
+                "phpmyadmin\\js\\", "phpmyadmin\\libraries\\", "phpmyadmin\\themes\\",
+                "webalizer\\", "sendmail\\",
+                # XAMPP Additional Noise (Tomcat, Static, Sessions)
+                "xampp\\tmp\\sess_", "tomcat\\webapps\\manager", "tomcat\\webapps\\host-manager",
+                "tomcat\\webapps\\root", "phpmyadmin\\doc\\", "htdocs\\img\\", "security\\htdocs\\",
+                # XAMPP Dashboard & Docs
+                "htdocs\\dashboard\\", "htdocs\\docs\\", "dashboard\\images\\", "dashboard\\css\\", "dashboard\\docs\\",
+                # XAMPP Libraries & Extras
+                "php\\extras\\", "php\\tests\\", "perl\\bin\\", "perl\\site\\",
+                # XAMPP Apache/MySQL Config & Locales
+                "apache\\include\\", "apache\\modules\\", "mysql\\share\\", "phpmyadmin\\locale\\",
+                # XAMPP Test & Misc
+                "webdav\\", "\\flags\\", "\\install\\", "phpids\\tests\\",
+                # Browser Cache & DVWA Static Resources
+                "content.ie5\\", "dvwa\\dvwa\\images\\", "dvwa\\dvwa\\css\\", "dvwa\\external\\",
+                # XAMPP System Libraries (Loader noise)
+                "apache\\bin\\iconv\\", "php\\ext\\", "tomcat\\lib\\",
+                # MySQL Metadata (Running service artifacts)
+                ".frm", ".myd", ".myi", "performance_schema\\",
+                # XAMPP Icons & Static Assets
+                "xampp\\img\\", "hackable\\users\\", "favicon.ico",
+                # AGGRESSIVE NOISE FILTERS (Server process loader artifacts)
+                "xampp\\apache\\bin\\", "xampp\\mysql\\bin\\", "xampp\\php\\", "xampp\\tomcat\\bin\\",
+                # Library/Binary extensions
+                ".dll", ".jar", ".so", ".chm", ".hlp", ".class",
+                # Documentation noise
+                "readme.txt", "license.txt", "install.txt", "changes.txt",
+                # MySQL system tables
+                "information_schema\\", "mysql\\mysql\\", "catalina\\"
+             ]
+             
              for ioc in analyzer.visual_iocs:
                  tag = str(ioc.get("Tag", "")).upper()
                  val = str(ioc.get("Value", ""))
+                 val_lower = val.lower()
                  score = int(ioc.get("Score", 0) or 0)
+                 
+                 # [Fix] Skip EXTREME_NOISE in this section as well
+                 if any(xp in val_lower for xp in EXTREME_NOISE):
+                     continue
                  
                  # Criteria for Section 5.1 inclusion
                  is_target = False
@@ -1505,21 +1813,242 @@ class LachesisRenderer:
                  
                  if is_target:
                      t_str = str(ioc.get("Time", "")).replace("T", " ")[:19]
+                     
+                     # [P2'] IE Cache Aggregation (Skip individual addition, will handle bulk later)
+                     # Identify scattered IE cache files by Tag or Path pattern
+                     if "INTERNAL_RECON_WEB" in tag or "CONTENT.IE5" in val.upper():
+                         # Store separately, do not add to 'rows' yet
+                         if not hasattr(self, '_ie_cache_pool'): self._ie_cache_pool = []
+                         self._ie_cache_pool.append(ioc)
+                         continue
+
+                     # [P4'] dsadd.exe Enrichment
+                     if "dsadd" in val_lower:
+                         val = f"{val} ⚠️ **(AD User Manipulation Tool - PrivEsc Prep)**"
+                     
                      rows.append({
                          "Time": t_str, "Icon": icon, "Verdict": verdict,
-                         "Details": f"{val}", "Ref": "Timeline Analysis"
+                         "Details": f"{val}", "Ref": "Timeline Analysis", "Tag": tag
                      })
+
+        # [P2'] Inject Aggregated IE Cache Entry
+        if hasattr(self, '_ie_cache_pool') and self._ie_cache_pool:
+            ie_pool = getattr(self, '_ie_cache_pool')
+            first_time = str(ie_pool[0].get("Time", "")).replace("T", " ")[:19]
+            count = len(ie_pool)
+            rows.append({
+                "Time": first_time, "Icon": "🌐", "Verdict": "**SUSPICIOUS_WEB_CACHE**",
+                "Details": f"📦 **Suspicious IE Cache Files x{count}** (Potential external resource loading)",
+                "Ref": f"Aggregated {count} web artifacts"
+            })
 
         if not rows: return self.txt.get('plutos_no_activity', "No suspicious network activity detected.\n")
 
         rows.sort(key=lambda x: x["Time"])
+        
+        # [v6.5] Timestamp Aggregation Algorithm
+        # Group by second, compress INTERNAL_RECON noise, preserve critical keywords
+        CRITICAL_KEYWORDS = ["password", "shell", "cmd", "whoami", "credentials", "webshell", "c99", "backdoor"]
+        NOISE_EXTENSIONS = [".bat", ".xml", ".csv", ".csm", ".ibd", ".opt", ".php", ".pyd", ".manifest"]
+        
+        aggregated_rows = []
+        i = 0
+        while i < len(rows):
+            current = rows[i]
+            t_sec = current["Time"][:19]  # Group by second
+            
+            # Check if this is a critical item that should NOT be compressed
+            is_critical = any(kw in current["Details"].lower() for kw in CRITICAL_KEYWORDS)
+            
+            if is_critical or current["Verdict"] not in ["**INTERNAL_RECON**"]:
+                # Keep critical items and non-INTERNAL_RECON items as-is
+                aggregated_rows.append(current)
+                i += 1
+                continue
+            
+            # For INTERNAL_RECON, check if we can aggregate with following entries
+            group = [current]
+            j = i + 1
+            while j < len(rows):
+                next_row = rows[j]
+                next_t_sec = next_row["Time"][:19]
+                
+                # Stop if different timestamp or different verdict type
+                if next_t_sec != t_sec or next_row["Verdict"] != current["Verdict"]:
+                    break
+                
+                # Don't aggregate critical items
+                if any(kw in next_row["Details"].lower() for kw in CRITICAL_KEYWORDS):
+                    break
+                
+                group.append(next_row)
+                j += 1
+            
+            if len(group) >= 3:
+                # Compress into single row: "Noise x(count) (examples)"
+                examples = [g["Details"].split("\\")[-1].split("/")[-1][:25] for g in group[:3]]
+                compressed = f"📦 Noise x{len(group)} ({', '.join(examples)}...)"
+                aggregated_rows.append({
+                    "Time": t_sec, "Icon": "🔇", "Verdict": "**COMPRESSED_NOISE**",
+                    "Details": compressed, "Ref": f"Aggregated {len(group)} entries"
+                })
+                i = j  # Skip all grouped items
+            else:
+                # Not enough to compress, output individually
+                for g in group:
+                    aggregated_rows.append(g)
+                i = j
+
+        # [P0] Top 20 Limit - Show only most important entries
+        MAX_DISPLAY = 20
+        critical_rows = [r for r in aggregated_rows if any(kw in r.get("Details", "").lower() for kw in CRITICAL_KEYWORDS)]
+        other_rows = [r for r in aggregated_rows if r not in critical_rows]
+        
+        # Prioritize critical, then by time
+        display_rows = critical_rows[:10] + other_rows[:MAX_DISPLAY - len(critical_rows[:10])]
+        remaining_count = len(aggregated_rows) - len(display_rows)
+
         md = "| Time / Period | Verdict | Summary | Reference |\n|---|---|---|---|\n"
-        for row in rows:
+        for row in display_rows:
             md += f"| {row['Time']} | {row['Icon']} {row['Verdict']} | {row['Details']} | {row['Ref']} |\n"
+        
+        if remaining_count > 0:
+            md += f"\n> 📦 **その他 {remaining_count} 件の検出は省略されました。** 詳細は `IOC_Full.csv` を参照してください。\n"
+        
         return md
     
-    def _generate_critical_network_map(self, dfs):
-        return "" # Simplified, Plutos integration verified in Phase 1
+    def _generate_critical_network_map(self, dfs, analyzer=None):
+        """Generate Mermaid network topology diagram from IOC data"""
+        if not analyzer or not analyzer.visual_iocs:
+            return ""
+        
+        # Extract network-related IOCs
+        unc_shares = set()  # UNC paths -> (IP, share_name, files)
+        remote_ips = set()
+        remote_tools = []
+        exfil_tools = []
+        web_targets = []
+        
+        ip_pattern = re.compile(r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})')
+        unc_pattern = re.compile(r'\\\\([\d\.]+|[a-zA-Z0-9_\-]+)\\([^\\]+)')
+        
+        for ioc in analyzer.visual_iocs:
+            val = str(ioc.get("Value", ""))
+            path = str(ioc.get("Path", ""))
+            tag = str(ioc.get("Tag", "")).upper()
+            ioc_type = str(ioc.get("Type", "")).upper()
+            combined = val + " " + path
+            
+            # Extract UNC paths
+            unc_match = unc_pattern.search(combined)
+            if unc_match:
+                ip_or_host = unc_match.group(1)
+                share_name = unc_match.group(2)
+                # Extract file info
+                file_part = combined.split(share_name + "\\")[-1] if share_name in combined else ""
+                unc_shares.add((ip_or_host, share_name, file_part[:30] if file_part else ""))
+                remote_ips.add(ip_or_host)
+            
+            # Extract standalone IPs
+            ip_match = ip_pattern.search(combined)
+            if ip_match and "127.0.0.1" not in ip_match.group(1):
+                remote_ips.add(ip_match.group(1))
+            
+            # Categorize tools
+            val_lower = val.lower()
+            if "REMOTE_ACCESS" in ioc_type or "REMOTE_ACCESS" in tag:
+                if "putty" in val_lower or "ssh" in val_lower or "plink" in val_lower:
+                    remote_tools.append(val.split("\\")[-1].split("/")[-1])
+            
+            if "DATA_EXFIL" in ioc_type or "EXFIL" in tag:
+                if any(x in val_lower for x in ["dd.exe", "ssh-add", "wget", "curl", "nc.exe", "netcat"]):
+                    exfil_tools.append(val.split("\\")[-1].split("/")[-1])
+            
+            # Web reconnaissance
+            if "xampp" in val_lower or "phpmyadmin" in val_lower or "http" in val_lower:
+                web_targets.append(val[:30])
+        
+        # Need at least some network activity to generate map
+        if not remote_ips and not unc_shares:
+            return ""
+        
+        # Build Mermaid diagram
+        lines = ["```mermaid", "graph LR"]
+        
+        # Host node with users
+        primary_user = getattr(self, 'primary_user', 'User') or 'User'
+        # Get joker user if exists
+        users_str = primary_user
+        for ioc in analyzer.visual_iocs:
+            tag = str(ioc.get("Tag", "")).upper()
+            if "NEW_USER_CREATION" in tag:
+                new_user = str(ioc.get("Value", "")).split("\\")[-1].split("/")[-1]
+                if new_user and new_user.lower() not in users_str.lower():
+                    users_str = f"{primary_user}/{new_user}"
+                    break
+        
+        lines.append(f'    A["{self.hostname}<br/>{users_str}"]')
+        
+        node_id = ord('B')
+        
+        # Add remote IPs/shares
+        for ip in list(remote_ips)[:3]:  # Limit to 3 IPs
+            node = chr(node_id)
+            node_id += 1
+            
+            # Find share info for this IP
+            share_info = ""
+            files_on_share = []
+            for unc_ip, share_name, file_part in unc_shares:
+                if unc_ip == ip:
+                    share_info = share_name
+                    if file_part:
+                        files_on_share.append(file_part)
+            
+            if share_info:
+                lines.append(f'    {node}["{ip}<br/>{share_info}"]')
+                lines.append(f'    A -->|SMB| {node}')
+                
+                # Add files from share
+                if files_on_share:
+                    file_node = chr(node_id)
+                    node_id += 1
+                    files_display = "<br/>".join(files_on_share[:3])
+                    lines.append(f'    {file_node}["{files_display}"]')
+                    lines.append(f'    {node} --> {file_node}')
+            else:
+                lines.append(f'    {node}["{ip}"]')
+                lines.append(f'    A -->|Network| {node}')
+        
+        # Add remote access tools
+        if remote_tools:
+            tool_node = chr(node_id)
+            node_id += 1
+            unique_tools = list(set(remote_tools))[:3]
+            tools_display = "<br/>".join(unique_tools)
+            lines.append(f'    {tool_node}["🔧 Remote Tools<br/>{tools_display}"]')
+            lines.append(f'    A -->|SSH/Remote| {tool_node}')
+        
+        # Add exfil tools
+        if exfil_tools:
+            exfil_node = chr(node_id)
+            node_id += 1
+            unique_exfil = list(set(exfil_tools))[:3]
+            exfil_display = "<br/>".join(unique_exfil)
+            lines.append(f'    {exfil_node}["⚠️ Exfil Prep<br/>{exfil_display}"]')
+            lines.append(f'    A -->|Exfil Prep| {exfil_node}')
+            # Style as warning
+            lines.append(f'    style {exfil_node} fill:#f96')
+        
+        # Add web targets if detected
+        if web_targets and list(remote_ips):
+            # Link web activity to first IP
+            first_ip_node = 'B'  # Assuming first IP is node B
+            lines.append(f'    A -->|HTTP| {first_ip_node}')
+        
+        lines.append("```")
+        
+        return "\n".join(lines)
 
     def _extract_dual_run_count(self, ioc, dfs):
         ua_count = "N/A"; pf_count = "N/A"
@@ -1532,13 +2061,39 @@ class LachesisRenderer:
 
     def export_pivot_config(self, pivot_seeds, path, primary_user):
         if not pivot_seeds: return
+        
+        # Group by category
+        categorized = {}
+        for seed in pivot_seeds:
+            cat = seed.get("Category", "GENERAL")
+            if cat not in categorized:
+                categorized[cat] = []
+            # Remove Category from individual entries to avoid redundancy
+            entry = {k: v for k, v in seed.items() if k != "Category"}
+            categorized[cat].append(entry)
+        
+        # Limit each category to top 10
+        for cat in categorized:
+            categorized[cat] = categorized[cat][:10]
+        
+        # Priority order for categories
+        priority_order = ["CRITICAL_PHISHING", "CRITICAL_RECON", "CRITICAL_ANTI_FORENSICS", "CRITICAL_LATERAL", "GENERAL"]
+        ordered_targets = {}
+        for cat in priority_order:
+            if cat in categorized and categorized[cat]:
+                ordered_targets[cat] = categorized[cat]
+        # Add any remaining categories
+        for cat in categorized:
+            if cat not in ordered_targets and categorized[cat]:
+                ordered_targets[cat] = categorized[cat]
+        
         config = {
             "Case_Context": {
                 "Hostname": self.hostname,
                 "Primary_User": primary_user,
                 "Generated_At": datetime.now().isoformat()
             },
-            "Deep_Dive_Targets": pivot_seeds[:20]
+            "Deep_Dive_Targets": ordered_targets
         }
         try:
             with open(path, "w", encoding="utf-8") as f:
