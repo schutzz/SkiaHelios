@@ -358,7 +358,7 @@ class LachesisRenderer:
             traceback.print_exc()
 
     def _group_all_iocs(self, iocs, analyzer=None):
-        # [Hybrid Fix] Dynamic Noise Filter Integration (Local Import)
+        refined_iocs = [] # [Hybrid Fix] Dynamic Noise Filter Integration (Local Import)
         from tools.lachesis.sh_analyzer import GARBAGE_PATTERNS
         # [Refactor] Load patterns from Intel module
         from tools.lachesis.intel import IntelManager
@@ -419,6 +419,9 @@ class LachesisRenderer:
                 "nativeimages_",      # .NET Native Images (GAC cache)
                 "\\assembly\\gac",    # .NET GAC assemblies
                 "microsoft.windows.cortana",  # Cortana UWP
+                "msfeedssync",
+                "mobsync",
+                "tzsync",
                 "appmodel-runtime",           # AppX Runtime logs
                 "contentdeliverymanager",     # Windows CDM
                 "devicesearchcache",          # Cortana search cache
@@ -607,6 +610,10 @@ class LachesisRenderer:
             val = str(ev.get('Value', ''))
             score = int(ev.get('Score', 0))
             
+            # [DEBUG] Trace 7za
+            if "7za" in val.lower():
+                print(f"[DEBUG-7ZA-GROUP] Val={val} Score={score} Tag={tag} Cat={cat}")
+            
             # Smart Filename Extraction for Grouping
             filename = str(ev.get('FileName') or ev.get('Target_FileName') or ev.get('Target_Path') or '')
             if not filename and "USN" in tag:
@@ -713,6 +720,15 @@ class LachesisRenderer:
                 should_group = True
                 group_key = f"VULN|{tag}" 
 
+            # [Feature] Filename Prefix Grouping (choco, sdelete)
+            # Groups choco.exe, choco.exe.manifest, choco.exe.pf -> choco.exe
+            elif any(prefix in filename.lower() for prefix in ["choco", "sdelete", "bcwipe"]):
+                should_group = True
+                # Extract prefix
+                prefix = next(p for p in ["choco", "sdelete", "bcwipe"] if p in filename.lower())
+                group_key = f"TOOL_PREFIX|{prefix}"
+                filename = f"{prefix} (Aggregated Artifacts)" # For display 
+
             # 1.2 RECON / EXFILTRATION (Google Search Grouping)
             # [User Request] Group repetitive Google URLs to improve readability
             elif "RECON" in tag or "EXFIL" in tag:
@@ -783,6 +799,14 @@ class LachesisRenderer:
                     filenames = [os.path.basename(str(b.get('Value'))) for b in bucket[:3]]
                     examples = ", ".join(filenames)
                     label_desc = f"Files (Potential Noise / Obfuscated Libs) - e.g. {examples}..."
+                    
+                elif "TOOL_PREFIX" in key:
+                    prefix_name = key.split("|")[1].upper()
+                    label_type = "EXECUTION" # or STAGING_TOOL
+                    # Inherit type from first event if possible
+                    if "STAGING" in str(first.get('Tag', '')): label_type = "STAGING TOOL"
+                    elif "ANTI" in str(first.get('Tag', '')): label_type = "ANTI-FORENSICS"
+                    label_desc = f"{prefix_name} Related Artifacts (Exe, Prefetch, Logs etc.)"
                     
                 elif "USN" in key:
                     label_type = "LATERAL MOVEMENT"
@@ -1044,6 +1068,12 @@ class LachesisRenderer:
             target = seed.get('Target_File', '')
             
             if include_keyword in reason and (not exclude or exclude not in reason):
+                # [Fix] LNK Noise Filter (Initial Access Table)
+                t_lower = target.lower()
+                is_std_app = any(p in t_lower for p in ["system32", "program files", "control panel", "windows power"])
+                is_known_lnk = any(k in t_lower for k in ["command prompt", "file explorer", "task manager", "run.lnk"])
+                if is_std_app or is_known_lnk: continue
+
                 if target in seen_targets: continue
                 seen_targets.add(target)
                 
@@ -1490,6 +1520,17 @@ class LachesisRenderer:
             # Fallback: High score items go to execution
             elif int(ioc.get('Score', 0) or 0) >= 200:
                 exec_events.append(ioc)
+        
+        # [Fix] Global Noise Filter for Mermaid
+        # Exclude items with Score < 50 unless Critical
+        prep_events = [e for e in prep_events if int(e.get('Score',0)) >= 50]
+        # Allow Phishing (LNK) even if low score if meaningful? No, standard LNKs are noise.
+        phish_events = [e for e in phish_events if int(e.get('Score',0)) >= 100 or "CRITICAL" in str(e.get('Tag',''))]
+        exec_events = [e for e in exec_events if int(e.get('Score',0)) >= 100]
+        # Recon: ssh-add-manual.htm often score 50. Filter it.
+        recon_events = [e for e in recon_events if int(e.get('Score',0)) >= 100]
+        # Anti: Keep even low score? Evidence destruction is rare.
+        anti_events = [e for e in anti_events if int(e.get('Score',0)) >= 100]
                 
         if not (prep_events or phish_events or exec_events or recon_events or anti_events):
             return ""

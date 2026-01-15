@@ -184,6 +184,8 @@ class HerculesReferee:
             cond = cond | pl.col("Target_Path").str.to_lowercase().str.contains(pattern)
         if "CommandLine" in df.columns:
             cond = cond | pl.col("CommandLine").str.to_lowercase().str.contains(pattern)
+        if "Message" in df.columns:
+            cond = cond | pl.col("Message").str.to_lowercase().str.contains(pattern)
 
         hits = df.filter(cond)
         
@@ -668,13 +670,15 @@ class HerculesReferee:
 
         # ▼▼▼【追加2】Hunterの結果を強制適用（上書き） ▼▼▼
         if hunter_hits is not None and hunter_hits.height > 0:
-            targets = [
+            # [Fix] Use dynamic targets from YAML instead of hardcoded list
+            # Ensure we use keys from the hunt map
+            targets = list(self._hunt_targets.keys()) if hasattr(self, '_hunt_targets') and self._hunt_targets else [
                 "sysinternals.exe", "vmtoolsio.exe", "vssadmin.exe", 
-                "wannacry.exe", "tasksche.exe", "@wanadecryptor@.exe"
+                "wannacry.exe", "tasksche.exe", "@wanadecryptor@.exe", "7za.exe"
             ]
             pattern = "(?i)(" + "|".join([re.escape(t) for t in targets]) + ")"
             
-            # ターゲットに一致する行のスコアを 300 に強制変更
+            # ターゲットに一致する行のスコアを 300 (or config value) に強制変更
             # Note: 必要なカラムが存在するか確認してからフィルタ条件を構築
             cond = pl.lit(False)
             if "FileName" in timeline_df.columns:
@@ -683,6 +687,8 @@ class HerculesReferee:
                 cond = cond | pl.col("Target_Path").str.contains(pattern)
             if "CommandLine" in timeline_df.columns:
                 cond = cond | pl.col("CommandLine").str.contains(pattern)
+            if "Message" in timeline_df.columns:  # [Fix] Check Message column (ShimCache)
+                cond = cond | pl.col("Message").str.contains(pattern)
 
             timeline_df = timeline_df.with_columns(
                 pl.when(cond)
