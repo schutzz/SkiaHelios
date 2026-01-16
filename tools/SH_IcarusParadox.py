@@ -106,10 +106,65 @@ class IcarusParadox:
             "Confidence": []
         })
 
+    # [OPTIMIZATION] Cache the prepared MFT (Sun) to avoid re-scanning 160k rows for each artifact.
+    _cached_sun_df: Optional[pl.DataFrame] = None
+
+    def _prepare_mft_sun(self, mft_lf: pl.LazyFrame) -> pl.DataFrame:
+        """
+        [Core Optimization] Materialize the MFT (Sun) once with standardized keys and times.
+        Handles column name variations (Created0x10 vs SI_CreationTime).
+        """
+        if self._cached_sun_df is not None:
+            return self._cached_sun_df
+
+        self.logger.info("Materializing Sun (MFT) for rapid access...")
+        schema = mft_lf.collect_schema().names()
+        
+        # Determine available columns
+        fn_col = "FileName"
+        path_col = "ParentPath"
+        
+        # Map time columns (Chronos renamed vs Raw)
+        # We need Creation (Prefetch), Modification (ShimCache), and generic (USN)
+        mapping = {}
+        
+        # Creation
+        if "SI_CreationTime" in schema: mapping["Creation"] = "SI_CreationTime"
+        elif "Created0x10" in schema: mapping["Creation"] = "Created0x10"
+        
+        # Modification
+        if "StandardInformation_Modified" in schema: mapping["Modification"] = "StandardInformation_Modified"
+        elif "LastModified0x10" in schema: mapping["Modification"] = "LastModified0x10"
+        elif "LastModified" in schema: mapping["Modification"] = "LastModified"
+
+        # USN Timestamp (usually Timestamp or UpdateTimestamp)
+        # Note: USN check logic looks for its own col in USN, but MFT needs a universal time?
+        # inspect_usnj_safe uses "Created0x10" or "Timestamp_UTC"
+        if "Timestamp_UTC" in schema: mapping["USN_Time"] = "Timestamp_UTC"
+        elif "Created0x10" in schema: mapping["USN_Time"] = "Created0x10"
+        elif "SI_CreationTime" in schema: mapping["USN_Time"] = "SI_CreationTime"
+
+        # Select only necessary columns
+        keep_cols = [fn_col, path_col] + list(set(mapping.values()))
+        # Filter existing
+        keep_cols = [c for c in keep_cols if c in schema]
+        
+        lf = mft_lf.select(keep_cols).unique(subset=[path_col, fn_col])
+        lf = self._create_robust_key(lf, path_col, fn_col)
+        
+        # Normalize all mapped time columns
+        for key, col in mapping.items():
+            if col in keep_cols:
+                # Normalize and alias to standardized names
+                lf = self._normalize_timestamp(lf, col, f"_sun_{key.lower()}")
+
+        # Materialize
+        self._cached_sun_df = lf.collect()
+        return self._cached_sun_df
+
     def inspect_prefetch(self, mft_lf: pl.LazyFrame, prefetch_lf: pl.LazyFrame) -> pl.LazyFrame:
         """
         [Witness: Prefetch]
-        実行された(Prefetch)のに、まだ生まれていない(MFT)？
         """
         self.logger.info("Scanning Prefetch formations...")
         try:
@@ -118,11 +173,14 @@ class IcarusParadox:
             if any(c not in pf_schema.names() for c in required):
                 return self._empty_result()
 
-            # 1. The Sun (MFT)
-            mft_sun = mft_lf.unique(subset=["ParentPath", "FileName"])
-            mft_sun = self._create_robust_key(mft_sun)
-            mft_sun = self._normalize_timestamp(mft_sun, "Created0x10", "_sun_time")
-            mft_sun = mft_sun.select(["Key_Full", "_sun_time", "FileName", "ParentPath"])
+            # 1. The Sun (MFT) - Cached
+            sun_df = self._prepare_mft_sun(mft_lf)
+            if "_sun_creation" not in sun_df.columns:
+                self.logger.warning("Missing Creation Time in MFT. Skipping Prefetch Icarus check.")
+                return self._empty_result()
+
+            # Lazy wrapper for join
+            mft_sun = sun_df.lazy().select(["Key_Full", "_sun_creation", "FileName", "ParentPath"])
 
             # 2. Wax Wings (Prefetch)
             pf_wings = self._create_robust_key(prefetch_lf)
@@ -133,9 +191,8 @@ class IcarusParadox:
             joined = pf_wings.join(mft_sun, on="Key_Full", how="inner")
             
             # _time_diff = Sun - Wax. 
-            # Positive >> 0 implies Wax is older than Sun (Impossible -> Backdate)
             joined = joined.with_columns(
-                (pl.col("_sun_time") - pl.col("_wax_time")).dt.total_seconds().alias("_time_diff")
+                (pl.col("_sun_creation") - pl.col("_wax_time")).dt.total_seconds().alias("_time_diff")
             )
 
             crashed = self._check_trajectory(
@@ -155,17 +212,19 @@ class IcarusParadox:
     def inspect_shimcache(self, mft_lf: pl.LazyFrame, shim_lf: pl.LazyFrame) -> pl.LazyFrame:
         """
         [Witness: ShimCache]
-        Kernel memory remembers the true heat (LastModified).
         """
         self.logger.info("Scanning ShimCache residue...")
         try:
             if "LastModified" not in shim_lf.collect_schema().names():
                 return self._empty_result()
 
-            mft_sun = mft_lf.unique(subset=["ParentPath", "FileName"])
-            mft_sun = self._create_robust_key(mft_sun)
-            mft_sun = self._normalize_timestamp(mft_sun, "Modified0x10", "_sun_mod")
-            mft_sun = mft_sun.select(["Key_Full", "_sun_mod", "FileName", "ParentPath"])
+            # 1. The Sun (MFT) - Cached
+            sun_df = self._prepare_mft_sun(mft_lf)
+            if "_sun_modification" not in sun_df.columns:
+                 self.logger.warning("Missing Modification Time in MFT. Skipping ShimCache Icarus check.")
+                 return self._empty_result()
+
+            mft_sun = sun_df.lazy().select(["Key_Full", "_sun_modification", "FileName", "ParentPath"])
 
             shim_wings = self._create_robust_key(shim_lf)
             shim_wings = self._normalize_timestamp(shim_wings, "LastModified", "_wax_mod")
@@ -174,7 +233,7 @@ class IcarusParadox:
             joined = shim_wings.join(mft_sun, on="Key_Full", how="inner")
             
             joined = joined.with_columns(
-                (pl.col("_sun_mod") - pl.col("_wax_mod")).dt.total_seconds().alias("_time_diff")
+                (pl.col("_sun_modification") - pl.col("_wax_mod")).dt.total_seconds().alias("_time_diff")
             )
 
             crashed = self._check_trajectory(
@@ -203,34 +262,20 @@ class IcarusParadox:
         self.logger.info(f"Tracking flight paths for {len(suspects)} suspects in USN...")
         
         try:
-            # [FIX v1.3] カラム名の正規化: "Name" があれば "FileName" にリネーム
+            # [FIX v1.5] Use Cached Sun (MFT)
+            sun_df = self._prepare_mft_sun(mft_lf)
+            if "_sun_usn_time" not in sun_df.columns:
+                 self.logger.warning("[!] No universal time column found in MFT (Sun). Aborting USN check.")
+                 return self._empty_result()
+
+            # Lazy wrapper
+            mft_sun = sun_df.lazy().select(["Key_Full", "FileName", "ParentPath", "_sun_usn_time"])
+            
+            # [FIX v1.3] Name normalization
             usn_cols = usnj_lf.collect_schema().names()
             if "Name" in usn_cols and "FileName" not in usn_cols:
-                self.logger.info("Found 'Name' column, aliasing to 'FileName' for consistency.")
                 usnj_lf = usnj_lf.rename({"Name": "FileName"})
             
-            # [FIX v1.4] MFT vs Master_Timeline 判定
-            # Master_Timeline uses "Timestamp_UTC", MFT uses "Created0x10"
-            mft_schema = mft_lf.collect_schema().names()
-            time_col = None
-            for candidate in ["Created0x10", "Timestamp_UTC", "Timestamp", "Created"]:
-                if candidate in mft_schema:
-                    time_col = candidate
-                    break
-            
-            if not time_col:
-                self.logger.warning("[!] No valid timestamp column in MFT source. Aborting USN check.")
-                return self._empty_result()
-            
-            self.logger.info(f"Using '{time_col}' as Sun (Truth) timestamp.")
-            
-            # 1. Sun (MFT/Timeline) - Do not drop rows, keep all truth.
-            mft_sun = mft_lf.unique(subset=["ParentPath", "FileName"])
-            mft_sun = self._create_robust_key(mft_sun)
-            mft_sun = self._normalize_timestamp(mft_sun, time_col, "_sun_time")
-            # Need Key_Full for precise join, FileName for fallback
-            mft_sun = mft_sun.select(["Key_Full", "FileName", "ParentPath", "_sun_time"])
-
             # [FIX v1.4] USN timestamp column detection
             usn_time_col = None
             for candidate in ["UpdateTimestamp", "Timestamp", "UpdateTime"]:
@@ -261,13 +306,14 @@ class IcarusParadox:
                 joined = joined.with_columns(pl.lit("HIGH").alias("Confidence"))
             else:
                 # Blind interception (Fallback)
+                # Note: mft_sun has FileName
                 self.logger.warning("[!] Visibility low: USN lacks path. Engaging wide-area search (Name Match Only).")
                 joined = usn_track.join(mft_sun, on="FileName", how="inner")
                 joined = joined.with_columns(pl.lit("LOW").alias("Confidence"))
-
-            # 4. Impact Calculation
+            
+            # 4. Impact Calculation (Use _sun_usn_time)
             joined = joined.with_columns(
-                (pl.col("_sun_time") - pl.col("_wax_time")).dt.total_seconds().alias("_time_diff")
+                (pl.col("_sun_usn_time") - pl.col("_wax_time")).dt.total_seconds().alias("_time_diff")
             )
 
             crashed = self._check_trajectory(

@@ -1,0 +1,194 @@
+# ============================================================
+#  SkiaHelios Centralized Noise Filters
+#  filter_rules.yaml v2.0
+#  Mission: Consolidated noise definitions from Chronos/Pandora/Lachesis
+# ============================================================
+
+noise_filters:
+  # ═══════════════════════════════════════════════════════════════
+  # System Paths - Windows Core
+  # ═══════════════════════════════════════════════════════════════
+  - target: "ParentPath"
+    condition: "contains"
+    pattern: "windows\\winsxs"
+  - target: "ParentPath"
+    condition: "contains"
+    pattern: "windows\\assembly"
+  - target: "ParentPath"
+    condition: "contains"
+    pattern: "windows\\installer"
+  - target: "ParentPath"
+    condition: "contains"
+    pattern: "windows\\servicing"
+  - target: "ParentPath"
+    condition: "contains"
+    pattern: "microsoft.net"
+  - target: "ParentPath"
+    condition: "contains"
+    pattern: "windows\\system32\\config"
+  - target: "ParentPath"
+    condition: "contains"
+    pattern: "softwaredistribution"
+  - target: "ParentPath"
+    condition: "contains"
+    pattern: "program files\\windowsapps"
+  - target: "ParentPath"
+    condition: "contains"
+    pattern: "windows\\infusedapps"
+
+  # ═══════════════════════════════════════════════════════════════
+  # Application Noise
+  # ═══════════════════════════════════════════════════════════════
+  - target: "ParentPath"
+    condition: "contains"
+    pattern: "onedrive"
+  - target: "ParentPath"
+    condition: "contains"
+    pattern: "dropbox"
+  - target: "ParentPath"
+    condition: "contains"
+    pattern: "googledrivesync"
+  - target: "ParentPath"
+    condition: "contains"
+    pattern: "macromedia"
+  - target: "ParentPath"
+    condition: "contains"
+    pattern: "flash player"
+  - target: "ParentPath"
+    condition: "contains"
+    pattern: "sharedobjects"
+  - target: "ParentPath"
+    condition: "contains"
+    pattern: "appdata\\local\\packages"
+  - target: "ParentPath"
+    condition: "contains"
+    pattern: "templates"
+  - target: "ParentPath"
+    condition: "contains"
+    pattern: "windows defender"
+  - target: "ParentPath"
+    condition: "contains"
+    pattern: "windows media player"
+  - target: "ParentPath"
+    condition: "contains"
+    pattern: "mcafee"
+  - target: "ParentPath"
+    condition: "contains"
+    pattern: "true key"
+
+  # ═══════════════════════════════════════════════════════════════
+  # Browser Cache / Temp
+  # ═══════════════════════════════════════════════════════════════
+  - target: "ParentPath"
+    condition: "contains"
+    pattern: "inetcache"
+  - target: "ParentPath"
+    condition: "contains"
+    pattern: "temporary internet files"
+  - target: "ParentPath"
+    condition: "contains"
+    pattern: "appdata\\local\\temp"
+  - target: "ParentPath"
+    condition: "contains"
+    pattern: "windows\\temp"
+
+  # ═══════════════════════════════════════════════════════════════
+  # Extension-Based Noise
+  # ═══════════════════════════════════════════════════════════════
+  - target: "FileName"
+    condition: "ends_with"
+    pattern: ".mui"
+  - target: "FileName"
+    condition: "ends_with"
+    pattern: ".nls"
+  - target: "FileName"
+    condition: "ends_with"
+    pattern: ".lng"
+  - target: "FileName"
+    condition: "ends_with"
+    pattern: ".template"
+  - target: "FileName"
+    condition: "ends_with"
+    pattern: ".provxml"
+  - target: "FileName"
+    condition: "ends_with"
+    pattern: ".pak"
+
+  # ═══════════════════════════════════════════════════════════════
+  # Exact File Name Noise
+  # ═══════════════════════════════════════════════════════════════
+  - target: "FileName"
+    condition: "is_in"
+    pattern:
+      - "desktop.ini"
+      - "thumbs.db"
+      - "ntuser.dat"
+      - "usrclass.dat"
+      - "iconcache.db"
+      - "gdipfontcache"
+      - "bistats.lock"
+      - "edb.log"
+
+  # ═══════════════════════════════════════════════════════════════
+  # Partial Match Noise (Keywords)
+  # ═══════════════════════════════════════════════════════════════
+  - target: "FileName"
+    condition: "contains"
+    pattern: "safe browsing"
+  - target: "FileName"
+    condition: "contains"
+    pattern: ".qml"
+  - target: "FileName"
+    condition: "contains"
+    pattern: "edb00"
+
+# ═══════════════════════════════════════════════════════════════
+# Dual-Use Tool Trap Configuration
+# ═══════════════════════════════════════════════════════════════
+dual_use_tools:
+  folders:
+    - "nmap"
+    - "wireshark"
+    - "python"
+    - "perl"
+    - "ruby"
+    - "java"
+    - "jdk"
+    - "jre"
+    - "tcl"
+    - "tor browser"
+  protected_binaries:
+    - "nmap.exe"
+    - "zenmap.exe"
+    - "ncat.exe"
+    - "wireshark.exe"
+    - "tshark.exe"
+    - "capinfos.exe"
+    - "dumpcap.exe"
+    - "python.exe"
+    - "pythonw.exe"
+    - "pip.exe"
+    - "java.exe"
+    - "javaw.exe"
+    - "javac.exe"
+    - "ruby.exe"
+    - "perl.exe"
+    - "tor.exe"
+
+# ═══════════════════════════════════════════════════════════════
+# Triage Mode Aggressive Extensions (Optional)
+# ═══════════════════════════════════════════════════════════════
+triage_extensions:
+  - ".ldb"
+  - "-journal"
+  - ".sys"
+  - ".lst"
+  - ".cab"
+  - ".pyd"
+  - ".lock"
+  - ".log"
+  - ".aux"
+  - ".bmp"
+  - ".gif"
+  - ".rbf"
+  - ".ni.dll"

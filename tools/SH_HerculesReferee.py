@@ -396,18 +396,90 @@ class HerculesReferee:
             
         return df
 
-    def judge(self, timeline_df):
+    def judge(self, timeline_df, chronos_file=None):
         print("    -> [Hercules] Judging events with Modular Detectors...")
         
         # [Fix] Standardize FileName column if missing (ChaosGrasp uses Target_Path)
         if "FileName" not in timeline_df.columns and "Target_Path" in timeline_df.columns:
             timeline_df = timeline_df.with_columns(pl.col("Target_Path").alias("FileName"))
+            
+        # [FIX v11.0] Merge Chronos Scores (Chronos_Score, Threat_Score, Threat_Tag)
+        # Hercules must inherit scores from Chronos processing (Time_Anomalies.csv)
+        if chronos_file and Path(chronos_file).exists():
+            try:
+                print(f"    -> [Hercules] Integrating Chronos output: {chronos_file}")
+                chronos_df = pl.read_csv(chronos_file, ignore_errors=True, infer_schema_length=0)
+                
+                # Check for critical columns
+                if "Chronos_Score" in chronos_df.columns:
+                    # Select relevant columns for merge
+                    # Use 'Action' as key if 'FileName' is missing in Chronos output (Fix 10 aftermath)
+                    join_key = "FileName"
+                    if "FileName" not in chronos_df.columns and "Action" in chronos_df.columns:
+                        chronos_df = chronos_df.with_columns(pl.col("Action").alias("FileName"))
+                    
+                    if "FileName" in chronos_df.columns:
+                        # Prepare merge dataframe
+                        merge_cols = ["FileName", "Chronos_Score"]
+                        if "Threat_Score" in chronos_df.columns: merge_cols.append("Threat_Score")
+                        if "Threat_Tag" in chronos_df.columns: merge_cols.append("Threat_Tag")
+                        
+                        # Add unique key to avoid duplicates if possible, or just left join on FileName
+                        # Ideally join on ParentPath + FileName, but ParentPath might be missing in Timeline
+                        merge_df = chronos_df.select(merge_cols)
+                        
+                        # Use update/join logic
+                        # Left join to timeline. If score exists in Chronos, use it.
+                        timeline_df = timeline_df.join(merge_df, on="FileName", how="left", suffix="_chronos")
+                        
+                        # Overwrite/Fill scores
+                        if "Threat_Score_chronos" in timeline_df.columns:
+                            # Maximize Threat Score
+                            timeline_df = timeline_df.with_columns(
+                                pl.max_horizontal(
+                                    pl.col("Threat_Score").cast(pl.Int64, strict=False).fill_null(0),
+                                    pl.col("Threat_Score_chronos").cast(pl.Int64, strict=False).fill_null(0)
+                                ).alias("Threat_Score")
+                            ).drop("Threat_Score_chronos")
+
+                        if "Chronos_Score" in timeline_df.columns: # After join, it might be named Chronos_Score if original didn't have it, or Chronos_Score_chronos
+                             pass # Chronos_Score is not standard in Hercules input, so it will be newly added or merged
+                        
+                        if "Chronos_Score_chronos" in timeline_df.columns:
+                             timeline_df = timeline_df.rename({"Chronos_Score_chronos": "Chronos_Score"})
+                        
+                        if "Threat_Tag_chronos" in timeline_df.columns:
+                             # Append tags
+                             timeline_df = timeline_df.with_columns(
+                                 pl.concat_str([
+                                     pl.col("Tag").fill_null(""),
+                                     pl.lit(","),
+                                     pl.col("Threat_Tag_chronos").fill_null("")
+                                 ]).str.replace(r"^,|,$", "").alias("Tag")
+                             ).drop("Threat_Tag_chronos")
+
+                        print(f"    -> [Hercules] Successfully merged Chronos scores for {merge_df.height} artifacts.")
+            except Exception as e:
+                print(f"    [!] Chronos Merge Failed: {e}")
 
         
         # Initialize Required Columns
-        for c in ["Threat_Score", "Tag", "Judge_Verdict"]:
+        if "Threat_Score" not in timeline_df.columns:
+            # [FIX v7.3] Score Inheritance Strategy
+            # Use upstream tool scores if available. Priority: AION > Chronos > Default(0)
+            initial_score = pl.lit(0, dtype=pl.Int64)
+            if "AION_Score" in timeline_df.columns:
+                 print("    -> [Hercules] Inheriting AION Scores...")
+                 initial_score = pl.max_horizontal(initial_score, pl.col("AION_Score").cast(pl.Int64, strict=False).fill_null(0))
+            if "Chronos_Score" in timeline_df.columns:
+                 print("    -> [Hercules] Inheriting Chronos Scores...")
+                 initial_score = pl.max_horizontal(initial_score, pl.col("Chronos_Score").cast(pl.Int64, strict=False).fill_null(0))
+            
+            timeline_df = timeline_df.with_columns(initial_score.alias("Threat_Score"))
+
+        for c in ["Tag", "Judge_Verdict"]:
             if c not in timeline_df.columns:
-                timeline_df = timeline_df.with_columns(pl.lit(0 if c == "Threat_Score" else "").alias(c))
+                timeline_df = timeline_df.with_columns(pl.lit("").alias(c))
         
         timeline_df = timeline_df.with_columns(pl.col("Threat_Score").cast(pl.Int64, strict=False).fill_null(0))
 
@@ -767,7 +839,7 @@ class HerculesReferee:
         # Logic remains conceptually same, streamlined for brevity
         return df_events
 
-    def execute(self, timeline_csv, ghost_csv, output_csv):
+    def execute(self, timeline_csv, ghost_csv, output_csv, chronos_file=None):
         self._extract_os_from_registry()
         try:
             df_timeline = pl.read_csv(timeline_csv, ignore_errors=True, infer_schema_length=0)
@@ -808,6 +880,19 @@ class HerculesReferee:
         if "FileName" in df_timeline.columns:
              df_timeline = df_timeline.filter(~pl.col("FileName").str.contains(noise_files))
 
+        # 5. Diagnostic Script Noise Filter (Prop 2)
+        # Filters standard Windows Troubleshooting scripts (ts_*.ps1, rs_*.ps1, etc.)
+        diag_script_pattern = r"(?i).*[\\/](ts|rs|cl|vf|mf|rc)_[a-z0-9]+\.ps1$"
+        if "Target_Path" in df_timeline.columns:
+             df_timeline = df_timeline.filter(~pl.col("Target_Path").str.contains(diag_script_pattern))
+        if "FileName" in df_timeline.columns:
+             df_timeline = df_timeline.filter(~pl.col("FileName").str.contains(diag_script_pattern))
+
+        # 6. Pester Test File Noise Filter (Case 6 Debug)
+        # Filters unit test files often flagged as time anomalies
+        if "FileName" in df_timeline.columns:
+             df_timeline = df_timeline.filter(~pl.col("FileName").str.contains(r"(?i)\.tests\.ps1$"))
+
         df_combined = df_timeline 
         # (EventLog merging and Sigma logic would typically happen here or in Themis)
         # Assuming df_timeline already contains merged data or we just process timeline for this refactor scope
@@ -816,7 +901,7 @@ class HerculesReferee:
         df_ads_threats = self._process_mft_ads()
         
         # Apply Judgment
-        df_judged = self.judge(df_combined)
+        df_judged = self.judge(df_combined, chronos_file=chronos_file)
         
         # ▼▼▼【NEW】Merge ADS Threats into Judged Timeline ▼▼▼
         if df_ads_threats is not None and df_ads_threats.height > 0:
@@ -906,12 +991,13 @@ def main():
     parser.add_argument("--timeline", required=True)
     parser.add_argument("--ghosts", required=True)
     parser.add_argument("--dir", required=True)
+    parser.add_argument("--chronos", help="Chronos Output (Time_Anomalies.csv) for Score Inheritance")
     parser.add_argument("-o", "--out", default="Hercules_Judged_Timeline.csv")
     parser.add_argument("--triage", action="store_true")
     args = parser.parse_args()
     
     referee = HerculesReferee(kape_dir=args.dir, triage_mode=args.triage)
-    referee.execute(args.timeline, args.ghosts, args.out)
+    referee.execute(args.timeline, args.ghosts, args.out, chronos_file=args.chronos)
 
 if __name__ == "__main__":
     main()

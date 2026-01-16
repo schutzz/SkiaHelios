@@ -137,7 +137,7 @@ class LachesisRenderer:
         with open(log_file, "a", encoding="utf-8") as log:
             log.write(f"\n[{datetime.now()}] Starting render_report for {out_file}\n")
         
-        print(f"[*] Lachesis v6.4 (Operation Truth) is weaving the Grimoire into {out_file}...")
+        print(f"[*] Lachesis v6.5 (Grimoire Engine) is weaving the Grimoire into {out_file}...")
 
         if not self.template_env:
             msg = "    [!] Critical: Jinja2 environment not initialized."
@@ -203,7 +203,8 @@ class LachesisRenderer:
                                 continue  # Skip this event
                         
                         # Apply Context-Aware Score Adjustment
-                        adjusted_score, new_tags = LachesisAnalyzer.adjust_score(path, original_score)
+                        command_line = str(ev.get('CommandLine', '')) or str(ev.get('cmdline', ''))
+                        adjusted_score, new_tags = LachesisAnalyzer.adjust_score(path, original_score, command_line=command_line)
                         
                         # Update event with adjusted score
                         ev['Score'] = adjusted_score
@@ -221,63 +222,67 @@ class LachesisRenderer:
                 analysis_data['phases'] = filtered_phases
 
 
-            # [Optimization] Apply Grouping & Noise Reduction Globally
-            # This ensures Section 4 (Detailed Findings), Section 7 (IOCs), and Stats are consistent.
-            refined_iocs = self._group_all_iocs(analyzer.visual_iocs, analyzer)
+            # [Optimization] Global Noise Reduction ( The Reaper & Kaishaku )
+            # Applies Score Adjustment, Tagging, and Noise Filtering BEFORE Grouping.
+            # This ensures Section 4 (Tables), Section 7 (IOCs), and Timeline are consistent.
+            from tools.lachesis.sh_analyzer import LachesisAnalyzer
+            DISPLAY_THRESHOLD = 50
             
-            # [Fix] Global Clean of VOID bug (Targeting the typo version specifically)
-            # This ensures Tables (Section 7) are clean, not just the diagram.
+            cleaned_iocs = []
+            print(f"[DEBUG-FLOW] Starting Global Cleaning. Input IOCs: {len(analyzer.visual_iocs)}")
+
+            for ioc in analyzer.visual_iocs:
+                # 1. Path Calculation
+                path = str(ioc.get("Path", ""))
+                value = str(ioc.get("Value", ""))
+                target_path = path if path else value
+                
+                # 2. Score Adjustment & Tagging
+                original_score = int(ioc.get("Score", 0) or 0)
+                command_line = str(ioc.get("CommandLine", "")) or str(ioc.get('cmdline', ''))
+                adjusted_score, new_tags = LachesisAnalyzer.adjust_score(target_path, original_score, analyzer.path_penalties, command_line=command_line)
+                
+                ioc["Score"] = adjusted_score
+                ioc["Original_Score"] = original_score
+                
+                if new_tags:
+                    existing = str(ioc.get("Tag", ""))
+                    ioc["Tag"] = existing + "," + ",".join(new_tags) if existing else ",".join(new_tags)
+
+                # 3. [The Reaper] Final Noise Filter
+                if "SYSTEM_NOISE" in str(ioc.get("Tag", "")) and adjusted_score < 400:
+                    continue 
+
+                # 4. [Nuclear Option] TIMESTOMP Score Threshold
+                # User Order: "Forget old logic. Score < 500 = Drop."
+                ioc_type = str(ioc.get("Type", "")).upper()
+                ioc_cat = str(ioc.get("Category", "")).upper()
+                if "TIMESTOMP" in ioc_type or "TIMESTOMP" in ioc_cat:
+                    if adjusted_score < 500:
+                        continue
+
+                # 5. Threshold Check
+                if adjusted_score >= DISPLAY_THRESHOLD:
+                    cleaned_iocs.append(ioc)
+
+            # 6. Grouping and Preparation
+            refined_iocs = self._group_all_iocs(cleaned_iocs, analyzer)
+            print(f"[DEBUG-FLOW] Global Cleaning Complete. Refined IOCs: {len(refined_iocs)}")
+
+            # [Fix] Global Clean of VOID bug
             for ioc in refined_iocs:
                 t_str = str(ioc.get('Time', ''))
-                if "VOID_VISUALIZA" in t_str: # Matches both correct and typo versions
+                if "VOID_VISUALIZA" in t_str: 
                      ioc['Time'] = "-"
 
-            # [Fix] Pre-calculate technical findings using refined IOCs (passing analyzer)
+            # [Fix] Pre-calculate technical findings using CLEANED IOCs
             tech_findings = self._prepare_technical_findings_from_list(refined_iocs, analyzer, origin_stories)
             init_access = tech_findings.get("INITIAL ACCESS", [])
             high_lnks = [i for i in init_access if i.get("Insight")]
             gen_lnks = [i for i in init_access if not i.get("Insight")]
-
-            # ═══════════════════════════════════════════════════════════════
-            # Context-Aware Scoring (Root Cause Fix)
-            # Applies score adjustments based on path context, then filters
-            # FN Prevention: high-threat patterns are boosted, not excluded
-            # ═══════════════════════════════════════════════════════════════
-            from tools.lachesis.sh_analyzer import LachesisAnalyzer
             
-            DISPLAY_THRESHOLD = 50  # Unified threshold for all sections
-            
-            scored_iocs = []
-            
-            # [DEBUG] Check Logic Flow
-            print(f"[DEBUG-FLOW] Entering Scoring Loop. refined_iocs count: {len(refined_iocs) if 'refined_iocs' in locals() else 'UNDEFINED'}")
-
-            for ioc in refined_iocs:
-                path = str(ioc.get("Path", ""))
-                value = str(ioc.get("Value", ""))
-                
-                # Use Value as fallback when Path is empty (IOC structure fix)
-                target_path = path if path else value
-                
-                original_score = int(ioc.get("Score", 0) or 0)
-                
-                # Apply Context-Aware Score Adjustment
-                adjusted_score, new_tags = LachesisAnalyzer.adjust_score(target_path, original_score, analyzer.path_penalties)
-
-                # Update IOC with adjusted score
-                ioc["Score"] = adjusted_score
-                ioc["Original_Score"] = original_score  # Keep for debugging
-                
-                # Append new tags if any
-                if new_tags:
-                    existing_tag = str(ioc.get("Tag", ""))
-                    ioc["Tag"] = existing_tag + "," + ",".join(new_tags) if existing_tag else ",".join(new_tags)
-                
-                # Filter by adjusted score
-                if adjusted_score >= DISPLAY_THRESHOLD:
-                    scored_iocs.append(ioc)
-            
-            refined_iocs = scored_iocs
+            # Since filtering is already done, scored_iocs is just refined_iocs
+            scored_iocs = refined_iocs
             
             context = {
                 "txt": self.txt,
@@ -980,7 +985,8 @@ class LachesisRenderer:
         
         temp_groups = {}
         for ev in events:
-            if ev.get('Score', 0) < 50 and "CRITICAL" not in str(ev.get('Type', '')): continue
+            # [v7.0 User Request] Raised threshold from 50 to 500 to filter diagnostic noise
+            if ev.get('Score', 0) < 500 and "CRITICAL" not in str(ev.get('Type', '')): continue
             cat = self._get_event_category(ev)
             if cat not in temp_groups: temp_groups[cat] = []
             
@@ -1093,8 +1099,9 @@ class LachesisRenderer:
         return processed
 
     def _prepare_technical_findings_from_list(self, ioc_list, analyzer, origin_stories):
-        # [Fix] Ensure ADS/Masquerade items are included even if Score logic misses them
-        high_conf_events = [ioc for ioc in ioc_list if analyzer.is_force_include_ioc(ioc) or "ANTI" in str(ioc.get("Type", "")) or "ADS" in str(ioc.get("Tag", "")) or "MASQUERADE" in str(ioc.get("Tag", ""))]
+        # [Fix] Apply global threshold (500) to Detailed Findings too.
+        # Ensure ADS/Masquerade items are included ONLY if they meet score or are force-included
+        high_conf_events = [ioc for ioc in ioc_list if (int(ioc.get('Score', 0) or 0) >= 500) or analyzer.is_force_include_ioc(ioc)]
         groups = {}
         
         for ioc in high_conf_events:
@@ -1951,8 +1958,16 @@ class LachesisRenderer:
             
             # Extract standalone IPs
             ip_match = ip_pattern.search(combined)
-            if ip_match and "127.0.0.1" not in ip_match.group(1):
-                remote_ips.add(ip_match.group(1))
+            if ip_match:
+                ip_cand = ip_match.group(1)
+                # [Case 6 Noise Fix] Filter out logic-level IPs (1.0.0.0) or version numbers
+                if "127.0.0.1" not in ip_cand and "0.0.0.0" not in ip_cand:
+                    try:
+                        p1 = int(ip_cand.split('.')[0])
+                        # Allow valid public DNS, otherwise ignore < 10 (likely version numbers)
+                        if p1 >= 10 or ip_cand in ["1.1.1.1", "8.8.8.8", "8.8.4.4"]:
+                             remote_ips.add(ip_cand)
+                    except: pass
             
             # Categorize tools
             val_lower = val.lower()

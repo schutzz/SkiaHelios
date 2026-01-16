@@ -59,4 +59,21 @@ class LnkDetector(BaseDetector):
         # 🚀 Universal Signatures Call
         df = self.apply_threat_signatures(df)
         
+        # [FIX v7.1] LNK Safe Path Score Capping
+        # Legitimate shortcuts (Start Menu, Desktop, application folders) should not inflate scores
+        LNK_SAFE_PATHS = r"(?i)(start menu|desktop|program files|appdata\\\\roaming\\\\microsoft\\\\windows\\\\start)"
+        LNK_MAX_SCORE = 100
+        
+        is_safe_lnk = (
+            pl.col(fname_col).str.to_lowercase().str.contains(r"\.lnk") &
+            pl.col("Target_Path").str.to_lowercase().str.contains(LNK_SAFE_PATHS, literal=False)
+        )
+        
+        df = df.with_columns(
+            pl.when(is_safe_lnk)
+              .then(pl.min_horizontal(pl.col("Threat_Score"), pl.lit(LNK_MAX_SCORE)))
+              .otherwise(pl.col("Threat_Score"))
+              .alias("Threat_Score")
+        )
+        
         return df

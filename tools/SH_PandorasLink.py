@@ -43,7 +43,12 @@ class PandoraEngine:
         self.usn_path = usn
         self.mft_vss_path = mft_vss
         self.triage_mode = triage_mode
-        self.loader = ThemisLoader(["rules/triage_rules.yaml", "rules/sigma_file_event.yaml", "rules/intel_signatures.yaml"])
+        self.loader = ThemisLoader([
+            "rules/triage_rules.yaml", 
+            "rules/sigma_file_event.yaml", 
+            "rules/intel_signatures.yaml",
+            "rules/sigma_custom.yaml"  # [Custom Rules] Metasploit, Impacket, etc.
+        ])
         print(f"[*] Initializing Engine with Themis Rules...")
         self.lf_live = self._load_mft(mft_live).lazy()
         self.lf_usn = self._load_usn(usn).lazy()
@@ -450,7 +455,141 @@ class PandoraEngine:
         return scored_ghosts
 
     def run_anti_forensics(self, limit=50): return pl.LazyFrame([])
-    def run_necromancer(self, lf_ghosts, pf_csv=None, shim_csv=None, chaos_csv=None): return lf_ghosts 
+
+    def run_necromancer(self, lf_ghosts, pf_csv=None, shim_csv=None, chaos_csv=None):
+        """
+        [Necromancer v2.0] Resurrect execution evidence by correlating Ghost files
+        with Prefetch, ShimCache, and ChaosGrasp (UserAssist) data.
+        
+        Enriches ghosts with:
+          - Prefetch Run Count
+          - ShimCache presence (execution evidence)
+          - UserAssist Run Counter
+        """
+        print("    -> [Necromancer] Correlating execution artifacts...")
+        
+        # Ensure we have FileName column for matching
+        schema = lf_ghosts.collect_schema().names()
+        if "Ghost_FileName" not in schema:
+            print("       [!] No Ghost_FileName column, skipping Necromancer")
+            return lf_ghosts
+        
+        # Create normalized join key
+        lf_ghosts = lf_ghosts.with_columns(
+            pl.col("Ghost_FileName").str.to_lowercase().str.replace_all(r"\\", "/").alias("_necro_key")
+        )
+        
+        # Initialize enrichment columns
+        lf_ghosts = lf_ghosts.with_columns([
+            pl.lit(None).cast(pl.Int64).alias("PF_Run_Count"),
+            pl.lit(None).cast(pl.Int64).alias("UA_Run_Count"),
+            pl.lit(False).alias("Shim_Evidence")
+        ])
+        
+        # 1. Prefetch Correlation
+        if pf_csv and os.path.exists(pf_csv):
+            try:
+                print(f"       -> Loading Prefetch: {pf_csv}")
+                df_pf = pl.read_csv(pf_csv, ignore_errors=True, infer_schema_length=0)
+                # Column variations: ExecutableName, SourceFilename, etc.
+                pf_name_col = None
+                for col in ["ExecutableName", "SourceFilename", "FileName", "Name"]:
+                    if col in df_pf.columns:
+                        pf_name_col = col
+                        break
+                pf_run_col = None
+                for col in ["RunCount", "Run Count", "PrefetchCount"]:
+                    if col in df_pf.columns:
+                        pf_run_col = col
+                        break
+                
+                if pf_name_col and pf_run_col:
+                    df_pf = df_pf.select([
+                        pl.col(pf_name_col).str.to_lowercase().alias("_pf_key"),
+                        pl.col(pf_run_col).cast(pl.Int64, strict=False).alias("PF_Run_Count_Val")
+                    ]).unique(subset=["_pf_key"])
+                    
+                    lf_ghosts = lf_ghosts.join(
+                        df_pf.lazy(), left_on="_necro_key", right_on="_pf_key", how="left"
+                    ).with_columns(
+                        pl.coalesce([pl.col("PF_Run_Count_Val"), pl.col("PF_Run_Count")]).alias("PF_Run_Count")
+                    ).drop(["PF_Run_Count_Val"])
+                    print(f"       [+] Prefetch matched!")
+            except Exception as e:
+                print(f"       [!] Prefetch load error: {e}")
+        
+        # 2. ShimCache Correlation
+        if shim_csv and os.path.exists(shim_csv):
+            try:
+                print(f"       -> Loading ShimCache: {shim_csv}")
+                df_shim = pl.read_csv(shim_csv, ignore_errors=True, infer_schema_length=0)
+                # Column variations
+                shim_path_col = None
+                for col in ["Path", "CachePath", "ControlSet001Path", "Key"]:
+                    if col in df_shim.columns:
+                        shim_path_col = col
+                        break
+                
+                if shim_path_col:
+                    # Extract filename from full path
+                    df_shim = df_shim.with_columns(
+                        pl.col(shim_path_col).str.to_lowercase().str.extract(r"([^\\]+)$", 1).alias("_shim_key")
+                    ).select(["_shim_key"]).unique()
+                    
+                    lf_ghosts = lf_ghosts.join(
+                        df_shim.lazy(), left_on="_necro_key", right_on="_shim_key", how="left"
+                    ).with_columns(
+                        pl.when(pl.col("_shim_key").is_not_null()).then(True).otherwise(pl.col("Shim_Evidence")).alias("Shim_Evidence")
+                    ).drop(["_shim_key"])
+                    print(f"       [+] ShimCache matched!")
+            except Exception as e:
+                print(f"       [!] ShimCache load error: {e}")
+        
+        # 3. ChaosGrasp / UserAssist Correlation
+        if chaos_csv and os.path.exists(chaos_csv):
+            try:
+                print(f"       -> Loading ChaosGrasp: {chaos_csv}")
+                df_chaos = pl.read_csv(chaos_csv, ignore_errors=True, infer_schema_length=0)
+                # UserAssist columns
+                ua_name_col = None
+                for col in ["Target_FileName", "FileName", "Application"]:
+                    if col in df_chaos.columns:
+                        ua_name_col = col
+                        break
+                ua_count_col = None
+                for col in ["Run Count", "RunCounter", "Count"]:
+                    if col in df_chaos.columns:
+                        ua_count_col = col
+                        break
+                
+                if ua_name_col and ua_count_col:
+                    df_chaos = df_chaos.select([
+                        pl.col(ua_name_col).str.to_lowercase().alias("_ua_key"),
+                        pl.col(ua_count_col).cast(pl.Int64, strict=False).alias("UA_Run_Count_Val")
+                    ]).unique(subset=["_ua_key"])
+                    
+                    lf_ghosts = lf_ghosts.join(
+                        df_chaos.lazy(), left_on="_necro_key", right_on="_ua_key", how="left"
+                    ).with_columns(
+                        pl.coalesce([pl.col("UA_Run_Count_Val"), pl.col("UA_Run_Count")]).alias("UA_Run_Count")
+                    ).drop(["UA_Run_Count_Val"])
+                    print(f"       [+] UserAssist matched!")
+            except Exception as e:
+                print(f"       [!] ChaosGrasp load error: {e}")
+        
+        # Apply execution evidence boost
+        has_execution = (
+            pl.col("PF_Run_Count").is_not_null() |
+            pl.col("UA_Run_Count").is_not_null() |
+            pl.col("Shim_Evidence")
+        )
+        
+        lf_ghosts = lf_ghosts.with_columns([
+            pl.when(has_execution).then(pl.col("Threat_Score") + 100).otherwise(pl.col("Threat_Score")).alias("Threat_Score"),
+            pl.when(has_execution).then(pl.concat_str([pl.col("Threat_Tag"), pl.lit(",EXECUTION_EVIDENCE")])).otherwise(pl.col("Threat_Tag")).alias("Threat_Tag")
+        ])
+        
+        return lf_ghosts.drop(["_necro_key"])
 
     def detect_encryption_burst(self, threshold_count: int = 50, threshold_seconds: int = 60):
         """

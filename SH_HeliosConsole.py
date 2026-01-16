@@ -319,7 +319,8 @@ def main():
         "--timeline", str(master_timeline),
         "--ghosts", str(ghost_report),
         "--dir", str(kape_csv_dir),
-        "--out", str(judged_timeline)
+        "--out", str(judged_timeline),
+        "--chronos", str(time_anomalies) # [FIX v11.0] Pass Chronos output for score inheritance
     ]
     if use_silencer: hercules_cmd.append("--triage")
     run_stage(hercules_cmd, f"HERCULES")

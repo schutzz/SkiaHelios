@@ -142,6 +142,10 @@ class CharonBridge:
             if status == "experimental" or status == "deprecated" or status == "unsupported":
                 continue
 
+            # [Phase 1 PoC] Level Filter: Only High/Critical allowed
+            if level not in ("high", "critical"):
+                continue
+
             # 対象OSフィルタリング
             product = logsource.get("product", "").lower()
             if product and "windows" not in product:

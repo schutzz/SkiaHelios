@@ -69,6 +69,7 @@ def main():
     final_os = detected_os if detected_os != "Unknown OS" else args.os
 
     print(f"    [+] Identity Resolved: {final_host} / {final_user} ({final_os})")
+    print(f"    [DEBUG] Loaded DataFrames: {list(dfs.keys())}")
 
     # History CSV Detection
     history_csv = None
@@ -138,6 +139,19 @@ def main():
         except Exception as e:
             print(f"    [!] USN Injection Failed: {e}")
 
+    # [FIX] Ensure Timeline and Hercules are loaded correctly (Clotho Override)
+    if (dfs.get('Timeline') is None or dfs.get('Timeline').height == 0) and args.timeline and os.path.exists(args.timeline):
+        print(f"    [!] Manually loading Timeline from {args.timeline}")
+        try:
+            dfs['Timeline'] = pl.read_csv(args.timeline, ignore_errors=True, infer_schema_length=0)
+        except Exception as e: print(f"      [!] Failed: {e}")
+
+    if (dfs.get('Hercules') is None or dfs.get('Hercules').height == 0) and args.hercules and os.path.exists(args.hercules):
+        print(f"    [!] Manually loading Hercules from {args.hercules}")
+        try:
+             dfs['Hercules'] = pl.read_csv(args.hercules, ignore_errors=True, infer_schema_length=0)
+        except Exception as e: print(f"      [!] Failed: {e}")
+
     # Build Events
     events = []
     verdict_flags = set()
@@ -145,18 +159,33 @@ def main():
     # [1] Main Source: Hercules
     if dfs.get('Hercules') is not None:
         df_herc = dfs['Hercules']
-        if "Timestamp_UTC" in df_herc.columns:
-            df_herc = df_herc.sort("Timestamp_UTC")
+        print(f"    [DEBUG] Hercules DF Height: {df_herc.height if hasattr(df_herc, 'height') else 'No Height (Not DF?)'}")
         
-        for row in df_herc.iter_rows(named=True):
-            score = 0
-            try: score = int(float(row.get('Threat_Score', 0)))
-            except: pass
-            tag = str(row.get('Tag', '')).upper()
-            verdict = str(row.get('Judge_Verdict', '')).upper()
+        # [Optimization] Filter FIRST using Polars (Vectorized) before iterating
+        # This avoids iterating 300k+ rows in Python which causes the stall
+        try:
+            # Ensure Score is float/int
+            if df_herc.schema.get("Threat_Score") == pl.Utf8:
+                df_herc = df_herc.with_columns(pl.col("Threat_Score").cast(pl.Float64, strict=False).fill_null(0))
             
-            is_critical = score >= 60 or "CRITICAL" in verdict or "SNIPER" in verdict
-            if is_critical:
+            critical_filter = (
+                (pl.col("Threat_Score") >= 60) |
+                (pl.col("Judge_Verdict").str.to_uppercase().str.contains("CRITICAL|SNIPER"))
+            )
+            
+            # Filter down to only relevant events (typically < 1% of total)
+            df_critical = df_herc.filter(critical_filter)
+            
+            if "Timestamp_UTC" in df_critical.columns:
+                df_critical = df_critical.sort("Timestamp_UTC")
+                
+            print(f"    [DEBUG] Hercules Critical Events: {df_critical.height} (Filtered from {df_herc.height})")
+
+            for row in df_critical.iter_rows(named=True):
+                score = int(float(row.get('Threat_Score', 0) or 0))
+                tag = str(row.get('Tag', '')).upper()
+                verdict = str(row.get('Judge_Verdict', '')).upper()
+                
                 ev = {
                     "Time": row.get('Timestamp_UTC'),
                     "Category": row.get('Category', 'EXEC'), 
@@ -176,9 +205,43 @@ def main():
                 if "LATERAL" in tag: ev['Category'] = "LATERAL"
                 elif "PERSISTENCE" in tag: ev['Category'] = "PERSIST"
                 elif "ANTI_FORENSICS" in tag:
-                     ev['Category'] = "ANTI"
-                     verdict_flags.add("ANTI-FORENSICS")
+                        ev['Category'] = "ANTI"
+                        verdict_flags.add("ANTI-FORENSICS")
                 events.append(ev)
+
+        except Exception as e:
+            print(f"    [!] Hercules Optimization Error: {e}. Falling back to slow iteration.")
+            # Fallback (Safety Net)
+            for row in df_herc.iter_rows(named=True):
+                score = 0
+                try: score = int(float(row.get('Threat_Score', 0)))
+                except: pass
+                tag = str(row.get('Tag', '')).upper()
+                verdict = str(row.get('Judge_Verdict', '')).upper()
+                
+                is_critical = score >= 60 or "CRITICAL" in verdict or "SNIPER" in verdict
+                if is_critical:
+                    ev = {
+                        "Time": row.get('Timestamp_UTC'),
+                        "Category": row.get('Category', 'EXEC'), 
+                        "Summary": row.get('Action', '') or row.get('Description', '') or row.get('Summary', ''),
+                        "Source": row.get('Source', row.get('Artifact_Type', 'Log')),
+                        "Criticality": score,
+                        "Tag": tag,
+                        "Keywords": [row.get('Target_Path')] if row.get('Target_Path') else [],
+                        "FileName": row.get('FileName'),
+                        "Target_Path": row.get('Target_Path'),
+                        "Action": row.get('Action'),
+                        "Payload": row.get('Payload'),
+                        "Reg_Key": row.get('Reg_Key'),
+                        "CommandLine": row.get('CommandLine')
+                    }
+                    if "LATERAL" in tag: ev['Category'] = "LATERAL"
+                    elif "PERSISTENCE" in tag: ev['Category'] = "PERSIST"
+                    elif "ANTI_FORENSICS" in tag:
+                            ev['Category'] = "ANTI"
+                            verdict_flags.add("ANTI-FORENSICS")
+                    events.append(ev)
 
     # [2] Backup Source: Pandora (Ghost Report)
     if dfs.get('Pandora') is not None:
@@ -367,6 +430,9 @@ def main():
     # ==========================================================
     # [Phase 6] Time-Agnostic Defense (Hekate Scope Filter)
     # ==========================================================
+    # ==========================================================
+    start_scope = None
+    end_scope = None
     valid_times = []
     for e in events:
         try:
@@ -392,17 +458,72 @@ def main():
                     high_critical_times.append(dt)
                 except: pass
         
-        start_scope = datetime.min
-        end_scope = datetime.max
+        start_scope = None
+        end_scope = None
         
         if high_critical_times:
-            high_critical_times.sort()
-            mid = len(high_critical_times) // 2
-            center = high_critical_times[mid]
+            # [RESTORED] Sliding Window Algorithm (Density + Critical Boost)
+            print(f"    [DEBUG] High Critical Times Count: {len(high_critical_times)}")
+            valid_events_with_time = []
+            for e in events:
+                try:
+                     ts = e.get('Time')
+                     criticality = int(e.get('Criticality', 0))
+                     if ts:
+                         t_raw = ts[:19].replace('T', ' ')
+                         dt_obj = datetime.strptime(t_raw, "%Y-%m-%d %H:%M:%S")
+                         valid_events_with_time.append({'dt': dt_obj, 'score': criticality})
+                except: pass
+            
+            valid_events_with_time.sort(key=lambda x: x['dt'])
+            
+            best_density = -1
+            center = high_critical_times[0] if high_critical_times else datetime.now()
+            
+            window_size = timedelta(days=3)
+            
+            # [FIX v2.0] O(N) Two-Pointer Sliding Window
+            # Previous nested loop was O(N^2) and froze on 130k+ events
+            n = len(valid_events_with_time)
+            if n > 0:
+                left = 0
+                current_window_score = 0
+                
+                for right in range(n):
+                    # Add right element to window
+                    curr = valid_events_with_time[right]
+                    base_score = curr['score']
+                    if base_score >= 500:
+                        current_window_score += (base_score * 2)
+                    elif base_score >= 80:
+                        current_window_score += base_score
+                    
+                    # Shrink window from left if outside time range
+                    t_end = valid_events_with_time[right]['dt']
+                    t_start_limit = t_end - window_size
+                    
+                    while left < right and valid_events_with_time[left]['dt'] < t_start_limit:
+                        # Remove left element from window
+                        rem = valid_events_with_time[left]
+                        rem_score = rem['score']
+                        if rem_score >= 500:
+                            current_window_score -= (rem_score * 2)
+                        elif rem_score >= 80:
+                            current_window_score -= rem_score
+                        left += 1
+                    
+                    # Check if this window is best
+                    if current_window_score > best_density:
+                        best_density = current_window_score
+                        # Center is approximate middle of window
+                        t_start = valid_events_with_time[left]['dt']
+                        center = t_start + timedelta(days=1, hours=12)
+
+            # Define Scope: Center +/- 1 Day (Strict)
             start_scope = center - timedelta(days=1)
             end_scope = center + timedelta(days=1)
         
-        print(f"    [*] Hekate Scope Enforced: {start_scope} ~ {end_scope}")
+        print(f"    [*] Hekate Scope Enforced (Score Density >= 500): {start_scope} ~ {end_scope} (Max Score: {best_density})")
 
         for e in events:
             # 1. Parse Time
@@ -508,12 +629,27 @@ def main():
         "events": events,
         "verdict_flags": verdict_flags,
         "lateral_summary": "Confirmed" if "LATERAL" in verdict_flags else "",
+        # [FIX] Pass enforced scope to Lachesis to filter raw DataFrame artifacts
+        "scope_start": start_scope,
+        "scope_end": end_scope
     }
 
     lang_suffix = args.lang if args.lang else "jp"
     output_md = Path(args.outdir) / f"Grimoire_{args.case}_{lang_suffix}.md"
     lachesis = LachesisCore(lang=lang_suffix, hostname=final_host, case_name=args.case)
     
+    print(f"    [DEBUG-PRE-WEAVE] dfs keys: {list(dfs.keys())}")
+    if dfs.get('Timeline') is not None:
+        print(f"    [DEBUG-PRE-WEAVE] Timeline Type: {type(dfs['Timeline'])} Height: {dfs['Timeline'].height}")
+    else:
+        print(f"    [DEBUG-PRE-WEAVE] Timeline is None! Attempting Emergency Reload...")
+        if args.timeline and os.path.exists(args.timeline):
+             try:
+                 dfs['Timeline'] = pl.read_csv(args.timeline, ignore_errors=True, infer_schema_length=0)
+                 print(f"      [+] Emergency Reload Successful. Height: {dfs['Timeline'].height}")
+             except Exception as e:
+                 print(f"      [!] Emergency Reload Failed: {e}")
+
     lachesis.weave_report(
         analysis_result=analysis_result,
         output_path=str(output_md),

@@ -97,16 +97,30 @@ class ObfuscationDetector(BaseDetector):
             ).alias("_obf_combined_text")
         )
         
-        # --- STEP 1: Base64 Detection ---
+        # --- STEP 1: Base64 Detection (Vectorized Pre-check) ---
+        # [OPTIMIZATION] Only map if looks like Base64 (>20 chars of b64 set)
+        looks_like_b64 = pl.col("_obf_combined_text").str.contains(r"[A-Za-z0-9+/=]{20,}")
+        
         df = df.with_columns(
-            pl.col("_obf_combined_text").map_elements(
-                self._detect_base64,
-                return_dtype=pl.Struct([
-                    pl.Field("score", pl.Int64),
-                    pl.Field("tag", pl.Utf8),
-                    pl.Field("decoded", pl.Utf8)
+            pl.when(looks_like_b64)
+            .then(
+                pl.col("_obf_combined_text").map_elements(
+                    self._detect_base64,
+                    return_dtype=pl.Struct([
+                        pl.Field("score", pl.Int64),
+                        pl.Field("tag", pl.Utf8),
+                        pl.Field("decoded", pl.Utf8)
+                    ])
+                )
+            )
+            .otherwise(
+                pl.struct([
+                    pl.lit(0, dtype=pl.Int64).alias("score"), 
+                    pl.lit("", dtype=pl.Utf8).alias("tag"), 
+                    pl.lit("", dtype=pl.Utf8).alias("decoded")
                 ])
-            ).alias("_b64_result")
+            )
+            .alias("_b64_result")
         )
         
         df = df.with_columns([
@@ -117,16 +131,30 @@ class ObfuscationDetector(BaseDetector):
               .alias("Tag")
         ])
         
-        # --- STEP 2: Script Seed Detection ---
+        # --- STEP 2: Script Seed Detection (Vectorized Pre-check) ---
+        # Only run if contains extensions
+        looks_like_script = pl.col("_obf_combined_text").str.to_lowercase().str.contains(r"\.(bat|ps1|vbs|js|hta|jse|wsf|sh|py|exe)")
+        
         df = df.with_columns(
-            pl.col("_obf_combined_text").map_elements(
-                self._detect_script_seeds,
-                return_dtype=pl.Struct([
-                    pl.Field("score", pl.Int64),
-                    pl.Field("tag", pl.Utf8),
-                    pl.Field("seeds", pl.Utf8)
+            pl.when(looks_like_script)
+            .then(
+                pl.col("_obf_combined_text").map_elements(
+                    self._detect_script_seeds,
+                    return_dtype=pl.Struct([
+                        pl.Field("score", pl.Int64),
+                        pl.Field("tag", pl.Utf8),
+                        pl.Field("seeds", pl.Utf8)
+                    ])
+                )
+            )
+            .otherwise(
+                pl.struct([
+                   pl.lit(0, dtype=pl.Int64).alias("score"), 
+                   pl.lit("", dtype=pl.Utf8).alias("tag"), 
+                   pl.lit("", dtype=pl.Utf8).alias("seeds")
                 ])
-            ).alias("_seed_result")
+            )
+            .alias("_seed_result")
         )
         
         df = df.with_columns([
@@ -137,15 +165,28 @@ class ObfuscationDetector(BaseDetector):
               .alias("Tag")
         ])
         
-        # --- STEP 3: Entropy Detection ---
+        # --- STEP 3: Entropy Detection (Length Gated) ---
+        # [OPTIMIZATION] Only calc entropy on strings > 50 chars
+        is_long_enough = pl.col("_obf_combined_text").str.len_bytes() > 50
+        
         df = df.with_columns(
-            pl.col("_obf_combined_text").map_elements(
-                self._check_entropy,
-                return_dtype=pl.Struct([
-                    pl.Field("score", pl.Int64),
-                    pl.Field("tag", pl.Utf8)
+            pl.when(is_long_enough)
+            .then(
+                pl.col("_obf_combined_text").map_elements(
+                    self._check_entropy,
+                    return_dtype=pl.Struct([
+                        pl.Field("score", pl.Int64),
+                        pl.Field("tag", pl.Utf8)
+                    ])
+                )
+            )
+            .otherwise(
+                 pl.struct([
+                    pl.lit(0, dtype=pl.Int64).alias("score"), 
+                    pl.lit("", dtype=pl.Utf8).alias("tag")
                 ])
-            ).alias("_entropy_result")
+            )
+            .alias("_entropy_result")
         )
         
         df = df.with_columns([
@@ -171,14 +212,27 @@ class ObfuscationDetector(BaseDetector):
         ])
         
         # --- STEP 5: Normalization + Re-scan [NEW] ---
+        # [OPTIMIZATION] Only normalize if contains obfuscation chars (^, `) or concatenation (+)
+        needs_normalization = pl.col("_obf_combined_text").str.contains(r"[\^`+]")
+        
         df = df.with_columns(
-            pl.col("_obf_combined_text").map_elements(
-                self._check_normalization,
-                return_dtype=pl.Struct([
-                    pl.Field("score", pl.Int64),
-                    pl.Field("tag", pl.Utf8)
+            pl.when(needs_normalization)
+            .then(
+                pl.col("_obf_combined_text").map_elements(
+                    self._check_normalization,
+                    return_dtype=pl.Struct([
+                        pl.Field("score", pl.Int64),
+                        pl.Field("tag", pl.Utf8)
+                    ])
+                )
+            )
+            .otherwise(
+                pl.struct([
+                    pl.lit(0, dtype=pl.Int64).alias("score"), 
+                    pl.lit("", dtype=pl.Utf8).alias("tag")
                 ])
-            ).alias("_norm_result")
+            )
+            .alias("_norm_result")
         )
         
         df = df.with_columns([

@@ -1,0 +1,174 @@
+# ============================================================
+#  SkiaHelios Custom Threat Signatures
+#  sigma_custom.yaml v2.0 (Action 3: Regex Precision)
+#  Mission: Detect "Famous" attack tools that SigmaHQ file rules miss.
+#  Target: FileName (Optimized for MFT/File Artifacts)
+# ============================================================
+
+threat_signatures:
+  # ═══════════════════════════════════════════════════════════════
+  # C2 / Exploitation Frameworks
+  # ═══════════════════════════════════════════════════════════════
+  - name: "[Custom] Metasploit Framework Artifacts"
+    tag: "EXPLOIT_FRAMEWORK,METASPLOIT,C2"
+    score: 1000
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)(exploitable|meterpreter|payload.*\\.rb|msfconsole|msfvenom)"
+    category: "file_event"
+
+  - name: "[Custom] Metasploit Exploit Config"
+    tag: "EXPLOIT_FRAMEWORK,METASPLOIT,C2"
+    score: 300
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)exploit\\.\\d+"
+
+  - name: "[Custom] Cobalt Strike Beacon"
+    tag: "C2,COBALT_STRIKE"
+    score: 1000
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)(beacon|artifact.*\\.exe|cobaltstrike|cs_beacon)"
+    category: "file_event"
+
+  - name: "[Custom] Sliver / Covenant C2"
+    tag: "C2,SLIVER"
+    score: 300
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)(sliver|grunt|covenant|implant.*\\.exe)"
+
+  - name: "[Custom] Havoc C2"
+    tag: "C2,HAVOC"
+    score: 300
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)(havoc|demon\\.exe|teamserver)"
+
+  # ═══════════════════════════════════════════════════════════════
+  # Lateral Movement / Impacket
+  # ═══════════════════════════════════════════════════════════════
+  - name: "[Custom] Impacket Tools"
+    tag: "LATERAL_MOVEMENT,IMPACKET"
+    score: 300
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)(secretsdump|wmiexec|psexec|smbexec|atexec|dcomexec)"
+
+  - name: "[Custom] PsExec (Sysinternals)"
+    tag: "LATERAL_MOVEMENT,PSEXEC"
+    score: 200
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)psexec"
+
+  - name: "[Custom] ProcDump"
+    tag: "CREDENTIAL_DUMPING,PROCDUMP"
+    score: 200
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)procdump"
+
+  # ═══════════════════════════════════════════════════════════════
+  # Tunneling / Proxy
+  # ═══════════════════════════════════════════════════════════════
+  - name: "[Custom] Ligolo-ng Proxy"
+    tag: "TUNNELING,LIGOLO"
+    score: 300
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)(ligolo|agent.*ligolo)"
+
+  - name: "[Custom] Chisel Tunnel"
+    tag: "TUNNELING,CHISEL"
+    score: 300
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)chisel"
+
+  - name: "[Custom] Ngrok Tunnel"
+    tag: "TUNNELING,NGROK"
+    score: 200
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)ngrok"
+
+  # ═══════════════════════════════════════════════════════════════
+  # Exfiltration
+  # ═══════════════════════════════════════════════════════════════
+  - name: "[Custom] Rclone Exfiltration"
+    tag: "DATA_EXFIL,RCLONE"
+    score: 300
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)rclone"
+
+  - name: "[Custom] MEGAcmd Exfiltration"
+    tag: "DATA_EXFIL,MEGA"
+    score: 300
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)(megacmd|mega-cmd)"
+
+  # ═══════════════════════════════════════════════════════════════
+  # Credential Dumping
+  # ═══════════════════════════════════════════════════════════════
+  - name: "[Custom] Mimikatz"
+    tag: "CREDENTIAL_DUMPING,MIMIKATZ"
+    score: 1000
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)(mimikatz|mimidogz|sekurlsa|kiwi)"
+    category: "file_event"
+
+  - name: "[Custom] LaZagne"
+    tag: "CREDENTIAL_DUMPING,LAZAGNE"
+    score: 300
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)lazagne"
+
+  - name: "[Custom] SharpHound / BloodHound"
+    tag: "INTERNAL_RECON,BLOODHOUND"
+    score: 300
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)(sharphound|bloodhound|azurehound)"
+
+  # ═══════════════════════════════════════════════════════════════
+  # Staging / Archive Tools (Dual Use)
+  # ═══════════════════════════════════════════════════════════════
+  - name: "[Custom] 7-Zip Standalone Archive"
+    tag: "STAGING,ARCHIVE_TOOL"
+    score: 300
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)(7za?|7zr?)\\.exe"
+
+  - name: "[Custom] WinRAR CLI Archive"
+    tag: "STAGING,ARCHIVE_TOOL"
+    score: 300
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)(rar|unrar)\\.exe"
+
+  # ═══════════════════════════════════════════════════════════════
+  # Anti-Forensics / Wiping
+  # ═══════════════════════════════════════════════════════════════
+  - name: "[Custom] Eraser / Secure Delete"
+    tag: "ANTI_FORENSICS,WIPING"
+    score: 1000
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)(eraser|sdelete|bcwipe|fileshredder)"
+    category: "file_event"
+
+  - name: "[Custom] Timestomping Tools"
+    tag: "ANTI_FORENSICS,TIMESTOMP"
+    score: 500
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)(timestomp|setfile|touch\\.exe)"
+
+noise_filters: []

@@ -1,0 +1,1499 @@
+'#': Imported by SH_CharonBridge on file
+threat_signatures:
+- name: '[Sigma] File Creation Date Changed to Another Year'
+  tag: attack.t1070.006,attack.defense-evasion
+  score: 80
+  target: Full_Path
+  condition: regex
+  pattern: ^2022
+- name: '[Sigma] File Creation Date Changed to Another Year'
+  tag: attack.t1070.006,attack.defense-evasion
+  score: 80
+  target: Full_Path
+  condition: regex
+  pattern: ^2022
+- name: '[Sigma] File Creation Date Changed to Another Year'
+  tag: attack.t1070.006,attack.defense-evasion
+  score: 80
+  target: Full_Path
+  condition: regex
+  pattern: ^202
+- name: '[Sigma] File Creation Date Changed to Another Year'
+  tag: attack.t1070.006,attack.defense-evasion
+  score: 80
+  target: Full_Path
+  condition: regex
+  pattern: ^202
+- name: '[Sigma] File Creation Date Changed to Another Year'
+  tag: attack.t1070.006,attack.defense-evasion
+  score: 80
+  target: Full_Path
+  condition: regex
+  pattern: (?i)(\{'Image':\ \['C:\\\\Windows\\\\system32\\\\ProvTool\.exe',\ 'C:\\\\Windows\\\\System32\\\\usocoreworker\.exe',\
+    'C:\\\\Windows\\\\ImmersiveControlPanel\\\\SystemSettings\.exe'\]\}|\{'TargetFilename\|startswith':\
+    'C:\\\\ProgramData\\\\USOPrivate\\\\UpdateStore\\\\'\}|\{'TargetFilename\|endswith':\
+    \['\.tmp',\ '\.temp'\]\})
+- name: '[Sigma] File Creation Date Changed to Another Year'
+  tag: attack.t1070.006,attack.defense-evasion
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: ^C:\\WINDOWS\\
+- name: '[Sigma] File Creation Date Changed to Another Year'
+  tag: attack.t1070.006,attack.defense-evasion
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)\\TiWorker\.exe$
+- name: '[Sigma] File Creation Date Changed to Another Year'
+  tag: attack.t1070.006,attack.defense-evasion
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\.cab$
+- name: '[Sigma] Unusual File Modification by dns.exe'
+  tag: attack.persistence,attack.initial-access,attack.t1133
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)\\dns\.exe$
+- name: '[Sigma] Unusual File Modification by dns.exe'
+  tag: attack.persistence,attack.initial-access,attack.t1133
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\dns\.log$
+- name: '[Sigma] Exchange PowerShell Cmdlet History Deleted'
+  tag: attack.defense-evasion,attack.t1070
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: ^\\Logging\\CmdletInfra\\LocalPowerShell\\Cmdlet\\
+- name: '[Sigma] Exchange PowerShell Cmdlet History Deleted'
+  tag: attack.defense-evasion,attack.t1070
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)_Cmdlet_
+- name: '[Sigma] Prefetch File Deleted'
+  tag: attack.defense-evasion,attack.t1070.004
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i):\\Windows\\Prefetch\\
+- name: '[Sigma] Prefetch File Deleted'
+  tag: attack.defense-evasion,attack.t1070.004
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\.pf$
+- name: '[Sigma] Prefetch File Deleted'
+  tag: attack.defense-evasion,attack.t1070.004
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i):\\windows\\system32\\svchost\.exe$
+- name: '[Sigma] Prefetch File Deleted'
+  tag: attack.defense-evasion,attack.t1070.004
+  score: 80
+  target: User
+  condition: regex
+  pattern: (?i)(AUTHORI|AUTORI)
+- name: '[Sigma] Unusual File Deletion by Dns.exe'
+  tag: attack.persistence,attack.initial-access,attack.t1133
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)\\dns\.exe$
+- name: '[Sigma] Unusual File Deletion by Dns.exe'
+  tag: attack.persistence,attack.initial-access,attack.t1133
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\dns\.log$
+- name: '[Sigma] Suspicious Binary Writes Via AnyDesk'
+  tag: attack.command-and-control,attack.t1219.002
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(\\AnyDesk\.exe|\\AnyDeskMSI\.exe)$
+- name: '[Sigma] Suspicious Binary Writes Via AnyDesk'
+  tag: attack.command-and-control,attack.t1219.002
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\.dll|\.exe)$
+- name: '[Sigma] Suspicious Binary Writes Via AnyDesk'
+  tag: attack.command-and-control,attack.t1219.002
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\gcapi\.dll$
+- name: '[Sigma] BloodHound Collection Files'
+  tag: attack.discovery,attack.t1087.001,attack.t1087.002,attack.t1482,attack.t1069.001,attack.t1069.002,attack.execution,attack.t1059.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(BloodHound\.zip|_computers\.json|_containers\.json|_domains\.json|_gpos\.json|_groups\.json|_ous\.json|_users\.json)$
+- name: '[Sigma] BloodHound Collection Files'
+  tag: attack.discovery,attack.t1087.001,attack.t1087.002,attack.t1482,attack.t1069.001,attack.t1069.002,attack.execution,attack.t1059.001
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)\\svchost\.exe$
+- name: '[Sigma] BloodHound Collection Files'
+  tag: attack.discovery,attack.t1087.001,attack.t1087.002,attack.t1482,attack.t1069.001,attack.t1069.002,attack.execution,attack.t1059.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: ^C:\\Program\ Files\\WindowsApps\\Microsoft\.
+- name: '[Sigma] BloodHound Collection Files'
+  tag: attack.discovery,attack.t1087.001,attack.t1087.002,attack.t1482,attack.t1069.001,attack.t1069.002,attack.execution,attack.t1059.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\pocket_containers\.json$
+- name: '[Sigma] Creation Exe for Service with Unquoted Path'
+  tag: attack.privilege-escalation,attack.persistence,attack.t1547.009
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)C:\\program\.exe
+- name: '[Sigma] Cred Dump Tools Dropped Files'
+  tag: attack.credential-access,attack.t1003.001,attack.t1003.002,attack.t1003.003,attack.t1003.004,attack.t1003.005
+  score: 80
+  target: Full_Path
+  condition: regex
+  pattern: (?i)(\{'TargetFilename\|contains':\ \['\\\\fgdump\-log',\ '\\\\kirbi',\
+    '\\\\pwdump',\ '\\\\pwhashes',\ '\\\\wce_ccache',\ '\\\\wce_krbtkts'\]\}|\{'TargetFilename\|endswith':\
+    \['\\\\cachedump\.exe',\ '\\\\cachedump64\.exe',\ '\\\\DumpExt\.dll',\ '\\\\DumpSvc\.exe',\
+    '\\\\Dumpy\.exe',\ '\\\\fgexec\.exe',\ '\\\\lsremora\.dll',\ '\\\\lsremora64\.dll',\
+    '\\\\NTDS\.out',\ '\\\\procdump\.exe',\ '\\\\procdump64\.exe',\ '\\\\procdump64a\.exe',\
+    '\\\\pstgdump\.exe',\ '\\\\pwdump\.exe',\ '\\\\SAM\.out',\ '\\\\SECURITY\.out',\
+    '\\\\servpw\.exe',\ '\\\\servpw64\.exe',\ '\\\\SYSTEM\.out',\ '\\\\test\.pwd',\
+    '\\\\wceaux\.dll'\]\})
+- name: '[Sigma] WScript or CScript Dropper - File'
+  tag: attack.execution,attack.t1059.005,attack.t1059.007
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(\\wscript\.exe|\\cscript\.exe)$
+- name: '[Sigma] WScript or CScript Dropper - File'
+  tag: attack.execution,attack.t1059.005,attack.t1059.007
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: ^(C:\\Users\\|C:\\ProgramData)
+- name: '[Sigma] WScript or CScript Dropper - File'
+  tag: attack.execution,attack.t1059.005,attack.t1059.007
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\.jse|\.vbe|\.js|\.vba|\.vbs)$
+- name: '[Sigma] Potential DCOM InternetExplorer.Application DLL Hijack'
+  tag: attack.lateral-movement,attack.t1021.002,attack.t1021.003
+  score: 100
+  target: Target_Path
+  condition: regex
+  pattern: (?i)System
+- name: '[Sigma] Potential DCOM InternetExplorer.Application DLL Hijack'
+  tag: attack.lateral-movement,attack.t1021.002,attack.t1021.003
+  score: 100
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\Internet\ Explorer\\iertutil\.dll$
+- name: '[Sigma] DLL Search Order Hijackig Via Additional Space in Path'
+  tag: attack.persistence,attack.privilege-escalation,attack.defense-evasion,attack.t1574.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: ^(C:\\Windows\ \\|C:\\Program\ Files\ \\|C:\\Program\ Files\ \(x86\)\ \\)
+- name: '[Sigma] DLL Search Order Hijackig Via Additional Space in Path'
+  tag: attack.persistence,attack.privilege-escalation,attack.defense-evasion,attack.t1574.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\.dll$
+- name: '[Sigma] Suspicious ASPX File Drop by Exchange'
+  tag: attack.persistence,attack.t1505.003
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)\\w3wp\.exe$
+- name: '[Sigma] Suspicious ASPX File Drop by Exchange'
+  tag: attack.persistence,attack.t1505.003
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)MSExchange
+- name: '[Sigma] Suspicious ASPX File Drop by Exchange'
+  tag: attack.persistence,attack.t1505.003
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(FrontEnd\\HttpProxy\\|\\inetpub\\wwwroot\\aspnet_client\\)
+- name: '[Sigma] Suspicious ASPX File Drop by Exchange'
+  tag: attack.persistence,attack.t1505.003
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\.aspx|\.asp|\.ashx)$
+- name: '[Sigma] HackTool - CrackMapExec File Indicators'
+  tag: attack.credential-access,attack.t1003.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: ^C:\\Windows\\Temp\\
+- name: '[Sigma] HackTool - CrackMapExec File Indicators'
+  tag: attack.credential-access,attack.t1003.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\\temp\.ps1|\\msol\.ps1)$
+- name: '[Sigma] HackTool - CrackMapExec File Indicators'
+  tag: attack.credential-access,attack.t1003.001
+  score: 80
+  target: Full_Path
+  condition: regex
+  pattern: (?i)(\{'TargetFilename\|re':\ '\\\\\\\\\[0\-9a\-f\]\{8\}\-\[0\-9a\-f\]\{4\}\-\[0\-9a\-f\]\{4\}\-\[0\-9a\-f\]\{4\}\-\[0\-9a\-f\]\{12\}\\\\\.txt\$'\}|\{'TargetFilename\|re':\
+    '\\\\\\\\\[a\-zA\-Z\]\{8\}\\\\\.tmp\$'\})
+- name: '[Sigma] HackTool - Dumpert Process Dumper Default File'
+  tag: attack.credential-access,attack.t1003.001
+  score: 100
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)dumpert\.dmp$
+- name: '[Sigma] HackTool - Typical HiveNightmare SAM File Export'
+  tag: attack.credential-access,attack.t1552.001,cve.2021-36934
+  score: 80
+  target: Full_Path
+  condition: regex
+  pattern: (?i)(\{'TargetFilename\|contains':\ \['\\\\hive_sam_',\ '\\\\SAM\-2021\-',\
+    '\\\\SAM\-2022\-',\ '\\\\SAM\-2023\-',\ '\\\\SAM\-haxx',\ '\\\\Sam\.save'\]\}|\{'TargetFilename':\
+    'C:\\\\windows\\\\temp\\\\sam'\})
+- name: '[Sigma] HackTool - Inveigh Execution Artefacts'
+  tag: attack.command-and-control,attack.t1219.002
+  score: 100
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\\Inveigh\-Log\.txt|\\Inveigh\-Cleartext\.txt|\\Inveigh\-NTLMv1Users\.txt|\\Inveigh\-NTLMv2Users\.txt|\\Inveigh\-NTLMv1\.txt|\\Inveigh\-NTLMv2\.txt|\\Inveigh\-FormInput\.txt|\\Inveigh\.dll|\\Inveigh\.exe|\\Inveigh\.ps1|\\Inveigh\-Relay\.ps1)$
+- name: '[Sigma] HackTool - RemoteKrbRelay SMB Relay Secrets Dump Module Indicators'
+  tag: attack.command-and-control,attack.t1219.002
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(:\\windows\\temp\\sam\.tmp|:\\windows\\temp\\sec\.tmp|:\\windows\\temp\\sys\.tmp)$
+- name: '[Sigma] HackTool - Mimikatz Kirbi File Creation'
+  tag: attack.credential-access,attack.t1558
+  score: 100
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\.kirbi|mimilsa\.log)$
+- name: '[Sigma] HackTool - NPPSpy Hacktool Usage'
+  tag: attack.credential-access
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\\NPPSpy\.txt|\\NPPSpy\.dll)$
+- name: '[Sigma] HackTool - Powerup Write Hijack DLL'
+  tag: attack.persistence,attack.privilege-escalation,attack.defense-evasion,attack.t1574.001
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(\\powershell\.exe|\\pwsh\.exe)$
+- name: '[Sigma] HackTool - Powerup Write Hijack DLL'
+  tag: attack.persistence,attack.privilege-escalation,attack.defense-evasion,attack.t1574.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\.bat$
+- name: '[Sigma] HackTool - QuarksPwDump Dump File'
+  tag: attack.credential-access,attack.t1003.002
+  score: 100
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\\AppData\\Local\\Temp\\SAM\-|\.dmp)
+- name: '[Sigma] HackTool - Potential Remote Credential Dumping Activity Via CrackMapExec
+    Or Impacket-Secretsdump'
+  tag: attack.credential-access,attack.t1003
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)\\svchost\.exe$
+- name: '[Sigma] HackTool - Potential Remote Credential Dumping Activity Via CrackMapExec
+    Or Impacket-Secretsdump'
+  tag: attack.credential-access,attack.t1003
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\\\Windows\\\\System32\\\\\[a\-zA\-Z0\-9\]\{8\}\\\.tmp\$
+- name: '[Sigma] HackTool - SafetyKatz Dump Indicator'
+  tag: attack.credential-access,attack.t1003.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\Temp\\debug\.bin$
+- name: '[Sigma] Malicious DLL File Dropped in the Teams or OneDrive Folder'
+  tag: attack.persistence,attack.privilege-escalation,attack.defense-evasion,attack.t1574.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(iphlpapi\.dll|\\AppData\\Local\\Microsoft)
+- name: '[Sigma] ISO File Created Within Temp Folders'
+  tag: attack.initial-access,attack.t1566.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\\AppData\\Local\\Temp\\|\.zip\\)
+- name: '[Sigma] ISO File Created Within Temp Folders'
+  tag: attack.initial-access,attack.t1566.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\.iso$
+- name: '[Sigma] ISO File Created Within Temp Folders'
+  tag: attack.initial-access,attack.t1566.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\AppData\\Local\\Microsoft\\Windows\\INetCache\\Content\.Outlook\\
+- name: '[Sigma] ISO File Created Within Temp Folders'
+  tag: attack.initial-access,attack.t1566.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\.iso$
+- name: '[Sigma] LSASS Process Memory Dump Files'
+  tag: attack.credential-access,attack.t1003.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\\Andrew\.dmp|\\Coredump\.dmp|\\lsass\.dmp|\\lsass\.rar|\\lsass\.zip|\\NotLSASS\.zip|\\PPLBlade\.dmp|\\rustive\.dmp)$
+- name: '[Sigma] LSASS Process Memory Dump Files'
+  tag: attack.credential-access,attack.t1003.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\\lsass_2|\\lsassdmp|\\lsassdump)
+- name: '[Sigma] LSASS Process Memory Dump Files'
+  tag: attack.credential-access,attack.t1003.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\\lsass|\.dmp)
+- name: '[Sigma] LSASS Process Memory Dump Files'
+  tag: attack.credential-access,attack.t1003.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)SQLDmpr
+- name: '[Sigma] LSASS Process Memory Dump Files'
+  tag: attack.credential-access,attack.t1003.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\.mdmp$
+- name: '[Sigma] LSASS Process Memory Dump Files'
+  tag: attack.credential-access,attack.t1003.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\\nanodump|\\proc_)
+- name: '[Sigma] LSASS Process Memory Dump Files'
+  tag: attack.credential-access,attack.t1003.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\.dmp$
+- name: '[Sigma] LSASS Process Dump Artefact In CrashDumps Folder'
+  tag: attack.credential-access,attack.t1003.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: ^C:\\Windows\\System32\\config\\systemprofile\\AppData\\Local\\CrashDumps\\
+- name: '[Sigma] LSASS Process Dump Artefact In CrashDumps Folder'
+  tag: attack.credential-access,attack.t1003.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)lsass\.exe\.
+- name: '[Sigma] LSASS Process Dump Artefact In CrashDumps Folder'
+  tag: attack.credential-access,attack.t1003.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\.dmp$
+- name: '[Sigma] WerFault LSASS Process Memory Dump'
+  tag: attack.credential-access,attack.t1003.001
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)C:\\WINDOWS\\system32\\WerFault\.exe
+- name: '[Sigma] WerFault LSASS Process Memory Dump'
+  tag: attack.credential-access,attack.t1003.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\\lsass|lsass\.exe)
+- name: '[Sigma] Adwind RAT / JRAT File Artifact'
+  tag: attack.execution,attack.t1059.005,attack.t1059.007
+  score: 80
+  target: Full_Path
+  condition: regex
+  pattern: (?i)(\{'TargetFilename\|contains\|all':\ \['\\\\AppData\\\\Roaming\\\\Oracle\\\\bin\\\\java',\
+    '\.exe'\]\}|\{'TargetFilename\|contains\|all':\ \['\\\\Retrive',\ '\.vbs'\]\})
+- name: '[Sigma] Octopus Scanner Malware'
+  tag: attack.initial-access,attack.t1195,attack.t1195.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\\AppData\\Local\\Microsoft\\Cache134\.dat|\\AppData\\Local\\Microsoft\\ExplorerSync\.db)$
+- name: '[Sigma] File Creation In Suspicious Directory By Msdt.EXE'
+  tag: attack.privilege-escalation,attack.persistence,attack.t1547.001,cve.2022-30190
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)\\msdt\.exe$
+- name: '[Sigma] File Creation In Suspicious Directory By Msdt.EXE'
+  tag: attack.privilege-escalation,attack.persistence,attack.t1547.001,cve.2022-30190
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\\Desktop\\|\\Start\ Menu\\Programs\\Startup\\|C:\\PerfLogs\\|C:\\ProgramData\\|C:\\Users\\Public\\)
+- name: '[Sigma] Uncommon File Creation By Mysql Daemon Process'
+  tag: attack.defense-evasion
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(\\mysqld\.exe|\\mysqld\-nt\.exe)$
+- name: '[Sigma] Uncommon File Creation By Mysql Daemon Process'
+  tag: attack.defense-evasion
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\.bat|\.dat|\.dll|\.exe|\.ps1|\.psm1|\.vbe|\.vbs)$
+- name: '[Sigma] Suspicious DotNET CLR Usage Log Artifact'
+  tag: attack.defense-evasion,attack.t1218
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\\UsageLogs\\cmstp\.exe\.log|\\UsageLogs\\cscript\.exe\.log|\\UsageLogs\\mshta\.exe\.log|\\UsageLogs\\msxsl\.exe\.log|\\UsageLogs\\regsvr32\.exe\.log|\\UsageLogs\\rundll32\.exe\.log|\\UsageLogs\\svchost\.exe\.log|\\UsageLogs\\wscript\.exe\.log|\\UsageLogs\\wmic\.exe\.log)$
+- name: '[Sigma] Suspicious DotNET CLR Usage Log Artifact'
+  tag: attack.defense-evasion,attack.t1218
+  score: 80
+  target: ParentPath
+  condition: regex
+  pattern: (?i)\\MsiExec\.exe$
+- name: '[Sigma] Suspicious DotNET CLR Usage Log Artifact'
+  tag: attack.defense-evasion,attack.t1218
+  score: 80
+  target: Full_Path
+  condition: regex
+  pattern: (?i)\ \-Embedding
+- name: '[Sigma] Suspicious DotNET CLR Usage Log Artifact'
+  tag: attack.defense-evasion,attack.t1218
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)\\rundll32\.exe$
+- name: '[Sigma] Suspicious DotNET CLR Usage Log Artifact'
+  tag: attack.defense-evasion,attack.t1218
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(Temp|zzzzInvokeManagedCustomActionOutOfProc)
+- name: '[Sigma] Suspicious File Creation In Uncommon AppData Folder'
+  tag: attack.defense-evasion,attack.execution
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: ^C:\\Users\\
+- name: '[Sigma] Suspicious File Creation In Uncommon AppData Folder'
+  tag: attack.defense-evasion,attack.execution
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\AppData\\
+- name: '[Sigma] Suspicious File Creation In Uncommon AppData Folder'
+  tag: attack.defense-evasion,attack.execution
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\.bat|\.cmd|\.cpl|\.dll|\.exe|\.hta|\.iso|\.lnk|\.msi|\.ps1|\.psm1|\.scr|\.vbe|\.vbs)$
+- name: '[Sigma] Suspicious File Creation In Uncommon AppData Folder'
+  tag: attack.defense-evasion,attack.execution
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: ^C:\\Users\\
+- name: '[Sigma] Suspicious File Creation In Uncommon AppData Folder'
+  tag: attack.defense-evasion,attack.execution
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\\AppData\\Local\\|\\AppData\\LocalLow\\|\\AppData\\Roaming\\)
+- name: '[Sigma] NTDS.DIT Creation By Uncommon Parent Process'
+  tag: attack.credential-access,attack.t1003.003
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\ntds\.dit$
+- name: '[Sigma] NTDS.DIT Creation By Uncommon Parent Process'
+  tag: attack.credential-access,attack.t1003.003
+  score: 80
+  target: ParentPath
+  condition: regex
+  pattern: (?i)(\\cscript\.exe|\\httpd\.exe|\\nginx\.exe|\\php\-cgi\.exe|\\powershell\.exe|\\pwsh\.exe|\\w3wp\.exe|\\wscript\.exe)$
+- name: '[Sigma] NTDS.DIT Creation By Uncommon Parent Process'
+  tag: attack.credential-access,attack.t1003.003
+  score: 80
+  target: ParentPath
+  condition: regex
+  pattern: (?i)(\\apache|\\tomcat|\\AppData\\|\\Temp\\|\\Public\\|\\PerfLogs\\)
+- name: '[Sigma] NTDS.DIT Creation By Uncommon Process'
+  tag: attack.credential-access,attack.t1003.002,attack.t1003.003
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\ntds\.dit$
+- name: '[Sigma] NTDS.DIT Creation By Uncommon Process'
+  tag: attack.credential-access,attack.t1003.002,attack.t1003.003
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(\\cmd\.exe|\\cscript\.exe|\\mshta\.exe|\\powershell\.exe|\\pwsh\.exe|\\regsvr32\.exe|\\rundll32\.exe|\\wscript\.exe|\\wsl\.exe|\\wt\.exe)$
+- name: '[Sigma] NTDS.DIT Creation By Uncommon Process'
+  tag: attack.credential-access,attack.t1003.002,attack.t1003.003
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(\\AppData\\|\\Temp\\|\\Public\\|\\PerfLogs\\)
+- name: '[Sigma] NTDS Exfiltration Filename Patterns'
+  tag: attack.credential-access,attack.t1003.003
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\\All\.cab|\.ntds\.cleartext)$
+- name: '[Sigma] Potential Persistence Via Microsoft Office Add-In'
+  tag: attack.persistence,attack.t1137.006
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\Microsoft\\Word\\Startup\\
+- name: '[Sigma] Potential Persistence Via Microsoft Office Add-In'
+  tag: attack.persistence,attack.t1137.006
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\.wll$
+- name: '[Sigma] Potential Persistence Via Microsoft Office Add-In'
+  tag: attack.persistence,attack.t1137.006
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\Microsoft\\Excel\\Startup\\
+- name: '[Sigma] Potential Persistence Via Microsoft Office Add-In'
+  tag: attack.persistence,attack.t1137.006
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\.xll$
+- name: '[Sigma] Potential Persistence Via Microsoft Office Add-In'
+  tag: attack.persistence,attack.t1137.006
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)Microsoft\\Excel\\XLSTART\\
+- name: '[Sigma] Potential Persistence Via Microsoft Office Add-In'
+  tag: attack.persistence,attack.t1137.006
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\.xlam$
+- name: '[Sigma] Potential Persistence Via Microsoft Office Add-In'
+  tag: attack.persistence,attack.t1137.006
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\Microsoft\\Addins\\
+- name: '[Sigma] Potential Persistence Via Microsoft Office Add-In'
+  tag: attack.persistence,attack.t1137.006
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\.xlam|\.xla|\.ppam)$
+- name: '[Sigma] Office Macro File Creation From Suspicious Process'
+  tag: attack.initial-access,attack.t1566.001
+  score: 80
+  target: Full_Path
+  condition: regex
+  pattern: (?i)(\{'Image\|endswith':\ \['\\\\cscript\.exe',\ '\\\\mshta\.exe',\ '\\\\regsvr32\.exe',\
+    '\\\\rundll32\.exe',\ '\\\\wscript\.exe'\]\}|\{'ParentImage\|endswith':\ \['\\\\cscript\.exe',\
+    '\\\\mshta\.exe',\ '\\\\regsvr32\.exe',\ '\\\\rundll32\.exe',\ '\\\\wscript\.exe'\]\})
+- name: '[Sigma] Office Macro File Creation From Suspicious Process'
+  tag: attack.initial-access,attack.t1566.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\.docm|\.dotm|\.xlsm|\.xltm|\.potm|\.pptm)$
+- name: '[Sigma] Suspicious File Created Via OneNote Application'
+  tag: attack.defense-evasion
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(\\onenote\.exe|\\onenotem\.exe|\\onenoteim\.exe)$
+- name: '[Sigma] Suspicious File Created Via OneNote Application'
+  tag: attack.defense-evasion
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\AppData\\Local\\Temp\\OneNote\\
+- name: '[Sigma] Suspicious File Created Via OneNote Application'
+  tag: attack.defense-evasion
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\.bat|\.chm|\.cmd|\.dll|\.exe|\.hta|\.htm|\.html|\.js|\.lnk|\.ps1|\.vbe|\.vbs|\.wsf)$
+- name: '[Sigma] Potential Persistence Via Outlook Form'
+  tag: attack.persistence,attack.t1137.003
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)\\outlook\.exe$
+- name: '[Sigma] Potential Persistence Via Outlook Form'
+  tag: attack.persistence,attack.t1137.003
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\\AppData\\Local\\Microsoft\\FORMS\\IPM|\\Local\ Settings\\Application\
+    Data\\Microsoft\\Forms)
+- name: '[Sigma] Suspicious Outlook Macro Created'
+  tag: attack.privilege-escalation,attack.persistence,attack.command-and-control,attack.t1137,attack.t1008,attack.t1546
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\Microsoft\\Outlook\\VbaProject\.OTM$
+- name: '[Sigma] Suspicious Outlook Macro Created'
+  tag: attack.privilege-escalation,attack.persistence,attack.command-and-control,attack.t1137,attack.t1008,attack.t1546
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)\\outlook\.exe$
+- name: '[Sigma] Potential Persistence Via Microsoft Office Startup Folder'
+  tag: attack.persistence,attack.t1137
+  score: 80
+  target: Full_Path
+  condition: regex
+  pattern: (?i)(\{'TargetFilename\|contains':\ '\\\\Microsoft\\\\Word\\\\STARTUP'\}|\{'TargetFilename\|contains\|all':\
+    \['\\\\Office',\ '\\\\Program\ Files',\ '\\\\STARTUP'\]\})
+- name: '[Sigma] Potential Persistence Via Microsoft Office Startup Folder'
+  tag: attack.persistence,attack.t1137
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\.doc|\.docm|\.docx|\.dot|\.dotm|\.rtf)$
+- name: '[Sigma] Potential Persistence Via Microsoft Office Startup Folder'
+  tag: attack.persistence,attack.t1137
+  score: 80
+  target: Full_Path
+  condition: regex
+  pattern: (?i)(\{'TargetFilename\|contains':\ '\\\\Microsoft\\\\Excel\\\\XLSTART'\}|\{'TargetFilename\|contains\|all':\
+    \['\\\\Office',\ '\\\\Program\ Files',\ '\\\\XLSTART'\]\})
+- name: '[Sigma] Potential Persistence Via Microsoft Office Startup Folder'
+  tag: attack.persistence,attack.t1137
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\.xls|\.xlsm|\.xlsx|\.xlt|\.xltm)$
+- name: '[Sigma] Potential Persistence Via Microsoft Office Startup Folder'
+  tag: attack.persistence,attack.t1137
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(\\WINWORD\.exe|\\EXCEL\.exe)$
+- name: '[Sigma] File With Uncommon Extension Created By An Office Application'
+  tag: attack.t1204.002,attack.execution
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(\\excel\.exe|\\msaccess\.exe|\\mspub\.exe|\\powerpnt\.exe|\\visio\.exe|\\winword\.exe)$
+- name: '[Sigma] File With Uncommon Extension Created By An Office Application'
+  tag: attack.t1204.002,attack.execution
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\.bat|\.cmd|\.com|\.dll|\.exe|\.hta|\.ocx|\.proj|\.ps1|\.scf|\.scr|\.sys|\.vbe|\.vbs|\.wsf|\.wsh)$
+- name: '[Sigma] File With Uncommon Extension Created By An Office Application'
+  tag: attack.t1204.002,attack.execution
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\AppData\\Local\\assembly\\tmp\\
+- name: '[Sigma] File With Uncommon Extension Created By An Office Application'
+  tag: attack.t1204.002,attack.execution
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\.dll$
+- name: '[Sigma] File With Uncommon Extension Created By An Office Application'
+  tag: attack.t1204.002,attack.execution
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(C:\\Users\\|\\AppData\\Local\\Microsoft\\Office\\|\\WebServiceCache\\AllUsers)
+- name: '[Sigma] File With Uncommon Extension Created By An Office Application'
+  tag: attack.t1204.002,attack.execution
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\.com$
+- name: '[Sigma] File With Uncommon Extension Created By An Office Application'
+  tag: attack.t1204.002,attack.execution
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)\\winword\.exe$
+- name: '[Sigma] File With Uncommon Extension Created By An Office Application'
+  tag: attack.t1204.002,attack.execution
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\AppData\\Local\\Temp\\webexdelta\\
+- name: '[Sigma] File With Uncommon Extension Created By An Office Application'
+  tag: attack.t1204.002,attack.execution
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\.dll|\.exe)$
+- name: '[Sigma] File With Uncommon Extension Created By An Office Application'
+  tag: attack.t1204.002,attack.execution
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(C:\\Users\\|\\AppData\\Local\\Microsoft\\Office\\|\\BackstageInAppNavCache\\)
+- name: '[Sigma] File With Uncommon Extension Created By An Office Application'
+  tag: attack.t1204.002,attack.execution
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\.com$
+- name: '[Sigma] Uncommon File Created In Office Startup Folder'
+  tag: attack.resource-development,attack.t1587.001
+  score: 80
+  target: Full_Path
+  condition: regex
+  pattern: (?i)(\{'TargetFilename\|contains':\ '\\\\Microsoft\\\\Word\\\\STARTUP'\}|\{'TargetFilename\|contains\|all':\
+    \['\\\\Office',\ '\\\\Program\ Files',\ '\\\\STARTUP'\]\})
+- name: '[Sigma] Uncommon File Created In Office Startup Folder'
+  tag: attack.resource-development,attack.t1587.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\.docb|\.docm|\.docx|\.dotm|\.mdb|\.mdw|\.pdf|\.wll|\.wwl)$
+- name: '[Sigma] Uncommon File Created In Office Startup Folder'
+  tag: attack.resource-development,attack.t1587.001
+  score: 80
+  target: Full_Path
+  condition: regex
+  pattern: (?i)(\{'TargetFilename\|contains':\ '\\\\Microsoft\\\\Excel\\\\XLSTART'\}|\{'TargetFilename\|contains\|all':\
+    \['\\\\Office',\ '\\\\Program\ Files',\ '\\\\XLSTART'\]\})
+- name: '[Sigma] Uncommon File Created In Office Startup Folder'
+  tag: attack.resource-development,attack.t1587.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\.xll|\.xls|\.xlsm|\.xlsx|\.xlt|\.xltm|\.xlw)$
+- name: '[Sigma] Uncommon File Created In Office Startup Folder'
+  tag: attack.resource-development,attack.t1587.001
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i):\\Program\ Files\\Common\ Files\\Microsoft\ Shared\\ClickToRun\\
+- name: '[Sigma] Uncommon File Created In Office Startup Folder'
+  tag: attack.resource-development,attack.t1587.001
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)\\OfficeClickToRun\.exe$
+- name: '[Sigma] Uncommon File Created In Office Startup Folder'
+  tag: attack.resource-development,attack.t1587.001
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(:\\Program\ Files\\Microsoft\ Office\\|:\\Program\ Files\ \(x86\)\\Microsoft\
+    Office\\)
+- name: '[Sigma] Uncommon File Created In Office Startup Folder'
+  tag: attack.resource-development,attack.t1587.001
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(\\winword\.exe|\\excel\.exe)$
+- name: '[Sigma] PCRE.NET Package Temp Files'
+  tag: attack.execution,attack.t1059
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\AppData\\Local\\Temp\\ba9ea7344a4a5f591d6e5dc32a13494b\\
+- name: '[Sigma] Malicious PowerShell Scripts - FileCreation'
+  tag: attack.execution,attack.t1059.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\\Add\-ConstrainedDelegationBackdoor\.ps1|\\Add\-Exfiltration\.ps1|\\Add\-Persistence\.ps1|\\Add\-RegBackdoor\.ps1|\\Add\-RemoteRegBackdoor\.ps1|\\Add\-ScrnSaveBackdoor\.ps1|\\ADRecon\.ps1|\\AzureADRecon\.ps1|\\BadSuccessor\.ps1|\\Check\-VM\.ps1|\\ConvertTo\-ROT13\.ps1|\\Copy\-VSS\.ps1|\\Create\-MultipleSessions\.ps1|\\DNS_TXT_Pwnage\.ps1|\\dnscat2\.ps1|\\Do\-Exfiltration\.ps1|\\DomainPasswordSpray\.ps1|\\Download_Execute\.ps1|\\Download\-Execute\-PS\.ps1|\\Enable\-DuplicateToken\.ps1|\\Enabled\-DuplicateToken\.ps1|\\Execute\-Command\-MSSQL\.ps1|\\Execute\-DNSTXT\-Code\.ps1|\\Execute\-OnTime\.ps1|\\ExetoText\.ps1|\\Exploit\-Jboss\.ps1|\\Find\-AVSignature\.ps1|\\Find\-Fruit\.ps1|\\Find\-GPOLocation\.ps1|\\Find\-TrustedDocuments\.ps1|\\FireBuster\.ps1|\\FireListener\.ps1|\\Get\-ApplicationHost\.ps1|\\Get\-ChromeDump\.ps1|\\Get\-ClipboardContents\.ps1|\\Get\-ComputerDetail\.ps1|\\Get\-FoxDump\.ps1|\\Get\-GPPAutologon\.ps1|\\Get\-GPPPassword\.ps1|\\Get\-IndexedItem\.ps1|\\Get\-Keystrokes\.ps1|\\Get\-LSASecret\.ps1|\\Get\-MicrophoneAudio\.ps1|\\Get\-PassHashes\.ps1|\\Get\-PassHints\.ps1|\\Get\-RegAlwaysInstallElevated\.ps1|\\Get\-RegAutoLogon\.ps1|\\Get\-RickAstley\.ps1|\\Get\-Screenshot\.ps1|\\Get\-SecurityPackages\.ps1|\\Get\-ServiceFilePermission\.ps1|\\Get\-ServicePermission\.ps1|\\Get\-ServiceUnquoted\.ps1|\\Get\-SiteListPassword\.ps1|\\Get\-System\.ps1|\\Get\-TimedScreenshot\.ps1|\\Get\-UnattendedInstallFile\.ps1|\\Get\-Unconstrained\.ps1|\\Get\-USBKeystrokes\.ps1|\\Get\-VaultCredential\.ps1|\\Get\-VulnAutoRun\.ps1|\\Get\-VulnSchTask\.ps1|\\Get\-WebConfig\.ps1|\\Get\-WebCredentials\.ps1|\\Get\-WLAN\-Keys\.ps1|\\Gupt\-Backdoor\.ps1|\\HTTP\-Backdoor\.ps1|\\HTTP\-Login\.ps1|\\Install\-ServiceBinary\.ps1|\\Install\-SSP\.ps1|\\Invoke\-ACLScanner\.ps1|\\Invoke\-ADSBackdoor\.ps1|\\Invoke\-AmsiBypass\.ps1|\\Invoke\-ARPScan\.ps1|\\Invoke\-BackdoorLNK\.ps1|\\Invoke\-BadPotato\.ps1|\\Invoke\-BetterSafetyKatz\.ps1|\\Invoke\-BruteForce\.ps1|\\Invoke\-BypassUAC\.ps1|\\Invoke\-Carbuncle\.ps1|\\Invoke\-Certify\.ps1|\\Invoke\-ConPtyShell\.ps1|\\Invoke\-CredentialInjection\.ps1|\\Invoke\-CredentialsPhish\.ps1|\\Invoke\-DAFT\.ps1|\\Invoke\-DCSync\.ps1|\\Invoke\-Decode\.ps1|\\Invoke\-DinvokeKatz\.ps1|\\Invoke\-DllInjection\.ps1|\\Invoke\-DNSExfiltrator\.ps1|\\Invoke\-DNSUpdate\.ps1|\\Invoke\-DowngradeAccount\.ps1|\\Invoke\-EgressCheck\.ps1|\\Invoke\-Encode\.ps1|\\Invoke\-EventViewer\.ps1|\\Invoke\-Eyewitness\.ps1|\\Invoke\-FakeLogonScreen\.ps1|\\Invoke\-Farmer\.ps1|\\Invoke\-Get\-RBCD\-Threaded\.ps1|\\Invoke\-Gopher\.ps1|\\Invoke\-Grouper2\.ps1|\\Invoke\-Grouper3\.ps1|\\Invoke\-HandleKatz\.ps1|\\Invoke\-Interceptor\.ps1|\\Invoke\-Internalmonologue\.ps1|\\Invoke\-Inveigh\.ps1|\\Invoke\-InveighRelay\.ps1|\\Invoke\-JSRatRegsvr\.ps1|\\Invoke\-JSRatRundll\.ps1|\\Invoke\-KrbRelay\.ps1|\\Invoke\-KrbRelayUp\.ps1|\\Invoke\-LdapSignCheck\.ps1|\\Invoke\-Lockless\.ps1|\\Invoke\-MalSCCM\.ps1|\\Invoke\-Mimikatz\.ps1|\\Invoke\-MimikatzWDigestDowngrade\.ps1|\\Invoke\-Mimikittenz\.ps1|\\Invoke\-MITM6\.ps1|\\Invoke\-NanoDump\.ps1|\\Invoke\-NetRipper\.ps1|\\Invoke\-NetworkRelay\.ps1|\\Invoke\-NinjaCopy\.ps1|\\Invoke\-OxidResolver\.ps1|\\Invoke\-P0wnedshell\.ps1|\\Invoke\-P0wnedshellx86\.ps1|\\Invoke\-Paranoia\.ps1|\\Invoke\-PortScan\.ps1|\\Invoke\-PoshRatHttp\.ps1|\\Invoke\-PoshRatHttps\.ps1|\\Invoke\-PostExfil\.ps1|\\Invoke\-PowerDump\.ps1|\\Invoke\-PowerDPAPI\.ps1|\\Invoke\-PowerShellIcmp\.ps1|\\Invoke\-PowerShellTCP\.ps1|\\Invoke\-PowerShellTcpOneLine\.ps1|\\Invoke\-PowerShellTcpOneLineBind\.ps1|\\Invoke\-PowerShellUdp\.ps1|\\Invoke\-PowerShellUdpOneLine\.ps1|\\Invoke\-PowerShellWMI\.ps1|\\Invoke\-PowerThIEf\.ps1|\\Invoke\-PPLDump\.ps1|\\Invoke\-Prasadhak\.ps1|\\Invoke\-PsExec\.ps1|\\Invoke\-PsGcat\.ps1|\\Invoke\-PsGcatAgent\.ps1|\\Invoke\-PSInject\.ps1|\\Invoke\-PsUaCme\.ps1|\\Invoke\-ReflectivePEInjection\.ps1|\\Invoke\-ReverseDNSLookup\.ps1|\\Invoke\-Rubeus\.ps1|\\Invoke\-RunAs\.ps1|\\Invoke\-SafetyKatz\.ps1|\\Invoke\-SauronEye\.ps1|\\Invoke\-SCShell\.ps1|\\Invoke\-Seatbelt\.ps1|\\Invoke\-ServiceAbuse\.ps1|\\Invoke\-SessionGopher\.ps1|\\Invoke\-ShellCode\.ps1|\\Invoke\-SMBScanner\.ps1|\\Invoke\-Snaffler\.ps1|\\Invoke\-Spoolsample\.ps1|\\Invoke\-SSHCommand\.ps1|\\Invoke\-SSIDExfil\.ps1|\\Invoke\-StandIn\.ps1|\\Invoke\-StickyNotesExtract\.ps1|\\Invoke\-Tater\.ps1|\\Invoke\-Thunderfox\.ps1|\\Invoke\-ThunderStruck\.ps1|\\Invoke\-TokenManipulation\.ps1|\\Invoke\-Tokenvator\.ps1|\\Invoke\-TotalExec\.ps1|\\Invoke\-UrbanBishop\.ps1|\\Invoke\-UserHunter\.ps1|\\Invoke\-VoiceTroll\.ps1|\\Invoke\-Whisker\.ps1|\\Invoke\-WinEnum\.ps1|\\Invoke\-winPEAS\.ps1|\\Invoke\-WireTap\.ps1|\\Invoke\-WmiCommand\.ps1|\\Invoke\-WScriptBypassUAC\.ps1|\\Invoke\-Zerologon\.ps1|\\Keylogger\.ps1|\\MailRaider\.ps1|\\New\-HoneyHash\.ps1|\\OfficeMemScraper\.ps1|\\Offline_Winpwn\.ps1|\\Out\-CHM\.ps1|\\Out\-DnsTxt\.ps1|\\Out\-Excel\.ps1|\\Out\-HTA\.ps1|\\Out\-Java\.ps1|\\Out\-JS\.ps1|\\Out\-Minidump\.ps1|\\Out\-RundllCommand\.ps1|\\Out\-SCF\.ps1|\\Out\-SCT\.ps1|\\Out\-Shortcut\.ps1|\\Out\-WebQuery\.ps1|\\Out\-Word\.ps1|\\Parse_Keys\.ps1|\\Port\-Scan\.ps1|\\PowerBreach\.ps1|\\powercat\.ps1|\\Powermad\.ps1|\\PowerRunAsSystem\.psm1|\\PowerSharpPack\.ps1|\\PowerUp\.ps1|\\PowerUpSQL\.ps1|\\PowerView\.ps1|\\PSAsyncShell\.ps1|\\RemoteHashRetrieval\.ps1|\\Remove\-Persistence\.ps1|\\Remove\-PoshRat\.ps1|\\Remove\-Update\.ps1|\\Run\-EXEonRemote\.ps1|\\Schtasks\-Backdoor\.ps1|\\Set\-DCShadowPermissions\.ps1|\\Set\-MacAttribute\.ps1|\\Set\-RemotePSRemoting\.ps1|\\Set\-RemoteWMI\.ps1|\\Set\-Wallpaper\.ps1|\\Show\-TargetScreen\.ps1|\\Speak\.ps1|\\Start\-CaptureServer\.ps1|\\Start\-WebcamRecorder\.ps1|\\StringToBase64\.ps1|\\TexttoExe\.ps1|\\Veeam\-Get\-Creds\.ps1|\\VolumeShadowCopyTools\.ps1|\\WinPwn\.ps1|\\WSUSpendu\.ps1)$
+- name: '[Sigma] Malicious PowerShell Scripts - FileCreation'
+  tag: attack.execution,attack.t1059.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)Invoke\-Sharp
+- name: '[Sigma] Malicious PowerShell Scripts - FileCreation'
+  tag: attack.execution,attack.t1059.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\.ps1$
+- name: '[Sigma] Potential Startup Shortcut Persistence Via PowerShell.EXE'
+  tag: attack.privilege-escalation,attack.persistence,attack.t1547.001
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(\\powershell\.exe|\\pwsh\.exe)$
+- name: '[Sigma] Potential Startup Shortcut Persistence Via PowerShell.EXE'
+  tag: attack.privilege-escalation,attack.persistence,attack.t1547.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\start\ menu\\programs\\startup\\
+- name: '[Sigma] Potential Startup Shortcut Persistence Via PowerShell.EXE'
+  tag: attack.privilege-escalation,attack.persistence,attack.t1547.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\.lnk$
+- name: '[Sigma] .RDP File Created By Uncommon Application'
+  tag: attack.defense-evasion
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\.rdp$
+- name: '[Sigma] .RDP File Created By Uncommon Application'
+  tag: attack.defense-evasion
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(\\brave\.exe|\\CCleaner\ Browser\\Application\\CCleanerBrowser\.exe|\\chromium\.exe|\\firefox\.exe|\\Google\\Chrome\\Application\\chrome\.exe|\\iexplore\.exe|\\microsoftedge\.exe|\\msedge\.exe|\\Opera\.exe|\\Vivaldi\.exe|\\Whale\.exe|\\olk\.exe|\\Outlook\.exe|\\RuntimeBroker\.exe|\\Thunderbird\.exe|\\Discord\.exe|\\Keybase\.exe|\\msteams\.exe|\\Slack\.exe|\\teams\.exe)$
+- name: '[Sigma] Potential Winnti Dropper Activity'
+  tag: attack.defense-evasion,attack.t1027
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\\gthread\-3\.6\.dll|\\sigcmm\-2\.4\.dll|\\Windows\\Temp\\tmp\.bat)$
+- name: '[Sigma] PDF File Created By RegEdit.EXE'
+  tag: attack.defense-evasion
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)\\regedit\.exe$
+- name: '[Sigma] PDF File Created By RegEdit.EXE'
+  tag: attack.defense-evasion
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\.pdf$
+- name: '[Sigma] Potential RipZip Attack on Startup Folder'
+  tag: attack.privilege-escalation,attack.persistence,attack.t1547
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\\Microsoft\\Windows\\Start\ Menu\\Programs\\Startup|\.lnk\.\{0AFACED1\-E828\-11D1\-9187\-B532F1E9575D\})
+- name: '[Sigma] Potential RipZip Attack on Startup Folder'
+  tag: attack.privilege-escalation,attack.persistence,attack.t1547
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)\\explorer\.exe$
+- name: '[Sigma] Potential SAM Database Dump'
+  tag: attack.credential-access,attack.t1003.002
+  score: 80
+  target: Full_Path
+  condition: regex
+  pattern: (?i)(\{'TargetFilename\|endswith':\ \['\\\\Temp\\\\sam',\ '\\\\sam\.sav',\
+    '\\\\Intel\\\\sam',\ '\\\\sam\.hive',\ '\\\\Perflogs\\\\sam',\ '\\\\ProgramData\\\\sam',\
+    '\\\\Users\\\\Public\\\\sam',\ '\\\\AppData\\\\Local\\\\sam',\ '\\\\AppData\\\\Roaming\\\\sam',\
+    '_ShadowSteal\.zip',\ '\\\\Documents\\\\SAM\.export',\ ':\\\\sam'\]\}|\{'TargetFilename\|contains':\
+    \['\\\\hive_sam_',\ '\\\\sam\.save',\ '\\\\sam\.export',\ '\\\\\~reg_sam\.save',\
+    '\\\\sam_backup',\ '\\\\sam\.bck',\ '\\\\sam\.backup'\]\})
+- name: '[Sigma] Windows Shell/Scripting Application File Write to Suspicious Folder'
+  tag: attack.execution,attack.t1059
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(\\bash\.exe|\\cmd\.exe|\\cscript\.exe|\\msbuild\.exe|\\powershell\.exe|\\pwsh\.exe|\\sh\.exe|\\wscript\.exe)$
+- name: '[Sigma] Windows Shell/Scripting Application File Write to Suspicious Folder'
+  tag: attack.execution,attack.t1059
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: ^(C:\\PerfLogs\\|C:\\Users\\Public\\)
+- name: '[Sigma] Windows Shell/Scripting Application File Write to Suspicious Folder'
+  tag: attack.execution,attack.t1059
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(\\certutil\.exe|\\forfiles\.exe|\\mshta\.exe|\\schtasks\.exe|\\scriptrunner\.exe|\\wmic\.exe)$
+- name: '[Sigma] Windows Shell/Scripting Application File Write to Suspicious Folder'
+  tag: attack.execution,attack.t1059
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(C:\\PerfLogs\\|C:\\Users\\Public\\|C:\\Windows\\Temp\\)
+- name: '[Sigma] Windows Binaries Write Suspicious Extensions'
+  tag: attack.defense-evasion,attack.t1036
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(\\csrss\.exe|\\lsass\.exe|\\RuntimeBroker\.exe|\\sihost\.exe|\\smss\.exe|\\wininit\.exe|\\winlogon\.exe)$
+- name: '[Sigma] Windows Binaries Write Suspicious Extensions'
+  tag: attack.defense-evasion,attack.t1036
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\.bat|\.dll|\.exe|\.hta|\.iso|\.ps1|\.txt|\.vbe|\.vbs)$
+- name: '[Sigma] Windows Binaries Write Suspicious Extensions'
+  tag: attack.defense-evasion,attack.t1036
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(\\dllhost\.exe|\\rundll32\.exe|\\svchost\.exe)$
+- name: '[Sigma] Windows Binaries Write Suspicious Extensions'
+  tag: attack.defense-evasion,attack.t1036
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\.bat|\.hta|\.iso|\.ps1|\.vbe|\.vbs)$
+- name: '[Sigma] Windows Binaries Write Suspicious Extensions'
+  tag: attack.defense-evasion,attack.t1036
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)C:\\Windows\\System32\\dllhost\.exe
+- name: '[Sigma] Windows Binaries Write Suspicious Extensions'
+  tag: attack.defense-evasion,attack.t1036
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(:\\Users\\|\\AppData\\Local\\Temp\\__PSScriptPolicyTest_)
+- name: '[Sigma] Windows Binaries Write Suspicious Extensions'
+  tag: attack.defense-evasion,attack.t1036
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\.ps1$
+- name: '[Sigma] Windows Binaries Write Suspicious Extensions'
+  tag: attack.defense-evasion,attack.t1036
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)C:\\Windows\\system32\\svchost\.exe
+- name: '[Sigma] Windows Binaries Write Suspicious Extensions'
+  tag: attack.defense-evasion,attack.t1036
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(C:\\Windows\\System32\\GroupPolicy\\DataStore\\|\\sysvol\\|\\Policies\\|\\Machine\\Scripts\\Startup\\)
+- name: '[Sigma] Windows Binaries Write Suspicious Extensions'
+  tag: attack.defense-evasion,attack.t1036
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\.ps1|\.bat)$
+- name: '[Sigma] Windows Binaries Write Suspicious Extensions'
+  tag: attack.defense-evasion,attack.t1036
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)C:\\Windows\\system32\\svchost\.exe
+- name: '[Sigma] Windows Binaries Write Suspicious Extensions'
+  tag: attack.defense-evasion,attack.t1036
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(C:\\Program\ Files\\WindowsApps\\Clipchamp|\.ps1)
+- name: '[Sigma] Windows Binaries Write Suspicious Extensions'
+  tag: attack.defense-evasion,attack.t1036
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(C:\\Windows\\system32\\svchost\.exe|C:\\Windows\\SysWOW64\\svchost\.exe)
+- name: '[Sigma] Windows Binaries Write Suspicious Extensions'
+  tag: attack.defense-evasion,attack.t1036
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: ^(C:\\Program\ Files\\WindowsApps\\Microsoft\.PowerShellPreview|C:\\Program\
+    Files\ \(x86\)\\WindowsApps\\Microsoft\.PowerShellPreview)
+- name: '[Sigma] Windows Binaries Write Suspicious Extensions'
+  tag: attack.defense-evasion,attack.t1036
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\.ps1$
+- name: '[Sigma] Suspicious Creation with Colorcpl'
+  tag: attack.defense-evasion,attack.t1564
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)\\colorcpl\.exe$
+- name: '[Sigma] Suspicious Creation with Colorcpl'
+  tag: attack.defense-evasion,attack.t1564
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\.icm|\.gmmp|\.cdmp|\.camp)$
+- name: '[Sigma] Suspicious Desktopimgdownldr Target File'
+  tag: attack.command-and-control,attack.t1105
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)\\svchost\.exe$
+- name: '[Sigma] Suspicious Desktopimgdownldr Target File'
+  tag: attack.command-and-control,attack.t1105
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\Personalization\\LockScreenImage\\
+- name: '[Sigma] Suspicious Desktopimgdownldr Target File'
+  tag: attack.command-and-control,attack.t1105
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)C:\\Windows\\
+- name: '[Sigma] Suspicious Desktopimgdownldr Target File'
+  tag: attack.command-and-control,attack.t1105
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\.jpg|\.jpeg|\.png)
+- name: '[Sigma] Suspicious Creation TXT File in User Desktop'
+  tag: attack.impact,attack.t1486
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)\\cmd\.exe$
+- name: '[Sigma] Suspicious Creation TXT File in User Desktop'
+  tag: attack.impact,attack.t1486
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\\Users\\|\\Desktop\\)
+- name: '[Sigma] Suspicious Creation TXT File in User Desktop'
+  tag: attack.impact,attack.t1486
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\.txt$
+- name: '[Sigma] Suspicious Double Extension Files'
+  tag: attack.defense-evasion,attack.t1036.007
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\.exe|\.iso|\.rar|\.svg|\.zip)$
+- name: '[Sigma] Suspicious Double Extension Files'
+  tag: attack.defense-evasion,attack.t1036.007
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\.doc\.|\.docx\.|\.gif\.|\.jpeg\.|\.jpg\.|\.mp3\.|\.mp4\.|\.pdf\.|\.png\.|\.ppt\.|\.pptx\.|\.rtf\.|\.svg\.|\.txt\.|\.xls\.|\.xlsx\.)
+- name: '[Sigma] Suspicious Double Extension Files'
+  tag: attack.defense-evasion,attack.t1036.007
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\.rar\.exe|\.zip\.exe)$
+- name: '[Sigma] DPAPI Backup Keys And Certificate Export Activity IOC'
+  tag: attack.credential-access,attack.t1555,attack.t1552.004
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(ntds_capi_|ntds_legacy_|ntds_unknown_)
+- name: '[Sigma] DPAPI Backup Keys And Certificate Export Activity IOC'
+  tag: attack.credential-access,attack.t1555,attack.t1552.004
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\.cer|\.key|\.pfx|\.pvk)$
+- name: '[Sigma] Suspicious MSExchangeMailboxReplication ASPX Write'
+  tag: attack.initial-access,attack.t1190,attack.persistence,attack.t1505.003
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)\\MSExchangeMailboxReplication\.exe$
+- name: '[Sigma] Suspicious MSExchangeMailboxReplication ASPX Write'
+  tag: attack.initial-access,attack.t1190,attack.persistence,attack.t1505.003
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\.aspx|\.asp)$
+- name: '[Sigma] Suspicious Executable File Creation'
+  tag: attack.defense-evasion,attack.t1564
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(:\\\$Recycle\.Bin\.exe|:\\Documents\ and\ Settings\.exe|:\\MSOCache\.exe|:\\PerfLogs\.exe|:\\Recovery\.exe|\.bat\.exe|\.sys\.exe)$
+- name: '[Sigma] Suspicious Get-Variable.exe Creation'
+  tag: attack.privilege-escalation,attack.persistence,attack.t1546,attack.defense-evasion,attack.t1027
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)Local\\Microsoft\\WindowsApps\\Get\-Variable\.exe$
+- name: '[Sigma] Legitimate Application Dropped Archive'
+  tag: attack.defense-evasion,attack.t1218
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(\\winword\.exe|\\excel\.exe|\\powerpnt\.exe|\\msaccess\.exe|\\mspub\.exe|\\eqnedt32\.exe|\\visio\.exe|\\wordpad\.exe|\\wordview\.exe|\\certutil\.exe|\\certoc\.exe|\\CertReq\.exe|\\Desktopimgdownldr\.exe|\\esentutl\.exe|\\finger\.exe|\\notepad\.exe|\\AcroRd32\.exe|\\RdrCEF\.exe|\\mshta\.exe|\\hh\.exe)$
+- name: '[Sigma] Legitimate Application Dropped Archive'
+  tag: attack.defense-evasion,attack.t1218
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\.zip|\.rar|\.7z|\.diagcab|\.appx)$
+- name: '[Sigma] Legitimate Application Dropped Executable'
+  tag: attack.defense-evasion,attack.t1218
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(\\eqnedt32\.exe|\\wordpad\.exe|\\wordview\.exe|\\certutil\.exe|\\certoc\.exe|\\CertReq\.exe|\\Desktopimgdownldr\.exe|\\esentutl\.exe|\\mshta\.exe|\\AcroRd32\.exe|\\RdrCEF\.exe|\\hh\.exe|\\finger\.exe)$
+- name: '[Sigma] Legitimate Application Dropped Executable'
+  tag: attack.defense-evasion,attack.t1218
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\.exe|\.dll|\.ocx)$
+- name: '[Sigma] Legitimate Application Dropped Script'
+  tag: attack.defense-evasion,attack.t1218
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(\\eqnedt32\.exe|\\wordpad\.exe|\\wordview\.exe|\\certutil\.exe|\\certoc\.exe|\\CertReq\.exe|\\Desktopimgdownldr\.exe|\\esentutl\.exe|\\mshta\.exe|\\AcroRd32\.exe|\\RdrCEF\.exe|\\hh\.exe|\\finger\.exe)$
+- name: '[Sigma] Legitimate Application Dropped Script'
+  tag: attack.defense-evasion,attack.t1218
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\.ps1|\.bat|\.vbs|\.scf|\.wsf|\.wsh)$
+- name: '[Sigma] Suspicious File Creation Activity From Fake Recycle.Bin Folder'
+  tag: attack.persistence,attack.defense-evasion
+  score: 80
+  target: Full_Path
+  condition: regex
+  pattern: (?i)(\{'Image\|contains':\ \['RECYCLERS\.BIN\\\\',\ 'RECYCLER\.BIN\\\\'\]\}|\{'TargetFilename\|contains':\
+    \['RECYCLERS\.BIN\\\\',\ 'RECYCLER\.BIN\\\\'\]\})
+- name: '[Sigma] Potential File Extension Spoofing Using Right-to-Left Override'
+  tag: attack.execution,attack.defense-evasion,attack.t1036.002
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\\u202e|\[U\+202E\])
+- name: '[Sigma] Potential File Extension Spoofing Using Right-to-Left Override'
+  tag: attack.execution,attack.defense-evasion,attack.t1036.002
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(3pm\.|4pm\.|cod\.|fdp\.|ftr\.|gepj\.|gnp\.|gpj\.|ism\.|lmth\.|nls\.|piz\.|slx\.|tdo\.|vsc\.|vwm\.|xcod\.|xslx\.|xtpp\.)
+- name: '[Sigma] Suspicious Startup Folder Persistence'
+  tag: attack.privilege-escalation,attack.execution,attack.t1204.002,attack.persistence,attack.t1547.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\Windows\\Start\ Menu\\Programs\\Startup\\
+- name: '[Sigma] Suspicious Startup Folder Persistence'
+  tag: attack.privilege-escalation,attack.execution,attack.t1204.002,attack.persistence,attack.t1547.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\.bat|\.cmd|\.dll|\.hta|\.jar|\.js|\.jse|\.msi|\.ps1|\.psd1|\.psm1|\.scr|\.url|\.vba|\.vbe|\.vbs|\.wsf)$
+- name: '[Sigma] Suspicious Interactive PowerShell as SYSTEM'
+  tag: attack.execution,attack.t1059.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(C:\\Windows\\System32\\config\\systemprofile\\AppData\\Roaming\\Microsoft\\Windows\\PowerShell\\PSReadLine\\ConsoleHost_history\.txt|C:\\Windows\\System32\\config\\systemprofile\\AppData\\Local\\Microsoft\\Windows\\PowerShell\\StartupProfileData\-Interactive)
+- name: '[Sigma] Suspicious Scheduled Task Write to System32 Tasks'
+  tag: attack.privilege-escalation,attack.persistence,attack.execution,attack.t1053
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\Windows\\System32\\Tasks
+- name: '[Sigma] Suspicious Scheduled Task Write to System32 Tasks'
+  tag: attack.privilege-escalation,attack.persistence,attack.execution,attack.t1053
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(\\AppData\\|C:\\PerfLogs|\\Windows\\System32\\config\\systemprofile)
+- name: '[Sigma] LiveKD Kernel Memory Dump File Created'
+  tag: attack.defense-evasion,attack.privilege-escalation
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)C:\\Windows\\livekd\.dmp
+- name: '[Sigma] LiveKD Driver Creation By Uncommon Process'
+  tag: attack.defense-evasion,attack.privilege-escalation
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)C:\\Windows\\System32\\drivers\\LiveKdD\.SYS
+- name: '[Sigma] LiveKD Driver Creation By Uncommon Process'
+  tag: attack.defense-evasion,attack.privilege-escalation
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(\\livekd\.exe|\\livek64\.exe)$
+- name: '[Sigma] Process Explorer Driver Creation By Non-Sysinternals Binary'
+  tag: attack.persistence,attack.privilege-escalation,attack.t1068
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\PROCEXP
+- name: '[Sigma] Process Explorer Driver Creation By Non-Sysinternals Binary'
+  tag: attack.persistence,attack.privilege-escalation,attack.t1068
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\.sys$
+- name: '[Sigma] Process Explorer Driver Creation By Non-Sysinternals Binary'
+  tag: attack.persistence,attack.privilege-escalation,attack.t1068
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(\\procexp\.exe|\\procexp64\.exe)$
+- name: '[Sigma] PSEXEC Remote Execution File Artefact'
+  tag: attack.lateral-movement,attack.privilege-escalation,attack.execution,attack.persistence,attack.t1136.002,attack.t1543.003,attack.t1570,attack.s0029
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: ^C:\\Windows\\PSEXEC\-
+- name: '[Sigma] PSEXEC Remote Execution File Artefact'
+  tag: attack.lateral-movement,attack.privilege-escalation,attack.execution,attack.persistence,attack.t1136.002,attack.t1543.003,attack.t1570,attack.s0029
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\.key$
+- name: '[Sigma] Potential Privilege Escalation Attempt Via .Exe.Local Technique'
+  tag: attack.defense-evasion,attack.persistence,attack.privilege-escalation
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: ^(C:\\Windows\\System32\\logonUI\.exe\.local|C:\\Windows\\System32\\werFault\.exe\.local|C:\\Windows\\System32\\consent\.exe\.local|C:\\Windows\\System32\\narrator\.exe\.local|C:\\Windows\\System32\\wermgr\.exe\.local)
+- name: '[Sigma] Potential Privilege Escalation Attempt Via .Exe.Local Technique'
+  tag: attack.defense-evasion,attack.persistence,attack.privilege-escalation
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\comctl32\.dll$
+- name: '[Sigma] LSASS Process Memory Dump Creation Via Taskmgr.EXE'
+  tag: attack.credential-access,attack.t1003.001
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(:\\Windows\\system32\\taskmgr\.exe|:\\Windows\\SysWOW64\\taskmgr\.exe)$
+- name: '[Sigma] LSASS Process Memory Dump Creation Via Taskmgr.EXE'
+  tag: attack.credential-access,attack.t1003.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\\AppData\\Local\\Temp\\|\\lsass|\.DMP)
+- name: '[Sigma] Hijack Legit RDP Session to Move Laterally'
+  tag: attack.command-and-control,attack.t1219.002
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)\\mstsc\.exe$
+- name: '[Sigma] Hijack Legit RDP Session to Move Laterally'
+  tag: attack.command-and-control,attack.t1219.002
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\Microsoft\\Windows\\Start\ Menu\\Programs\\Startup\\
+- name: '[Sigma] UAC Bypass Using Consent and Comctl32 - File'
+  tag: attack.defense-evasion,attack.privilege-escalation,attack.t1548.002
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: ^C:\\Windows\\System32\\consent\.exe\.@
+- name: '[Sigma] UAC Bypass Using Consent and Comctl32 - File'
+  tag: attack.defense-evasion,attack.privilege-escalation,attack.t1548.002
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\comctl32\.dll$
+- name: '[Sigma] UAC Bypass Using .NET Code Profiler on MMC'
+  tag: attack.defense-evasion,attack.privilege-escalation,attack.t1548.002
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: ^C:\\Users\\
+- name: '[Sigma] UAC Bypass Using .NET Code Profiler on MMC'
+  tag: attack.defense-evasion,attack.privilege-escalation,attack.t1548.002
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\AppData\\Local\\Temp\\pe386\.dll$
+- name: '[Sigma] UAC Bypass Using EventVwr'
+  tag: attack.defense-evasion,attack.privilege-escalation
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\\Microsoft\\Event\ Viewer\\RecentViews|\\Microsoft\\EventV\~1\\RecentViews)$
+- name: '[Sigma] UAC Bypass Using EventVwr'
+  tag: attack.defense-evasion,attack.privilege-escalation
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: ^(C:\\Windows\\System32\\|C:\\Windows\\SysWOW64\\)
+- name: '[Sigma] UAC Bypass Using IDiagnostic Profile - File'
+  tag: attack.execution,attack.defense-evasion,attack.privilege-escalation,attack.t1548.002
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)\\DllHost\.exe$
+- name: '[Sigma] UAC Bypass Using IDiagnostic Profile - File'
+  tag: attack.execution,attack.defense-evasion,attack.privilege-escalation,attack.t1548.002
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: ^C:\\Windows\\System32\\
+- name: '[Sigma] UAC Bypass Using IDiagnostic Profile - File'
+  tag: attack.execution,attack.defense-evasion,attack.privilege-escalation,attack.t1548.002
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\.dll$
+- name: '[Sigma] UAC Bypass Using IEInstal - File'
+  tag: attack.defense-evasion,attack.privilege-escalation,attack.t1548.002
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)C:\\Program\ Files\\Internet\ Explorer\\IEInstal\.exe
+- name: '[Sigma] UAC Bypass Using IEInstal - File'
+  tag: attack.defense-evasion,attack.privilege-escalation,attack.t1548.002
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: ^C:\\Users\\
+- name: '[Sigma] UAC Bypass Using IEInstal - File'
+  tag: attack.defense-evasion,attack.privilege-escalation,attack.t1548.002
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\AppData\\Local\\Temp\\
+- name: '[Sigma] UAC Bypass Using IEInstal - File'
+  tag: attack.defense-evasion,attack.privilege-escalation,attack.t1548.002
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)consent\.exe$
+- name: '[Sigma] UAC Bypass Using MSConfig Token Modification - File'
+  tag: attack.defense-evasion,attack.privilege-escalation,attack.t1548.002
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: ^C:\\Users\\
+- name: '[Sigma] UAC Bypass Using MSConfig Token Modification - File'
+  tag: attack.defense-evasion,attack.privilege-escalation,attack.t1548.002
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\AppData\\Local\\Temp\\pkgmgr\.exe$
+- name: '[Sigma] UAC Bypass Using NTFS Reparse Point - File'
+  tag: attack.defense-evasion,attack.privilege-escalation,attack.t1548.002
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: ^C:\\Users\\
+- name: '[Sigma] UAC Bypass Using NTFS Reparse Point - File'
+  tag: attack.defense-evasion,attack.privilege-escalation,attack.t1548.002
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\AppData\\Local\\Temp\\api\-ms\-win\-core\-kernel32\-legacy\-l1\.DLL$
+- name: '[Sigma] UAC Bypass Abusing Winsat Path Parsing - File'
+  tag: attack.defense-evasion,attack.privilege-escalation,attack.t1548.002
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: ^C:\\Users\\
+- name: '[Sigma] UAC Bypass Abusing Winsat Path Parsing - File'
+  tag: attack.defense-evasion,attack.privilege-escalation,attack.t1548.002
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)(\\AppData\\Local\\Temp\\system32\\winsat\.exe|\\AppData\\Local\\Temp\\system32\\winmm\.dll)$
+- name: '[Sigma] UAC Bypass Using Windows Media Player - File'
+  tag: attack.defense-evasion,attack.privilege-escalation,attack.t1548.002
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: ^C:\\Users\\
+- name: '[Sigma] UAC Bypass Using Windows Media Player - File'
+  tag: attack.defense-evasion,attack.privilege-escalation,attack.t1548.002
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\AppData\\Local\\Temp\\OskSupport\.dll$
+- name: '[Sigma] UAC Bypass Using Windows Media Player - File'
+  tag: attack.defense-evasion,attack.privilege-escalation,attack.t1548.002
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)C:\\Windows\\system32\\DllHost\.exe
+- name: '[Sigma] UAC Bypass Using Windows Media Player - File'
+  tag: attack.defense-evasion,attack.privilege-escalation,attack.t1548.002
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)C:\\Program\ Files\\Windows\ Media\ Player\\osk\.exe
+- name: '[Sigma] Renamed VsCode Code Tunnel Execution - File Indicator'
+  tag: attack.command-and-control
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\code_tunnel\.json$
+- name: '[Sigma] Renamed VsCode Code Tunnel Execution - File Indicator'
+  tag: attack.command-and-control
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)(\\code\-tunnel\.exe|\\code\.exe)$
+- name: '[Sigma] Wmiexec Default Output File'
+  tag: attack.lateral-movement,attack.execution,attack.t1047
+  score: 100
+  target: Full_Path
+  condition: regex
+  pattern: (?i)(\{'TargetFilename\|re':\ '\\\\\\\\Windows\\\\\\\\__1\\\\d\{9\}\\\\\.\\\\d\{1,7\}\$'\}|\{'TargetFilename\|re':\
+    'C:\\\\\\\\__1\\\\d\{9\}\\\\\.\\\\d\{1,7\}\$'\}|\{'TargetFilename\|re':\ 'D:\\\\\\\\__1\\\\d\{9\}\\\\\.\\\\d\{1,7\}\$'\})
+- name: '[Sigma] Wmiprvse Wbemcomn DLL Hijack - File'
+  tag: attack.execution,attack.t1047,attack.lateral-movement,attack.t1021.002
+  score: 100
+  target: Target_Path
+  condition: regex
+  pattern: (?i)System
+- name: '[Sigma] Wmiprvse Wbemcomn DLL Hijack - File'
+  tag: attack.execution,attack.t1047,attack.lateral-movement,attack.t1021.002
+  score: 100
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)\\wbem\\wbemcomn\.dll$
+- name: '[Sigma] WMI Persistence - Script Event Consumer File Write'
+  tag: attack.privilege-escalation,attack.t1546.003,attack.persistence
+  score: 80
+  target: Target_Path
+  condition: regex
+  pattern: (?i)C:\\WINDOWS\\system32\\wbem\\scrcons\.exe
+- name: '[Sigma] UEFI Persistence Via Wpbbin - FileCreation'
+  tag: attack.persistence,attack.defense-evasion,attack.t1542.001
+  score: 80
+  target: Target_FileName
+  condition: regex
+  pattern: (?i)C:\\Windows\\System32\\wpbbin\.exe
+noise_filters: []

@@ -34,13 +34,13 @@ anti_forensics:
   - (?i)MpCmdRun.*-AddExclusion
   - (?i)bcdedit.*/set.*recoveryenabled.*no
   log_deletion:
-  - (?i)1102
-  - (?i)104
+  - (?i)\b1102\b
+  - (?i)\b104\b
   - (?i)wevtutil.*cl
   - (?i)clear-eventlog
   - (?i)clearev
-  - (?i)del.*\.evtx
-  - (?i)remove.*\.evtx
+  - (?i)\bdel\b.*\.evtx
+  - (?i)\bremove\b.*\.evtx
   - (?i)auditpol.*/clear
   tools:
     bcwipe.exe: BCWIPE_WIPING
@@ -613,9 +613,9 @@ privilege_escalation:
   - net user \S+ /add
   - net localgroup.*administrators.*/add
   - (?i)net\s+localgroup.*remote.*desktop.*/add
-  - (?i)4720
-  - (?i)4732
-  - (?i)4728
+  - (?i)\b4720\b
+  - (?i)\b4732\b
+  - (?i)\b4728\b
   - (?i)new-localuser
   - (?i)add-localgroupmember
 recon_indicators:

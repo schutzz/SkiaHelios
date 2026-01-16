@@ -585,7 +585,8 @@ class ChronosEngine:
         is_noise = is_noise | (is_tool_folder & (~is_protected))
 
         # CRITICALタグがついているものはノイズ判定を強制キャンセル
-        is_critical_context = pl.col("Threat_Tag").str.contains("CRITICAL")
+        # [FIX v8.0] 高脅威度タグ (METASPLOIT, COBALT, MIMIKATZ等) もバイパス対象に追加
+        is_critical_context = pl.col("Threat_Tag").str.contains("CRITICAL|METASPLOIT|COBALT|MIMIKATZ|EXPLOIT_FRAMEWORK|C2|SLIVER|HAVOC")
 
         df = df.with_columns([
             pl.when(is_noise & (~is_critical_context)) 
@@ -620,10 +621,16 @@ class ChronosEngine:
                   .alias("Anomaly_Extreme")
             ])
 
-            # Smart Filter: Keep valid dates OR extreme anomalies
+            # Smart Filter: Keep valid dates OR extreme anomalies OR HIGH-VALUE ARTIFACTS
+            # [FIX v8.2] Do NOT delete rows that already have high Threat_Score or critical tags
+            is_high_value = (
+                (pl.col("Threat_Score") >= 500) | 
+                pl.col("Threat_Tag").str.contains("METASPLOIT|COBALT|MIMIKATZ|EXPLOIT|C2|CRITICAL")
+            )
             lf = lf.filter(
                 (pl.col("si_dt").is_not_null() & pl.col("fn_dt").is_not_null()) | 
-                (pl.col("Anomaly_Extreme") != "")
+                (pl.col("Anomaly_Extreme") != "") |
+                is_high_value  # [FIX v8.2] High-value artifacts bypass timestamp filter
             )
 
             lf = lf.with_columns((pl.col("fn_dt") - pl.col("si_dt")).dt.total_seconds().fill_null(0).alias("diff_sec"))
@@ -646,16 +653,18 @@ class ChronosEngine:
                   .otherwise(pl.lit("")).alias("Anomaly_Zero")
             ])
             
+            # [FIX v9.0] Chronos_Score should PRESERVE existing Threat_Score from Sigma rules
+            # The old logic used .otherwise(0) which destroyed Sigma scores for files without timestamp anomalies
             score_expr = (
                 pl.when(pl.col("Anomaly_Time") == "CRITICAL_SYSTEM_ROLLBACK").then(300)
                 .when(pl.col("Threat_Tag") == "NOISE_ARTIFACT").then(0)
                 .when(pl.col("Threat_Tag") == "INFO_VM_TIME_SYNC").then(0)
                 .when(pl.col("Threat_Tag") == "INFO_NULL_TIMESTAMP").then(0)
-                .when(pl.col("Anomaly_Time") == "INFO_UPDATE_PATTERN").then(0) # [FIX] Score 0 for updates
+                .when(pl.col("Anomaly_Time") == "INFO_UPDATE_PATTERN").then(0)
                 .when(pl.col("Threat_Tag").str.contains("CRITICAL")).then(300) 
                 .when(pl.col("Anomaly_Time") == "CRITICAL_ARTIFACT").then(200)
-                .when(pl.col("Anomaly_Time") == "TIMESTOMP_BACKDATE").then(200) # [FIX] Score 200 for backdate
-                .otherwise(0)
+                .when(pl.col("Anomaly_Time") == "TIMESTOMP_BACKDATE").then(200)
+                .otherwise(pl.col("Threat_Score"))  # [FIX v9.0] Preserve existing Sigma score
             )
             lf = lf.with_columns(score_expr.alias("Chronos_Score"))
         else:
@@ -663,7 +672,8 @@ class ChronosEngine:
             lf = lf.with_columns([
                 pl.lit("").alias("Anomaly_Time"),
                 pl.lit("").alias("Anomaly_Zero"),
-                pl.lit(0).alias("Chronos_Score")
+                # [FIX v12.0] Preserve Threat_Score even if timestamps are missing
+                pl.col("Threat_Score").alias("Chronos_Score")
             ])
         
         return lf
@@ -672,7 +682,14 @@ class ChronosEngine:
         mode_str = "LEGACY" if args.legacy else "STANDARD"
         print(f"[*] Chronos v3.4 awakening... Mode: {mode_str}")
         try:
-            loader = ThemisLoader(["rules/triage_rules.yaml", "rules/sigma_file_event.yaml", "rules/intel_signatures.yaml"])
+            loader = ThemisLoader([
+                "rules/triage_rules.yaml",
+                "rules/sigma_file_event.yaml",
+                "rules/intel_signatures.yaml",
+                "rules/sigma_custom.yaml",      # [FIX] Critical tools (Metasploit, Mimikatz)
+                "rules/scoring_rules.yaml",     # [FIX] Centralized scoring rules
+                "rules/filter_rules.yaml"       # [FIX] Noise filters
+            ])
             lf = pl.read_csv(args.file, ignore_errors=True, infer_schema_length=0).lazy()
             
             # Normalize Columns
@@ -726,18 +743,25 @@ class ChronosEngine:
             # 3. [CRITICAL] Context-Aware Null Timestamp Check
             lf = self.check_null_timestamps(lf)
             
-            # 4. Themis脅威スコアリング
-            print("    -> Applying Themis Threat Scoring...")
+            # 4. Themis脅威スコアリング (FIRST)
+            # [FIX v8.1] Scoring MUST happen BEFORE safety filters
+            # so that Threat_Tag is populated for bypass checks
+            print("    -> Applying Themis Threat Scoring (Sigma)...")
             lf = loader.apply_threat_scoring(lf)
+            
+            print("    -> Applying Themis Context Scoring (Skia Rules)...")
+            lf = loader.apply_scoring_rules(lf)
+            
+            # [OPTIMIZED Action 2] Pre-Filtering (Noise Reduction)
+            # [FIX v8.1] Now runs AFTER scoring, so high-value tags can bypass
+            print("    -> [Optimized] Pre-Filtering Noise (Silverlight, Fontset, etc)...")
+            lf = self._apply_safety_filters(lf)
             
             if "Threat_Score" in lf.collect_schema().names():
                 lf = lf.with_columns(pl.col("Threat_Score").cast(pl.Int64, strict=False).fill_null(0))
 
             # 5. コンテキスト判定 (VM同期など)
             lf = self._detect_system_time_context(lf)
-
-            # 6. 安全フィルタ (ノイズ削除)
-            lf = self._apply_safety_filters(lf)
             
             # 7. MFT Timestomp 検知 (Extreme Future etc.)
             lf = self._detect_mft_timestomp(lf)
@@ -763,7 +787,11 @@ class ChronosEngine:
                         print(f"    [!] ShimCache Analysis Failed: {e}")
 
             # Results Consolidation
-            df = lf.filter(pl.col("Chronos_Score") > 0).collect()
+            # [OPTIMIZED v4.1] Use Streaming to prevent 1.5GB Memory Spike
+            # Also invoke GC to clear fragmentation from Themis builder
+            df = lf.filter(pl.col("Chronos_Score") > 0).collect(streaming=True)
+            import gc
+            gc.collect()
             
             # Logic A: Microburst Detection (Update Storm Filter)
             # Use 'SI_CreationTime' as it is guaranteed to exist in the output DF (string format)

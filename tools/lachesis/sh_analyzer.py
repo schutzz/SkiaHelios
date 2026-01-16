@@ -30,15 +30,17 @@ THREAT_BOOST_PATTERNS = [
     ("r57", 800, "CRITICAL_WEBSHELL"),
     
     # [Feature 3] UNC Lateral Movement Tools
-    ("robocopy", 200, "FILE_COPY_TOOL"),
-    ("xcopy", 200, "FILE_COPY_TOOL"),
+    # [Fix] Admin Tool Tuning (Base Score Lowered, Context Boosted via adjust_score)
+    ("robocopy.exe", 50, "FILE_COPY_TOOL"),
+    ("xcopy.exe", 50, "FILE_COPY_TOOL"),
     ("dcode", 400, "FORENSIC_TOOL"),
-    ("wmic", 200, "WMI_EXECUTION"),
+    ("wmic.exe", 50, "WMI_EXECUTION"),
     # [FIX] Refine "sync" to avoid OneDrive/SettingsSync noise
     ("sync.exe", 300, "SYSINTERNALS_SYNC"),
     ("sync64.exe", 300, "SYSINTERNALS_SYNC"),
     ("ssh-add", 900, "DATA_EXFIL"),
 ]
+
 
 # [Feature 3] UNC Lateral Movement Tool Patterns
 UNC_LATERAL_TOOLS = [
@@ -77,6 +79,7 @@ class LachesisAnalyzer:
         self.lang = lang
         self.txt = TEXT_RES[self.lang if self.lang in TEXT_RES else "jp"]
         self.visual_iocs = []
+        self.visual_iocs_hashes = set() # [OPTIMIZATION] O(1) Lookup
         self.pivot_seeds = []
         self.infra_ips_found = set()
         self.noise_stats = {}
@@ -87,7 +90,7 @@ class LachesisAnalyzer:
         self.path_penalties = context_scoring.get('path_penalties', [])
 
     @staticmethod
-    def adjust_score(path: str, base_score: int, penalties=None) -> tuple:
+    def adjust_score(path: str, base_score: int, penalties=None, command_line: str = "") -> tuple:
         adjusted = base_score
         tags = []
         path_lower = path.lower() if path else ""
@@ -144,6 +147,130 @@ class LachesisAnalyzer:
                 if any(sdir in path_lower for sdir in suspicious_dirs):
                     adjusted = max(adjusted, 500)
                     tags.append("SECURITY_TOOL_IN_USER_PATH")
+
+        # [User Request] Bonus for Suspicious Extensions in User Paths
+        # .lnk, .crx, .jar in Downloads/Desktop -> +200 Score
+        # This highlights potential Initial Access vectors or dropped tools.
+        target_exts = [".lnk", ".crx", ".jar"]
+        target_dirs = ["downloads", "desktop"]
+
+        if any(filename.endswith(ext) for ext in target_exts):
+             # Ensure we don't boost legitimate shortcuts in Start Menu (which might have 'desktop' in path rarely, but usually not)
+             # But here we look for "downloads" or "desktop" string in path.
+             if any(tdir in path_lower for tdir in target_dirs):
+                 adjusted += 200
+                 tags.append("SUSPICIOUS_USER_DOWNLOAD")
+
+        # [Case 6] Context-Aware Tool Scoring
+        # Prevent legitimate admin tools from flooding the timeline unless suspicious
+        cmd_lower = command_line.lower() if command_line else ""
+        
+        # Robocopy / Xcopy
+        if "robocopy" in filename or "xcopy" in filename:
+            # Boost only if sensitive/network paths involved
+            if "admin$" in cmd_lower or "c$" in cmd_lower or "\\\\" in cmd_lower:
+                adjusted = max(adjusted, 450)
+                tags.append("LATERAL_MOVEMENT_COPY")
+            if "backup" in cmd_lower or "archive" in cmd_lower:
+                adjusted = max(adjusted, 100) # Slightly higher but not critical
+                tags.append("BACKUP_ACTIVITY")
+
+        # WMIC
+        if "wmic" in filename:
+            if "process call create" in cmd_lower or "shadowcopy" in cmd_lower or "/node:" in cmd_lower:
+                adjusted = max(adjusted, 500)
+                tags.append("SUSPICIOUS_WMI")
+                if "shadowcopy" in cmd_lower: tags.append("SHADOW_COPY_TAMPERING")
+
+        
+        # [Final Noise Tuning] WinRM System Path Context Logic
+        if "winrm" in filename:
+            # If in System32/SysWOW64 and NO suspicious args -> Low Score
+            is_system_path = "system32" in path_lower or "syswow64" in path_lower
+            is_suspicious_arg = "http" in cmd_lower or "invoke" in cmd_lower or "-r" in cmd_lower
+            
+            if is_system_path and not is_suspicious_arg:
+                 # Likely Windows Update or Service Activity
+                 adjusted = min(adjusted, 40) 
+                 tags.append("WINRM_SYSTEM_SERVICE")
+
+        # ═══════════════════════════════════════════════════════════
+        # [Noise Reduction v2] Explicit Noise Filter (Tagging Strategy)
+        # ═══════════════════════════════════════════════════════════
+        
+        # A. Path-based Noise Tagging
+        noise_paths = [
+            "programdata\\chocolatey", "programdata\\microsoft\\windows defender",
+            "appdata\\local\\google\\chrome", "appdata\\local\\microsoft\\onedrive",
+            "windows\\diagnostics", "windows\\servicing",
+            "program files\\windowsapps", "windows\\systemapps",
+            "program files\\microsoft", "program files (x86)\\microsoft"
+        ]
+        if any(np in path_lower for np in noise_paths):
+            tags.append("SYSTEM_NOISE")
+            # Special Handling for Windows Temp (only if filename is also noisy)
+            # but user said 'Windows\Temp' is NOT bulk noise. So we rely on Filename whitelist below.
+
+        # B. Filename-based Whitelist (Regex)
+        noise_filename_patterns = [
+            r"^\.tmp$", r"^googlecrashhandler.*", r"^shapecollector.*", r"^tabtip.*",
+            r"^mpcmdrun\.exe", r"^msmpeng\.exe", r"^conhost\.exe", r"^searchindexer\.exe", r"^dllhost\.exe"
+        ]
+        if any(re.match(fp, filename, re.IGNORECASE) for fp in noise_filename_patterns):
+             tags.append("SYSTEM_NOISE")
+
+        # C. TIMESTOMP Tuning (Logic from User)
+        # Chocolatey related -> specific downscore
+        if "chocolatey" in path_lower:
+            adjusted = 100
+            if "SYSTEM_NOISE" not in tags: tags.append("SYSTEM_NOISE")
+        
+        # Diagnostic .ps1 -> specific downscore
+        if filename.endswith(".ps1") and "diagnostics" in path_lower:
+            adjusted = 100
+            if "SYSTEM_NOISE" not in tags: tags.append("SYSTEM_NOISE")
+
+        # ═══════════════════════════════════════════════════════════
+
+        # [Final Noise Tuning] Sync Tool Dampening (msfeedssync, mobsync, cipher)
+        # Prevents these from being flagged as TIMESTOMP unless score is very high
+        sync_tools = ["msfeedssync.exe", "mobsync.exe", "tzsync.exe", "cipher.exe", "microsoft.uev.synccontroller.exe"]
+        if filename in sync_tools:
+             is_system_path = "system32" in path_lower or "syswow64" in path_lower
+             # If no suspicious args/paths, force score low to fail TIMESTOMP filter
+             if is_system_path:
+                 adjusted = min(adjusted, 250) 
+                 tags.append("SYSTEM_SYNC_PROCESS")
+
+        # [User Request] LOLBins Context Bonus (Post-Dampening Boost)
+        # robocopy, xcopy, cipher, vssadmin, bitsadmin
+        # If suspicious args or location -> +300 Score (Overrides dampening)
+        target_lolbins = ["robocopy", "xcopy", "cipher", "vssadmin", "bitsadmin"]
+        suspicious_args = ["/wipe", "shadow", "transfer", "download", "upload", "-r", "job"]
+
+        if any(bin_name in filename for bin_name in target_lolbins):
+            is_suspicious_context = False
+            
+            # 1. Args Check
+            if any(arg in cmd_lower for arg in suspicious_args):
+                is_suspicious_context = True
+                tags.append("SUSPICIOUS_ARGS")
+                
+            # 2. Users Dir Check (excluding system32 to avoid FP on admins running tools)
+            if "users" in path_lower and "system32" not in path_lower: 
+                 is_suspicious_context = True
+                 tags.append("LOLBIN_IN_USER_PATH")
+                 
+            # Apply Bonus
+            if is_suspicious_context:
+                adjusted += 300
+                tags.append("CONTEXT_BOOST_HIGH")
+        
+        # [Final Noise Tuning] Puppet/Ruby Test File Filter
+        if "test" in path_lower or "vendor" in path_lower:
+            if "callback" in filename or "indent" in filename:
+                adjusted = min(adjusted, 50) # Reduce from 300 -> 50
+                tags.append("DEV_TEST_FILE")
         
         return adjusted, tags
 
@@ -177,6 +304,26 @@ class LachesisAnalyzer:
         score = int(ioc.get("Score", 0) or 0)
         norm_path = check_val.replace("/", "\\").replace(".\\", "").replace("\\\\", "\\")
 
+        # ═══════════════════════════════════════════════════════════
+        # [Case 6] STRICT NOISE FILTER (Killer Rule Integration)
+        # ═══════════════════════════════════════════════════════════
+        # 1. Regex Definitions
+        ps1_noise = r"(?i)^((rs|ts|rc|cl|vf|mf)_.*\.ps1$|.*chocolatey.*\.ps1$|.*\.tests\.ps1$|^(describe|mock|should|context|pester.*)\.ps1$)"
+        app_noise = r"(?i)^(googleupdate.*|chrome|chrmstp|notification_helper|onedrive.*|filecoauth|msmpeng|mpcmdrun|nissrv|shimgen|checksum)\.exe$"
+        sys_noise = r"(?i)^(pagefile|swapfile|wd(boot|filter|nisdrv))\.sys$"
+        cmd_noise = r"(?i)^(collectsynclogs|onedrivepersonal)\.(bat|cmd)$"
+        misc_noise = r"(?i).*\.(ignore|manifest)$"
+        
+        fn_only = fname.split("\\")[-1]
+        
+        if re.match(ps1_noise, fn_only) or re.match(app_noise, fn_only) or re.match(sys_noise, fn_only) or re.match(cmd_noise, fn_only) or re.match(misc_noise, fn_only):
+             # 2. Safety Net: Keep if in suspicious user paths
+             suspicious_paths = ["\\downloads\\", "\\temp\\", "appdata\\local\\temp"]
+             if any(x in norm_path for x in suspicious_paths):
+                 pass # Keep (Risk of Masquerade)
+             else:
+                 return True # KILL (It's Noise)
+
         # [Feature 2] Expanded RECON_KEYWORDS for phpMyAdmin/phpinfo detection
         RECON_KEYWORDS = [
             "xampp", "phpmyadmin", "admin", "dashboard", "kibana", 
@@ -196,7 +343,8 @@ class LachesisAnalyzer:
         # [FIX] Extended noise extensions to reduce false positives
         noise_exts = [
             ".mui", ".nls", ".dll", ".sys", ".jpg", ".png", ".gif", ".ico", ".xml", ".dat",
-            ".odl", ".admx", ".adml", ".svg", ".rb", ".provxml", ".cdxml", ".man"  # [Noise Fix] Added
+            ".odl", ".admx", ".adml", ".svg", ".rb", ".provxml", ".cdxml", ".man",
+            ".pak"  # [Case 6 Fix] Chrome pak files
         ]
         system_resource_paths = [
             "windows\\system32", 
@@ -205,6 +353,10 @@ class LachesisAnalyzer:
             "windows\\branding\\",
             "program files\\windowsapps",
             "programdata\\microsoft\\windows\\systemdata",
+            # [Final Noise Tuning] Update Garbage Paths
+            "softwaredistribution",
+            "provisioning",
+            "onedrive\\setup\\logs"
         ]
         browser_cache_paths = [
             "appdata\\local\\microsoft\\windows\\inetcache",
@@ -213,6 +365,14 @@ class LachesisAnalyzer:
             "content.ie5",
         ]
         
+        # [Final Noise Tuning] Chrome Default Apps Whitelist
+        if ".crx" in fname and "default_apps" in norm_path and "chrome" in norm_path:
+            return True
+            
+        # [Final Noise Tuning] OpenSSH Manual Filter
+        if "openssh" in norm_path and ("manual" in norm_path or ".htm" in fname):
+            return True
+
         if any(fname.endswith(ext) for ext in noise_exts):
             critical_tags = ["RECON", "EXFIL", "MASQUERADE", "SCREENSHOT", "LATERAL"]
             if any(t in tags for t in critical_tags):
@@ -330,11 +490,12 @@ class LachesisAnalyzer:
                 t_val = ev.get('Time') or ev.get('Ghost_Time_Hint') or ev.get('Last_Executed_Time')
                 dt = self.enricher.parse_time_safe(t_val)
                 if dt and dt.year >= 2000:  
-                    high_crit_times.append(dt)
+                    high_crit_times.append((dt, chk_score))
 
         self.visual_iocs = []
         self._extract_visual_iocs_from_pandora(dfs)
         self._extract_visual_iocs_from_timeline(dfs) 
+        print(f"[DEBUG-ANALYZER] Visual IOCs after Timeline: {len(self.visual_iocs)}")
         self._extract_visual_iocs_from_chronos(dfs)
         self._extract_visual_iocs_from_aion(dfs)
         self._extract_visual_iocs_from_plutos_srum(dfs)
@@ -350,6 +511,17 @@ class LachesisAnalyzer:
             analysis_result["verdict_flags"] = flags
             analysis_result["lateral_summary"] = summary
         
+        # ═══════════════════════════════════════════════════════════
+        # [The Reaper] Final Noise Filter (Polars Logic Adaptation)
+        # Drop items with Score < 400 AND Tag "SYSTEM_NOISE"
+        # ═══════════════════════════════════════════════════════════
+        before_reaper = len(self.visual_iocs)
+        self.visual_iocs = [
+            ioc for ioc in self.visual_iocs
+            if not (int(ioc.get('Score', 0) or 0) < 400 and "SYSTEM_NOISE" in str(ioc.get('Tag', '')))
+        ]
+        print(f"[THE REAPER] Culled {before_reaper - len(self.visual_iocs)} noise artifacts.")
+        
         self._generate_pivot_seeds()
         
         force_include_types = [
@@ -361,14 +533,36 @@ class LachesisAnalyzer:
             if any(k in ioc_type for k in force_include_types):
                 ioc_time = ioc.get("Time", "")
                 dt = self.enricher.parse_time_safe(ioc_time)
+                # Parse score for Recency Check
+                try: ioc_score = int(ioc.get("Score", 0) or 0)
+                except: ioc_score = 0
+                
                 if dt and dt.year >= 2000:
-                    high_crit_times.append(dt)
+                    high_crit_times.append((dt, ioc_score))
+
+        # [Case 6 Fix] Recency Logic for Analysis Range (Score-Aware)
+        # Prevent ancient artifacts (2011, etc.) from skewing the report timeline,
+        # UNLESS they are High Criticality (Score >= 900).
+        valid_times = []
+        if high_crit_times:
+            # Sort by date
+            high_crit_times = sorted([t for t in high_crit_times if t[0] is not None], key=lambda x: x[0])
+            
+            if high_crit_times:
+                max_dt = high_crit_times[-1][0]
+                cutoff_dt = max_dt - timedelta(days=730) # 2 years
+                
+                # Keep if Recent OR Critical
+                valid_times = [t[0] for t in high_crit_times if (t[0] >= cutoff_dt) or (t[1] >= 900)]
+                
+                # If we filtered everything (unlikely), fallback to last 30 days of max
+                if not valid_times:
+                     valid_times = [max_dt]
 
         time_range = "Unknown Range (No Critical Events)"
-        if high_crit_times:
-            high_crit_times = sorted(set(high_crit_times))
-            core_start = min(high_crit_times) - timedelta(hours=3)
-            core_end = max(high_crit_times) + timedelta(hours=3)
+        if valid_times:
+            core_start = min(valid_times) - timedelta(hours=3)
+            core_end = max(valid_times) + timedelta(hours=3)
             time_range = f"{core_start.strftime('%Y-%m-%d %H:%M')} 〜 {core_end.strftime('%Y-%m-%d %H:%M')} (UTC)"
         
         self._correlate_antiforensics_and_user_creation()
@@ -448,8 +642,11 @@ class LachesisAnalyzer:
 
     def _extract_visual_iocs_from_timeline(self, dfs):
         timeline_df = dfs.get('Timeline')
+        print(f"[DEBUG-ANALYZER] Timeline Type: {type(timeline_df)}")
         if timeline_df is not None:
+            print(f"[DEBUG-ANALYZER] Timeline DF rows: {timeline_df.height} Columns: {timeline_df.columns[:5]}")
             # [Feature 3] Enhanced with UNC Lateral Movement Tools
+            # Tuple Format: (Pattern, Tag, Score, Match_Mode[Optional default="partial"])
             HIGH_VALUE_PATTERNS = [
                 ("putty", "REMOTE_ACCESS", 300),
                 ("winscp", "REMOTE_ACCESS", 300),
@@ -459,23 +656,79 @@ class LachesisAnalyzer:
                 ("dd.exe", "DATA_EXFIL", 200),
                 ("ssh-add", "DATA_EXFIL", 200),
                 # [Feature 3] Lateral Movement Tools
-                ("robocopy", "FILE_COPY_TOOL", 200),
-                ("xcopy", "FILE_COPY_TOOL", 200),
+                ("robocopy.exe", "FILE_COPY_TOOL", 50),
+                ("xcopy.exe", "FILE_COPY_TOOL", 50),
                 ("dcode", "FORENSIC_TOOL", 400),
-                ("wmic", "WMI_EXECUTION", 200),
+                ("wmic.exe", "WMI_EXECUTION", 50),
                 ("psexec", "LATERAL_MOVEMENT", 250),
                 ("plink", "REMOTE_ACCESS", 300),
-                ("sync", "SYNC_TOOL", 150),
+                # [FIX] Exact Match for Sync to avoid mobsync/tzsync noise
+                ("sync.exe", "SYSINTERNALS_SYNC", 150, "exact"),
+                ("sync64.exe", "SYSINTERNALS_SYNC", 150, "exact"),
+                ("sysinternals", "SYSINTERNALS_TOOL", 150),
             ]
             
-            for row in timeline_df.iter_rows(named=True):
+            # [Optimization] Construct Vectorized Filter for Pre-filtering
+            # Iterate only on rows that contain at least one pattern in FileName or Path
+            try:
+                patterns_list = [p[0] for p in HIGH_VALUE_PATTERNS]
+                # Escape patterns for regex
+                escaped_patterns = [re.escape(p) for p in patterns_list]
+                combined_regex = "(?i)(" + "|".join(escaped_patterns) + ")"
+                
+                
+                # Check column existence
+                cols = timeline_df.columns
+                f_col = None
+                for c in ["FileName", "Target_FileName", "File_Name", "Source_File", "Target_Path"]:
+                    if c in cols:
+                        f_col = c
+                        break
+                if not f_col: f_col = "FileName" # Fallback to avoid NoneType error, though likely will fail in filter if missing
+
+                p_col = None
+                for c in ["ParentPath", "Target_Path", "Path"]:
+                    if c in cols:
+                        p_col = c
+                        break
+                if not p_col: p_col = "Target_Path"
+                
+                # Filter Expression
+                # Only keep rows where FileName OR Path matches the combined regex
+                # UNC paths start with \\ (escaped as \\\\)
+                timeline_df_filtered = timeline_df.filter(
+                    pl.col(f_col).str.contains(combined_regex) | 
+                    pl.col(p_col).str.contains(combined_regex) |
+                    pl.col(p_col).str.starts_with(r"\\") 
+                )
+                print(f"[DEBUG-ANALYZER] Timeline High-Value Hits: {timeline_df_filtered.height} (Filtered from {timeline_df.height})")
+                
+                target_iter = timeline_df_filtered.iter_rows(named=True)
+            except Exception as e:
+                print(f"[!] Analyzer Optimization Failed: {e}. Fallback to full scan.")
+                target_iter = timeline_df.iter_rows(named=True)
+
+            for row in target_iter:
                 fname = str(row.get("Target_FileName") or row.get("FileName") or row.get("File_Name") or "").lower()
                 path = str(row.get("Target_Path") or row.get("ParentPath") or "").lower()
                 score = int(row.get("Score", 0))
                 
                 matched_pattern = False
-                for pattern, ioc_type, min_score in HIGH_VALUE_PATTERNS:
-                    if pattern in fname or pattern in path:
+                for entry in HIGH_VALUE_PATTERNS:
+                    pattern = entry[0]
+                    ioc_type = entry[1]
+                    min_score = entry[2]
+                    mode = entry[3] if len(entry) > 3 else "partial"
+
+                    is_hit = False
+                    if mode == "exact":
+                        # Exact Match: Filename must match exactly (ignoring path)
+                        if fname == pattern: is_hit = True
+                    else:
+                        # Partial Match: Contains in filename or path
+                        if pattern in fname or pattern in path: is_hit = True
+
+                    if is_hit:
                          is_unc = path.startswith("\\\\") and not path.startswith("\\\\?\\")
                          if is_unc:
                              ioc_type = "LATERAL_MOVEMENT"
@@ -946,16 +1199,19 @@ class LachesisAnalyzer:
 
         if self._is_noise(ioc_dict): return
         
-        for existing in self.visual_iocs:
-            if existing["Value"] == ioc_dict["Value"] and existing["Type"] == ioc_dict["Type"]: return
+        # [OPTIMIZATION] O(1) Hash Check
+        ioc_key = (ioc_dict.get("Value"), ioc_dict.get("Type"))
+        if ioc_key in self.visual_iocs_hashes: return
+        
+        self.visual_iocs_hashes.add(ioc_key)
         
         if "downloads" in path.lower():
              print(f"[DEBUG-DL] Path={path} Val={ioc_dict['Value']} Tags={tag}")
 
         if is_critical or "setmace" in path.lower():
-             print(f"[DEBUG-ADD] Adding IOC: {ioc_dict['Value']} Sc={ioc_dict.get('Score')} Path={ioc_dict.get('Path')} Crit={is_critical}")
-             with open("add_debug.log", "a", encoding="utf-8") as f:
-                 f.write(f"[ADD] Adding IOC: {ioc_dict['Value']} Sc={ioc_dict.get('Score')} Path={ioc_dict.get('Path')}\n")
+             # [PERFORMANCE FIX] Removed file I/O logging to prevent 78s stall
+             # print(f"[DEBUG-ADD] Adding IOC: {ioc_dict['Value']} (Reason: {tag})")
+             pass
                  
         self.visual_iocs.append(ioc_dict)
 
@@ -1015,7 +1271,50 @@ class LachesisAnalyzer:
         if "DUAL-USE" in reason or "DUAL_USE" in ioc_type:
             return True
         if "TIMESTOMP" in ioc_type:
-            return True
+            # [Case 6 Noise Fix] STRICT TIMESTOMP FILTERING
+            # Rule 1: Discard low confidence (Score <= 500)
+            score = int(ioc.get('Score', 0) or 0)
+            if score > 500 or "CRITICAL" in tag:
+                return True
+                
+            # Rule 2: Exception (Safety Net)
+            # Even if low score, KEEP if in suspicious path or high-risk extension
+            path_lower = str(ioc.get("Path", "")).lower()
+            val_lower = str(ioc.get("Value", "")).lower()
+            
+            # A. Path-based Rescue (Temp/Downloads)
+            # Fix: Raw strings cannot end with odd backslashes
+            suspicious_paths = ["\\downloads\\", "\\temp\\", "appdata\\local\\temp"]
+            if any(x in path_lower for x in suspicious_paths):
+                return True
+                
+
+                
+            # [Case 6 Noise Fix] STRICT NOISE FILTER (Killer Rule)
+            # Unified Regex for Windows Diagnostics, Chocolatey, Pester Tests, and App/Infra Noise
+            fn_lower = val_lower.split("\\")[-1]
+            
+            # 1. Script Noise (PS1)
+            ps1_noise = r"(?i)^((rs|ts|rc|cl|vf|mf)_.*\.ps1$|.*chocolatey.*\.ps1$|.*\.tests\.ps1$|^(describe|mock|should|context|pester.*)\.ps1$)"
+            
+            # 2. App/Infra Noise (Executables & Sys)
+            app_noise = r"(?i)^(googleupdate.*|chrome|chrmstp|notification_helper|onedrive.*|filecoauth|msmpeng|mpcmdrun|nissrv|shimgen|checksum)\.exe$"
+            sys_noise = r"(?i)^(pagefile|swapfile|wd(boot|filter|nisdrv))\.sys$"
+            cmd_noise = r"(?i)^(collectsynclogs|onedrivepersonal)\.(bat|cmd)$"
+            misc_noise = r"(?i).*\.(ignore|manifest)$"
+            
+            if re.match(ps1_noise, fn_lower) or re.match(app_noise, fn_lower) or re.match(sys_noise, fn_lower) or re.match(cmd_noise, fn_lower) or re.match(misc_noise, fn_lower):
+                 # EXCEPT if in Temp/Downloads (handled above by Path-based Rescue which runs first)
+                 # Double check: if Path Rescue didn't trigger, these are in system/safe paths -> KILL
+                 return False
+
+            # B. Extension-based Rescue (Scripts)
+            target_exts = [".ps1", ".bat", ".cmd", ".vbs", ".js", ".rb", ".py", ".sh"]
+            if any(val_lower.endswith(x) for x in target_exts):
+                return True
+                
+            return False  # Discard (Noise)
+            
         return False
     
     def generate_ioc_insight(self, ioc):

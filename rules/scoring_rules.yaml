@@ -1,0 +1,267 @@
+# ============================================================
+#  SkiaHelios Centralized Threat Scoring Rules
+#  scoring_rules.yaml v1.0
+#  Mission: Unified threat scores from sh_analyzer.py THREAT_BOOST_PATTERNS
+# ============================================================
+
+threat_scores:
+  # ═══════════════════════════════════════════════════════════════
+  # Anti-Forensics / Data Wiping (CRITICAL)
+  # ═══════════════════════════════════════════════════════════════
+  - pattern: "sdelete"
+    score: 600
+    tags: ["ANTI_FORENSICS", "WIPING"]
+    target: "Action"
+    match_mode: "contains"
+
+  - pattern: "ccleaner"
+    score: 500
+    tags: ["ANTI_FORENSICS", "CLEANER"]
+    target: "Action"
+    match_mode: "contains"
+
+  - pattern: "bcwipe"
+    score: 600
+    tags: ["ANTI_FORENSICS", "WIPING"]
+    target: "Action"
+    match_mode: "contains"
+
+  - pattern: "jetico"
+    score: 500
+    tags: ["ANTI_FORENSICS", "WIPING"]
+    target: "Action"
+    match_mode: "contains"
+
+  - pattern: "setmace"
+    score: 700
+    tags: ["ANTI_FORENSICS", "TIMESTOMP"]
+    target: "Action"
+    match_mode: "contains"
+
+  - pattern: "timestomp"
+    score: 700
+    tags: ["ANTI_FORENSICS", "TIMESTOMP"]
+    target: "Action"
+    match_mode: "contains"
+
+  - pattern: "cipher.exe"
+    score: 600
+    tags: ["ANTI_FORENSICS", "WIPING"]
+    target: "FileName"
+    match_mode: "contains"
+
+  - pattern: "vssadmin.exe"
+    score: 600
+    tags: ["ANTI_FORENSICS", "SHADOW_COPY_KILLER"]
+    target: "FileName"
+    match_mode: "contains"
+
+  # ═══════════════════════════════════════════════════════════════
+  # Credential Dumping
+  # ═══════════════════════════════════════════════════════════════
+  - pattern: "mimikatz"
+    score: 800
+    tags: ["CREDENTIAL_THEFT", "MIMIKATZ"]
+    target: "Action"
+    match_mode: "contains"
+
+  - pattern: "lazagne"
+    score: 700
+    tags: ["CREDENTIAL_THEFT", "LAZAGNE"]
+    target: "Action"
+    match_mode: "contains"
+
+  - pattern: "procdump"
+    score: 500
+    tags: ["CREDENTIAL_THEFT", "PROCDUMP"]
+    target: "Action"
+    match_mode: "contains"
+
+  - pattern: "hash_suite"
+    score: 500
+    tags: ["CREDENTIAL_THEFT", "HASH_CRACKER"]
+    target: "Action"
+    match_mode: "contains"
+
+  # ═══════════════════════════════════════════════════════════════
+  # Lateral Movement
+  # ═══════════════════════════════════════════════════════════════
+  - pattern: "psexec"
+    score: 400
+    tags: ["LATERAL_MOVEMENT", "PSEXEC"]
+    target: "Action"
+    match_mode: "contains"
+
+  - pattern: "wmiexec"
+    score: 500
+    tags: ["LATERAL_MOVEMENT", "IMPACKET"]
+    target: "Action"
+    match_mode: "contains"
+
+  - pattern: "secretsdump"
+    score: 700
+    tags: ["LATERAL_MOVEMENT", "IMPACKET", "CREDENTIAL_THEFT"]
+    target: "Action"
+    match_mode: "contains"
+
+  # ═══════════════════════════════════════════════════════════════
+  # Exploitation Frameworks
+  # ═══════════════════════════════════════════════════════════════
+  - pattern: "metasploit"
+    score: 500
+    tags: ["EXPLOIT_FRAMEWORK", "METASPLOIT"]
+    target: "FileName"
+    match_mode: "contains"
+
+  - pattern: "exploitable_back_door"
+    score: 600
+    tags: ["BACKDOOR", "CRITICAL"]
+    target: "FileName"
+    match_mode: "contains"
+
+  - pattern: "meterpreter"
+    score: 600
+    tags: ["C2", "METERPRETER"]
+    target: "FileName"
+    match_mode: "contains"
+
+  # ═══════════════════════════════════════════════════════════════
+  # Sysinternals / Admin Tools (Context-Aware)
+  # ═══════════════════════════════════════════════════════════════
+  - pattern: "sync.exe"
+    score: 150
+    tags: ["SYSINTERNALS_SYNC"]
+    target: "Action"
+    match_mode: "exact"
+
+  - pattern: "robocopy"
+    score: 100
+    tags: ["ADMIN_TOOL"]
+    target: "Action"
+    match_mode: "contains"
+
+  - pattern: "xcopy"
+    score: 100
+    tags: ["ADMIN_TOOL"]
+    target: "Action"
+    match_mode: "contains"
+
+  - pattern: "wmic"
+    score: 100
+    tags: ["ADMIN_TOOL"]
+    target: "Action"
+    match_mode: "contains"
+
+  # ═══════════════════════════════════════════════════════════════
+  # Remote Access / Tunneling
+  # ═══════════════════════════════════════════════════════════════
+  - pattern: "putty"
+    score: 300
+    tags: ["REMOTE_ACCESS", "SSH"]
+    target: "Action"
+    match_mode: "contains"
+
+  - pattern: "winscp"
+    score: 300
+    tags: ["REMOTE_ACCESS", "SSH"]
+    target: "Action"
+    match_mode: "contains"
+
+  - pattern: "pscp"
+    score: 300
+    tags: ["REMOTE_ACCESS", "SSH"]
+    target: "Action"
+    match_mode: "contains"
+
+  - pattern: "ssh-add"
+    score: 350
+    tags: ["REMOTE_ACCESS", "SSH"]
+    target: "Action"
+    match_mode: "contains"
+
+  - pattern: "chisel"
+    score: 500
+    tags: ["TUNNELING", "C2"]
+    target: "Action"
+    match_mode: "contains"
+
+  - pattern: "ngrok"
+    score: 400
+    tags: ["TUNNELING", "PROXY"]
+    target: "Action"
+    match_mode: "contains"
+
+  - pattern: "ligolo"
+    score: 500
+    tags: ["TUNNELING", "C2"]
+    target: "Action"
+    match_mode: "contains"
+
+  # ═══════════════════════════════════════════════════════════════
+  # Data Exfiltration
+  # ═══════════════════════════════════════════════════════════════
+  - pattern: "rclone"
+    score: 600
+    tags: ["EXFILTRATION", "CLOUD_SYNC"]
+    target: "Action"
+    match_mode: "contains"
+
+  - pattern: "megacmd"
+    score: 600
+    tags: ["EXFILTRATION", "CLOUD_SYNC"]
+    target: "Action"
+    match_mode: "contains"
+
+  # ═══════════════════════════════════════════════════════════════
+  # Recon / Scanning
+  # ═══════════════════════════════════════════════════════════════
+  - pattern: "nmap"
+    score: 200
+    tags: ["INTERNAL_RECON", "SCANNER"]
+    target: "Action"
+    match_mode: "contains"
+
+  - pattern: "sharphound"
+    score: 600
+    tags: ["INTERNAL_RECON", "BLOODHOUND"]
+    target: "Action"
+    match_mode: "contains"
+
+  - pattern: "bloodhound"
+    score: 600
+    tags: ["INTERNAL_RECON", "BLOODHOUND"]
+    target: "Action"
+    match_mode: "contains"
+
+  # ═══════════════════════════════════════════════════════════════
+  # Staging / Archive Tools
+  # ═══════════════════════════════════════════════════════════════
+  - pattern: "7za.exe"
+    score: 300
+    tags: ["STAGING", "ARCHIVE"]
+    target: "FileName"
+    match_mode: "contains"
+
+  - pattern: "7z.exe"
+    score: 300
+    tags: ["STAGING", "ARCHIVE"]
+    target: "FileName"
+    match_mode: "contains"
+
+  - pattern: "rar.exe"
+    score: 300
+    tags: ["STAGING", "ARCHIVE"]
+    target: "FileName"
+    match_mode: "contains"
+
+# ═══════════════════════════════════════════════════════════════
+# Context Boost Patterns (Admin Share Access)
+# ═══════════════════════════════════════════════════════════════
+context_boosts:
+  admin_share_keywords:
+    - "ADMIN$"
+    - "C$"
+    - "D$"
+    - "IPC$"
+  boost_score: 200
+  description: "Boost when accessing admin shares"

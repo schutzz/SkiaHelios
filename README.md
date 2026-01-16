@@ -145,6 +145,10 @@ graph TD
 * **Hestia (Gatekeeper):** Aggressive whitelisting of OS noise.
 * **Robust Noise Filter (v4.50):** Regex-based sanitization of `Windows\Notifications`, `INetCache`, and `Temp` folders to remove 99% of false positives.
 * **System File Whitelisting (v6.0):** Dynamically reduces scores for signed binaries in `System32` unless execution evidence (`UserAssist`) is present.
+* **[NEW] The Reaper (v6.5):** "The Nuclear Option" for noise.
+    * **System Noise:** Drops artifacts tagged `SYSTEM_NOISE` if Score < 400 (e.g. Defender updates, Chrome cache).
+    * **Timestomp Nuke:** Drops ANY `TIMESTOMP` artifact if Score < 500. Zero exceptions.
+    * **Recency Filter (Score-Aware):** Hides ancient artifacts (>2 years) unless they are Critical (Score >= 900).
 
 ### 4. Origin Tracing (Tartaros v4.1) - **[UPDATED]**
 * **Tartaros (The Adaptive Origin Tracer):** Connects isolated artifacts back to their source using advanced heuristics.
@@ -431,7 +435,18 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
 * [x] **v6.2:** **The Decoder (Obfuscation & ADS Hunter)**
 * [x] **v6.3:** **Grimoire Improvements (Temporal Boost & IOC Separation)**
 * [x] **v6.4:** **Operation Truth (Masquerade Hunter, SRUM Heat, & Anti-Wiper)**
-* [ ] **v6.5:** **Deep Exfil & Recon (Batch Access Detection & phpMyAdmin Hunter)** - *Planned*
+* **[NEW]** **The Reaper (Noise Elimination):**
+    * **Nuclear Option:** `TIMESTOMP` artifacts with Score < 500 are strictly deleted.
+    * **System Noise:** Artifacts tagged `KEY_NOISE` (Defender/Chrome/OneDrive) with Score < 400 are deleted.
+    * **Result:** 100% elimination of known metadata noise while preserving Critical threats.
+* **[NEW]** **Context Boosters:**
+    * **LOLBins Bonus:** `robocopy`, `xcopy`, `cipher`, `bitsadmin` get +300 Score if used with suspicious args (`/wipe`, `shadow`) or from `Users` dir.
+    * **Download/Desktop Bonus:** `.lnk`, `.crx`, `.jar` files in `Downloads` or `Desktop` get +200 Score.
+* **[NEW]** **Recency Filter (Score-Aware):**
+    * **Logic:** Timeline start date ignores old events (>2 years) UNLESS they are High Criticality (Score >= 900).
+    * **Effect:** 2011 noise is hidden, but 2016 Backdoor (Score 1600) remains visible.
+* **[Feature]** **Global Cleaning:** Refactored Renderer to apply noise filters *before* generating Tables/Stats/Timelines, ensuring consistency.
+* [ ] **v7.0:** **The Oracle (LLM Auto-Summarization & Chat)** - *Planned*
 * [ ] **v7.0:** **The Oracle (LLM Auto-Summarization & Chat)** - *Planned*
 
 ---

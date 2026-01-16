@@ -560,18 +560,27 @@ class PlutosGate:
             time_col = next((c for c in ["VisitTime", "LastWriteTimestamp"] if c in schema), "VisitTime")
             tag_col = next((c for c in ["Tag"] if c in schema), None)  # Check if ClioGet added Tags
             
-            # 1. Regex Construction
-            domain_pattern = "|".join([re.escape(d) for d in susp_domains])
-            term_pattern = "|".join(susp_terms) if susp_terms else r"(?!)" 
-            download_pattern = "|".join(susp_downloads) if susp_downloads else r"(?!)"
-            internal_pattern = "|".join([re.escape(k) for k in internal_recon_kws])
+            # 1. Regex Construction (Robust)
+            domain_pattern = "|".join([re.escape(d) for d in susp_domains]) if susp_domains else None
+            term_pattern = "|".join([re.escape(t) for t in susp_terms]) if susp_terms else None
+            download_pattern = "|".join([re.escape(d) for d in susp_downloads]) if susp_downloads else None
+            internal_pattern = "|".join([re.escape(k) for k in internal_recon_kws]) if internal_recon_kws else None
 
-            # Build Filter Expression - Match URL/Title patterns OR ClioGet Tag
-            filter_expr = (
-                pl.col(url_col).str.contains(f"(?i)({domain_pattern}|{term_pattern}|{download_pattern}|{internal_pattern})") |
-                pl.col(title_col).str.contains(f"(?i)({term_pattern}|{internal_pattern})")
-            )
+            # Build Filter Expression (Safe Construction)
+            filter_expr = pl.lit(False)
             
+            if domain_pattern:
+                filter_expr = filter_expr | pl.col(url_col).str.contains(f"(?i)({domain_pattern})")
+            
+            if term_pattern:
+                filter_expr = filter_expr | pl.col(url_col).str.contains(f"(?i)({term_pattern})") | pl.col(title_col).str.contains(f"(?i)({term_pattern})")
+                
+            if download_pattern:
+                filter_expr = filter_expr | pl.col(url_col).str.contains(f"(?i)({download_pattern})")
+
+            if internal_pattern:
+                filter_expr = filter_expr | pl.col(url_col).str.contains(f"(?i)({internal_pattern})") | pl.col(title_col).str.contains(f"(?i)({internal_pattern})")
+
             if tag_col:
                 filter_expr = filter_expr | pl.col(tag_col).str.contains("INTERNAL_RECON_WEB")
 
@@ -587,24 +596,24 @@ class PlutosGate:
                     
                     # Verdict Determination - Internal Recon takes priority
                     pl.when(
-                        pl.col(url_col).str.contains(f"(?i)({internal_pattern})") | 
+                        (pl.col(url_col).str.contains(f"(?i)({internal_pattern})") if internal_pattern else pl.lit(False)) | 
                         (pl.col(tag_col).str.contains("INTERNAL_RECON_WEB") if tag_col else pl.lit(False))
                     )
                     .then(pl.lit("INTERNAL_RECON_WEB"))
-                    .when(pl.col(url_col).str.contains(f"(?i)({domain_pattern})"))
+                    .when(pl.col(url_col).str.contains(f"(?i)({domain_pattern})") if domain_pattern else pl.lit(False))
                     .then(pl.lit("RECON_ACTIVITY"))
-                    .when(pl.col(url_col).str.contains(f"(?i)({download_pattern})"))
+                    .when(pl.col(url_col).str.contains(f"(?i)({download_pattern})") if download_pattern else pl.lit(False))
                     .then(pl.lit("RECON_SECTOOLS"))
                     .otherwise(pl.lit("RECON_EXFILTRATION"))
                     .alias("Plutos_Verdict"),
                     
                     # Score Assignment - [Feature 2] Internal Recon = 600 (High Priority)
                     pl.when(
-                        pl.col(url_col).str.contains(f"(?i)({internal_pattern})") | 
+                        (pl.col(url_col).str.contains(f"(?i)({internal_pattern})") if internal_pattern else pl.lit(False)) | 
                         (pl.col(tag_col).str.contains("INTERNAL_RECON_WEB") if tag_col else pl.lit(False))
                     )
                     .then(600)  # [Feature 2] Internal Recon is High Priority
-                    .when(pl.col(url_col).str.contains(f"(?i)({download_pattern})"))
+                    .when(pl.col(url_col).str.contains(f"(?i)({download_pattern})") if download_pattern else pl.lit(False))
                     .then(150) 
                     .when(pl.col(url_col).str.contains("(?i)exfiltrat"))
                     .then(120) 
