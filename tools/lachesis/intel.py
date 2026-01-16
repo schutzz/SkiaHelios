@@ -397,5 +397,5 @@ class IntelManager:
         """Returns tags that protect events from noise filtering."""
         return [
             "CRITICAL", "EVIL", "WEBSHELL", "RANSOM", "WIPE", 
-            "LATERAL", "MIMIKATZ", "EXFIL", "DEFACEMENT", "MALICIOUS"
+            "LATERAL", "MIMIKATZ", "EXFIL", "DEFACEMENT", "MALICIOUS", "STAGING_TOOL"
         ]

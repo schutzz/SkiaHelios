@@ -38,7 +38,11 @@ THREAT_BOOST_PATTERNS = [
     # [FIX] Refine "sync" to avoid OneDrive/SettingsSync noise
     ("sync.exe", 300, "SYSINTERNALS_SYNC"),
     ("sync64.exe", 300, "SYSINTERNALS_SYNC"),
-    ("ssh-add", 900, "DATA_EXFIL"),
+    # [Case 6] Metasploit & Staging
+    ("back_door.rb", 800, "METASPLOIT_SCRIPT"),
+    ("exploit.", 800, "METASPLOIT_FRAMEWORK"),
+    ("7za.exe", 600, "STAGING_TOOL"),
+    ("choco.exe", 400, "STAGING_TOOL"),
 ]
 
 
@@ -121,6 +125,38 @@ class LachesisAnalyzer:
             if pattern in path_lower:
                 adjusted += boost
                 tags.append(tag)
+        
+        # [Case 6] OpenSSH Documentation Noise Filter
+        if "openssh" in path_lower and ("manual" in path_lower or ".htm" in path_lower):
+            adjusted = 50  # Force low score for documentation
+            if "DATA_EXFIL" in tags:
+                tags.remove("DATA_EXFIL")
+            tags.append("DOCUMENTATION_NOISE")
+
+        # [Case 6] SSH-Add Safety Valve & Contextual Scoring
+        if "ssh-add" in filename:
+            # 1. Known Legitimate Path (Program Files/OpenSSH) - High Trust
+            if "program files" in path_lower and "openssh" in path_lower:
+                adjusted = 100 
+                new_tag = "LEGITIMATE_TOOL_PATH"
+                if "DATA_EXFIL" in tags: tags.remove("DATA_EXFIL")
+                tags.append(new_tag)
+                
+            # 2. Suspicious Context (User Profile/Temp) - High Threat
+            elif any(s in path_lower for s in ["users\\", "temp\\", "downloads", "desktop"]):
+                adjusted = max(adjusted, 900)
+                tags.append("DATA_EXFIL")
+                adjusted = max(adjusted, 900)
+                tags.append("DATA_EXFIL")
+                tags.append("SUSPICIOUS_PATH")
+                
+            # 3. Ambiguous/Unknown Path - Neutral/Low Score (Prevent FP)
+            # [Case 6 Fix] If path is just filename or unknown, cap score to prevent 2000+ FP
+            else:
+                 if adjusted > 500:
+                     print(f"[DEBUG-SSH] Capping ssh-add score: {adjusted} -> 450 (Path: {path})")
+                     adjusted = 450
+                     tags.append("AMBIGUOUS_PATH_CAP")
         
         # [Case 7] Masquerade Detection Logic
         filename = path_lower.split("\\")[-1]
@@ -662,10 +698,19 @@ class LachesisAnalyzer:
                 ("wmic.exe", "WMI_EXECUTION", 50),
                 ("psexec", "LATERAL_MOVEMENT", 250),
                 ("plink", "REMOTE_ACCESS", 300),
+<<<<<<< HEAD
                 # [FIX] Exact Match for Sync to avoid mobsync/tzsync noise
                 ("sync.exe", "SYSINTERNALS_SYNC", 150, "exact"),
                 ("sync64.exe", "SYSINTERNALS_SYNC", 150, "exact"),
                 ("sysinternals", "SYSINTERNALS_TOOL", 150),
+=======
+                ("sync", "SYNC_TOOL", 150),
+                # [Case 6] Metasploit & Staging
+                ("back_door.rb", "METASPLOIT_SCRIPT", 800),
+                ("exploit.", "METASPLOIT_FRAMEWORK", 800),
+                ("7za.exe", "STAGING_TOOL", 600),
+                ("choco.exe", "STAGING_TOOL", 400),
+>>>>>>> 7dcf25be3750f579d5703c6a87d8ef6c97ce252f
             ]
             
             # [Optimization] Construct Vectorized Filter for Pre-filtering
@@ -711,7 +756,7 @@ class LachesisAnalyzer:
             for row in target_iter:
                 fname = str(row.get("Target_FileName") or row.get("FileName") or row.get("File_Name") or "").lower()
                 path = str(row.get("Target_Path") or row.get("ParentPath") or "").lower()
-                score = int(row.get("Score", 0))
+                score = int(float(row.get("Score") or row.get("Threat_Score") or 0)) # [FIX] Handle Threat_Score column
                 
                 matched_pattern = False
                 for entry in HIGH_VALUE_PATTERNS:
@@ -828,6 +873,24 @@ class LachesisAnalyzer:
                     ioc['Insight'] = (ioc.get('Insight', '') + "\n\n" + insight).strip()
                 
                 print(f"    [!] Correlation Hit ({rule['id']}): {ioc_val} -> Score {ioc['Score']}")
+
+    def is_force_include_ioc(self, ioc):
+        """
+        [Fix] Force inclusion of specific tags even if score < 500.
+        Used by Renderer for Technical Findings generation.
+        """
+        tag = str(ioc.get("Tag", "")).upper()
+        typ = str(ioc.get("Type", "")).upper()
+        
+        FORCE_TAGS = [
+            "CRITICAL", "WEBSHELL", "RANSOM", "ROOTKIT", "C2",
+            "STAGING_TOOL", "METASPLOIT", "EXPLOIT", 
+            "LATERAL_MOVEMENT", "UNC_EXECUTION", "REMOTE_ACCESS"
+        ]
+        
+        if any(t in tag for t in FORCE_TAGS): return True
+        if any(t in typ for t in FORCE_TAGS): return True
+        return False
 
     def _extract_visual_iocs_from_chronos(self, dfs):
         if dfs.get('Chronos') is not None:
@@ -1197,7 +1260,9 @@ class LachesisAnalyzer:
         is_critical = "TIMESTOMP" in tag or "CRITICAL" in tag or "REMOTE_ACCESS" in tag or "LATERAL" in tag
         is_critical = is_critical or "SETMACE" in path or "PUTTY" in path
 
-        if self._is_noise(ioc_dict): return
+        # [Fix] Check Force Include BEFORE Noise Check
+        if not self.is_force_include_ioc(ioc_dict):
+             if self._is_noise(ioc_dict): return
         
         # [OPTIMIZATION] O(1) Hash Check
         ioc_key = (ioc_dict.get("Value"), ioc_dict.get("Type"))
@@ -1205,13 +1270,14 @@ class LachesisAnalyzer:
         
         self.visual_iocs_hashes.add(ioc_key)
         
-        if "downloads" in path.lower():
-             print(f"[DEBUG-DL] Path={path} Val={ioc_dict['Value']} Tags={tag}")
 
+<<<<<<< HEAD
         if is_critical or "setmace" in path.lower():
              # [PERFORMANCE FIX] Removed file I/O logging to prevent 78s stall
              # print(f"[DEBUG-ADD] Adding IOC: {ioc_dict['Value']} (Reason: {tag})")
              pass
+=======
+>>>>>>> 7dcf25be3750f579d5703c6a87d8ef6c97ce252f
                  
         self.visual_iocs.append(ioc_dict)
 
@@ -1267,6 +1333,9 @@ class LachesisAnalyzer:
         if any(k in reason for k in force_keywords):
             return True
         if any(k in tag for k in force_keywords):
+            return True
+        # [Case 6] Force Include 7za even if filtered
+        if "7za" in str(ioc.get('Value','')).lower():
             return True
         if "DUAL-USE" in reason or "DUAL_USE" in ioc_type:
             return True

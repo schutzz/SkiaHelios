@@ -185,6 +185,7 @@ execution_hunting:
     tasksche.exe: 400
     vmtoolsio.exe: 300
     vssadmin.exe: 150
+    7za.exe: 500
     wannacry.exe: 500
 internal_recon:
   patterns:
@@ -890,7 +891,11 @@ v53_watcher_config:
   - windows/assembly
   - windows/installer
   - windows/temp/cab_
-  - programdata/microsoft/windows/wer
+  - windows/programdata/microsoft/windows/wer
+  - windows/systemapps
+  - ./windows/systemapps
+  - .\\windows\\systemapps
+  - systemapps
   sensitive_extensions:
   - .docx
   - .xlsx

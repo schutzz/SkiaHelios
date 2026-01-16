@@ -57,9 +57,12 @@ class ChaosGrasp:
         if "opensavepidlmru" in fname: return "REG_OPENSAVEMRU"
         if "lastvisitedpidlmru" in fname: return "REG_LASTVISITEDMRU"
         if "userassist" in fname: return "USER_ASSIST"
-        if "prefetch" in fname: return "PREFETCH"
+        if "prefetch" in fname or "pecmd" in fname: return "PREFETCH"
         if "amcache" in fname: return "AMCACHE"
         if "recentdocs" in fname: return "RECENT_DOCS"
+        if "appcompatcache" in fname: return "SHIMCACHE"
+        if "lecmd" in fname or "lnk" in fname: return "LNK"
+        if "destinations" in fname: return "JUMPLIST"
         if "evtxecmd" in fname or "eventlog" in fname: return "EVENT_LOG"
         if "activity" in fname and ".csv" in fname: return "ACTIVITY_TIMELINE"  # NEW: Windows Activity Timeline
         if "$mft" in fname or "mft_output" in fname: return "MFT"
@@ -88,6 +91,7 @@ class ChaosGrasp:
         for csv_path in self.target_dir.rglob("*.csv"):
             artifact_type = self.identify_artifact(csv_path)
             if not artifact_type: continue
+            # print(f"DEBUG: Found {artifact_type} for {csv_path.name}")
             try:
                 lf = pl.scan_csv(csv_path, infer_schema_length=0, ignore_errors=True)
             except: continue
@@ -107,9 +111,11 @@ class ChaosGrasp:
                 elif artifact_type == "REG_OPENSAVEMRU": self._add_registry_mru(lf, csv_path, "OpenSaveMRU", "File_Access_Dialog")
                 elif artifact_type == "REG_LASTVISITEDMRU": self._add_registry_mru(lf, csv_path, "LastVisitedMRU", "Folder_Access_Dialog")
                 elif artifact_type == "ACTIVITY_TIMELINE": self._add_activity_timeline(lf, csv_path)  # NEW
-                elif artifact_type == "MFT": self._add_mft(lf, csv_path)
-                elif artifact_type == "USN": self._add_usn(lf, csv_path)
-            except Exception: pass
+                elif artifact_type == "SHIMCACHE": self._add_shimcache(lf, csv_path)
+                elif artifact_type == "LNK": self._add_lnk(lf, csv_path)
+                elif artifact_type == "JUMPLIST": self._add_jumplist(lf, csv_path)
+            except Exception as e:
+                print(f"DEBUG: Error processing {csv_path.name}: {e}")
 
     def _add_mft(self, lf, path):
         schema = lf.collect_schema().names()
@@ -183,6 +189,12 @@ class ChaosGrasp:
         local_time = parsed_time - pl.duration(minutes=self.timezone_offset)
         sid_expr = sid_val if isinstance(sid_val, pl.Expr) else pl.lit(sid_val)
         sess_expr = session_val if isinstance(session_val, pl.Expr) else pl.lit(session_val)
+        
+        # DEBUG Parsing
+        # try:
+        #    nulls = lf.select(parsed_time.alias("pt")).select(pl.col("pt").null_count()).collect()
+        #    print(f"DEBUG PARSING {time_type_str}: Nulls: {nulls[0,0]}")
+        # except: pass
 
         return lf.filter(parsed_time.is_not_null()).select([
             utc_time.alias("Timestamp_UTC"),
@@ -271,6 +283,8 @@ class ChaosGrasp:
         if plan is not None: self.lazy_plans.append(plan.with_columns(pl.lit(str(path)).alias("Source_File")))
 
     def _add_prefetch(self, lf, path):
+        schema = lf.collect_schema().names()
+        # print(f"DEBUG SCHEMA PREFETCH: {schema}")
         name_col = self._get_col(lf, ["ExecutableName", "SourceFilename"], "Unknown.exe")
         count_col = self._get_col(lf, ["RunCount"], "0")
         plan = self._common_transform(lf, "LastRun", "System", "Prefetch", name_col + pl.lit(" (Run: ") + count_col.cast(pl.Utf8) + pl.lit(")"), name_col, "Execution")
@@ -307,6 +321,73 @@ class ChaosGrasp:
         name_col = self._get_col(lf, ["Name", "FileName"], "Unknown_App")
         plan = self._common_transform(lf, t_name, "System", "Amcache", name_col, name_col, "Artifact_Write")
         if plan is not None: self.lazy_plans.append(plan.with_columns(pl.lit(str(path)).alias("Source_File")))
+
+    def _add_lnk(self, lf, path):
+        """Parse LNK files (LECmd)"""
+        schema = lf.collect_schema().names()
+        print(f"DEBUG SCHEMA LNK: {schema}")
+        try: print(lf.head().collect())
+        except: pass
+        # LECmd: SourceAccessed, SourceCreated, SourceModified
+        t_name = next((c for c in ["SourceModified", "SourceCreated"] if c in schema), None)
+        if not t_name: return
+
+        name_col = self._get_col(lf, ["SourceFile", "Name"], "Unknown_LNK")
+        target_col = self._get_col(lf, ["TargetAbsolutePath", "LocalPath", "NetworkPath"], "Unknown_Target")
+        args_col = self._get_col(lf, ["Arguments", "CommandArguments"], "")
+        
+        # Action: "LNK Open: [Name] -> [Target] [Args]"
+        action_expr = pl.lit("LNK Open: ") + name_col + pl.lit(" -> ") + target_col + pl.lit(" ") + args_col
+        
+        plan = self._common_transform(lf, t_name, "User", "LNK", action_expr, target_col, "File_Open")
+        if plan is not None:
+             self.lazy_plans.append(plan.with_columns([
+                 pl.lit(str(path)).alias("Source_File"),
+                 pl.lit("LNK_ENTRY").alias("Tag")
+             ]))
+
+    def _add_jumplist(self, lf, path):
+        """Parse JumpLists (Automatic/CustomDestinations)"""
+        schema = lf.collect_schema().names()
+        # JumpList: SourceAccessed, SourceCreated, SourceModified
+        t_name = next((c for c in ["SourceModified", "SourceAccess", "SourceCreated"] if c in schema), None)
+        if not t_name: return
+
+        name_col = self._get_col(lf, ["SourceFile", "Name"], "Unknown_JumpList")
+        target_col = self._get_col(lf, ["TargetAbsolutePath", "LocalPath", "NetworkPath"], "Unknown_Target")
+        
+        action_expr = pl.lit("JumpList: ") + name_col + pl.lit(" -> ") + target_col
+        
+        plan = self._common_transform(lf, t_name, "User", "JumpList", action_expr, target_col, "File_Access")
+        if plan is not None:
+             self.lazy_plans.append(plan.with_columns([
+                 pl.lit(str(path)).alias("Source_File"),
+                 pl.lit("JUMPLIST_ENTRY").alias("Tag")
+             ]))
+
+    def _add_shimcache(self, lf, path):
+        """Parse AppCompatCache (ShimCache)"""
+        # Schema: Path, LastModifiedTimeUTC, Executed
+        schema = lf.collect_schema().names()
+        time_col = next((c for c in ["LastModifiedTimeUTC", "LastModified"] if c in schema), None)
+        if not time_col: return
+
+        path_col = self._get_col(lf, ["Path"], "Unknown_Path")
+        name_col = path_col.str.split("\\").list.last()
+        
+        # ShimCache indicates existence/execution (though execution flag is often inaccurate on Win10+, presence implies execution/staging)
+        plan = self._common_transform(
+            lf, time_col, "System", "ShimCache", 
+            pl.lit("ShimCache Entry: ") + path_col, 
+            path_col, "Outcome_Execution"
+        )
+        
+        if plan is not None:
+             self.lazy_plans.append(plan.with_columns([
+                 pl.lit(str(path)).alias("Source_File"),
+                 pl.lit("SHIMCACHE_ENTRY").alias("Tag")
+             ]))
+             print(f"    [+] ShimCache loaded: {path.name}")
 
     def _add_activity_timeline(self, lf, path):
         """Parse Windows Activity Timeline (ActivitiesCache.db) CSV - v6.0 SysInternals Hunter"""

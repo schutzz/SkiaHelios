@@ -33,8 +33,17 @@ class NoiseFilter(BaseDetector):
             
             # [FIX] Protect critical forensic tags from noise filtering
             # If Tag contains NEW_USER_CREATION or other critical tags, don't treat as noise
-            has_critical_tag = pl.col("Tag").fill_null("").str.contains("(?i)NEW_USER_CREATION|CRITICAL|ANTI_FORENSICS|LATERAL_MOVEMENT")
-            is_noise_final = is_noise & ~has_critical_tag
+            has_critical_tag = pl.col("Tag").fill_null("").str.contains("(?i)NEW_USER_CREATION|CRITICAL|ANTI_FORENSICS|LATERAL_MOVEMENT|STAGING_TOOL")
+            
+            # [Case 6 Fix] Protect critical staging tool filenames from noise filtering
+            # Even if they are in chocolatey/temp paths, 7za.exe and similar tools are forensically important
+            critical_tools_pattern = "(?i)(7za\\.exe|sdelete|bcwipe|mimikatz|psexec|lazagne)"
+            is_critical_tool = pl.lit(False)
+            for fname_col in ["FileName", "Target_FileName", "Target_Path", "Message", "Action"]:
+                if fname_col in cols:
+                    is_critical_tool = is_critical_tool | pl.col(fname_col).fill_null("").str.contains(critical_tools_pattern)
+            
+            is_noise_final = is_noise & ~has_critical_tag & ~is_critical_tool
 
             df = df.with_columns([
                 pl.when(is_noise_final).then(0).otherwise(pl.col("Threat_Score")).alias("Threat_Score"),
