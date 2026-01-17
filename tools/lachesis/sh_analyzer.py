@@ -6,75 +6,14 @@ from tools.lachesis.intel import TEXT_RES
 # [NEW] Correlatorをインポート
 from tools.lachesis.correlator import CrossCorrelationEngine
 
-# Threat patterns: boost score (always prioritized)
-THREAT_BOOST_PATTERNS = [
-    ("setmace", 300, "CRITICAL_TIMESTOMP"),
-    ("sdelete", 300, "ANTI_FORENSICS"),      
-    ("psexec", 250, "LATERAL_MOVEMENT"),
-    ("putty", 300, "REMOTE_ACCESS"),
-    ("mimikatz", 500, "CREDENTIAL_THEFT"),
-    ("procdump", 150, "CREDENTIAL_DUMP"),
-    ("\\\\\\\\", 150, "UNC_EXECUTION"),
-    ("dd.exe", 900, "DATA_EXFIL_TOOL"),           
-    ("cipher.exe$", 600, "WIPING_TOOL"),          
-    ("bcwipe", 600, "WIPING_TOOL"),
-    ("vssadmin.exe$", 600, "SHADOW_COPY_KILLER"), 
-    ("wbadmin.exe$", 600, "BACKUP_DESTRUCTION"),  
-    ("attributedialog", 800, "ADS_CREATION"),
-    
-    # [Fix] Webshell Critical Boosting
-    ("c99", 800, "CRITICAL_WEBSHELL"),
-    ("webshell", 800, "CRITICAL_WEBSHELL"),
-    ("phpshell", 800, "CRITICAL_WEBSHELL"),
-    ("b374k", 800, "CRITICAL_WEBSHELL"),
-    ("r57", 800, "CRITICAL_WEBSHELL"),
-    
-    # [Feature 3] UNC Lateral Movement Tools
-    # [Fix] Admin Tool Tuning (Base Score Lowered, Context Boosted via adjust_score)
-    ("robocopy.exe", 50, "FILE_COPY_TOOL"),
-    ("xcopy.exe", 50, "FILE_COPY_TOOL"),
-    ("dcode", 400, "FORENSIC_TOOL"),
-    ("wmic.exe", 50, "WMI_EXECUTION"),
-    # [FIX] Refine "sync" to avoid OneDrive/SettingsSync noise
-    ("sync.exe", 300, "SYSINTERNALS_SYNC"),
-    ("sync64.exe", 300, "SYSINTERNALS_SYNC"),
-    # [Case 6] Metasploit & Staging
-    ("back_door.rb", 800, "METASPLOIT_SCRIPT"),
-    ("exploit.", 800, "METASPLOIT_FRAMEWORK"),
-    ("7za.exe", 600, "STAGING_TOOL"),
-    ("choco.exe", 400, "STAGING_TOOL"),
-]
-
-
-# [Feature 3] UNC Lateral Movement Tool Patterns
-UNC_LATERAL_TOOLS = [
-    "dcode", "robocopy", "xcopy", "psexec", "wmic", "sync",
-    "dcode", "robocopy", "xcopy", "psexec", "wmic", "sync",
-    "bcwipe",
-    "dd.exe", "putty", "plink", "ssh"
-]
-
-# [PUBLIC] Garbage Patterns
-GARBAGE_PATTERNS = [
-    r"windows\winsxs", 
-    r"windows\assembly", 
-    r"windows\microsoft.net", 
-    r"windows\servicing",
-    r"windows\systemapps",
-    r"windows\inf",
-    r"windows\driverstore",
-    r"driverstore", 
-    r"windows\diagtrack",
-    r"windows\biometry",
-    r"windows\softwaredistribution",
-    r"program files\windowsapps",
-    r"windowsapps", 
-    r"deletedalluserpackages",
-    r"\apprepository",
-    r"\contentdeliverymanager",
-    r"\infusedapps",
-    r"system32\driverstore" 
-]
+# ============================================================
+# [MIGRATED v2.0] All patterns moved to rules/scoring_rules.yaml
+# Use intel_module.get('threat_scores'), intel_module.get('unc_lateral_tools'),
+# and intel_module.get('garbage_patterns') to access unified rules.
+# ============================================================
+# THREAT_BOOST_PATTERNS, UNC_LATERAL_TOOLS, GARBAGE_PATTERNS - REMOVED
+# See: rules/scoring_rules.yaml for the Single Source of Truth
+# ============================================================
 
 class LachesisAnalyzer:
     def __init__(self, intel_module, enricher_module, lang="jp"):
@@ -92,12 +31,48 @@ class LachesisAnalyzer:
         
         context_scoring = self.intel.get('context_scoring', {})
         self.path_penalties = context_scoring.get('path_penalties', [])
+        
+        # [v2.1] Initialize CompiledRuleEngine for precompiled regex patterns
+        self._rule_engine = None
+        try:
+            from tools.compiled_rule_engine import CompiledRuleEngine
+            threat_scores = self.intel.get('threat_scores', [])
+            if threat_scores:
+                self._rule_engine = CompiledRuleEngine(threat_scores)
+        except ImportError:
+            pass  # Fallback to dynamic matching in adjust_score
+        
+        # [v2.2] Initialize LedgerManager for score tracking
+        self._ledger_manager = None
+        try:
+            from tools.score_ledger import LedgerManager
+            self._ledger_manager = LedgerManager()
+        except ImportError:
+            pass
 
-    @staticmethod
-    def adjust_score(path: str, base_score: int, penalties=None, command_line: str = "") -> tuple:
+    def adjust_score(self, path: str, base_score: int, penalties=None, command_line: str = "", ledger=None) -> tuple:
+        """
+        [v2.2] Dynamic score adjustment using YAML-defined rules.
+        Migrated from hardcoded THREAT_BOOST_PATTERNS to intel_module.get('threat_scores').
+        
+        Args:
+            path: File path to evaluate
+            base_score: Initial score
+            penalties: Optional list of penalty rules
+            command_line: Optional command line for context matching
+            ledger: Optional ScoreLedger instance for audit trail
+        """
         adjusted = base_score
         tags = []
         path_lower = path.lower() if path else ""
+        
+        # [v2.2] Auto-create ledger for high-score paths (≥200 base) to capture breakdown
+        if ledger is None and self._ledger_manager and base_score >= 200 and path:
+            ledger = self._ledger_manager.get_or_create(path[:100])  # Truncate long paths
+        
+        # Initialize ledger if provided/created
+        if ledger:
+            ledger.set_base(base_score, "Initial Score")
         
         SENSITIVE_KEYWORDS = [
             "password", "secret", "confidential", "credentials", "login", 
@@ -107,8 +82,11 @@ class LachesisAnalyzer:
         filename = path_lower.split("\\")[-1]
         
         if any(k in filename for k in SENSITIVE_KEYWORDS):
+            delta = max(0, 800 - adjusted)
             adjusted = max(adjusted, 800)
             tags.append("SENSITIVE_DATA_ACCESS")
+            if ledger and delta > 0:
+                ledger.record_context_boost(f"Sensitive keyword: {filename}", delta)
         
         if penalties is None:
             penalties = [] 
@@ -119,12 +97,48 @@ class LachesisAnalyzer:
             if p_pat and p_pat in path_lower:
                 adjusted = max(0, adjusted + p_val)
                 tags.append("SYSTEM_NOISE")
+                if ledger:
+                    ledger.record_penalty(f"Path penalty: {p_pat}", p_val)
                 break 
         
-        for pattern, boost, tag in THREAT_BOOST_PATTERNS:
-            if pattern in path_lower:
-                adjusted += boost
-                tags.append(tag)
+        # [v2.1] Use CompiledRuleEngine for precompiled patterns (fast path)
+        if self._rule_engine:
+            engine_score, engine_tags = self._rule_engine.match(path_lower, 0)
+            adjusted += engine_score
+            tags.extend(engine_tags)
+            # Record to ledger (aggregated as single entry for performance)
+            if ledger and engine_score > 0:
+                ledger.record("YAML_RULES", engine_score, f"Matched {len(engine_tags)} rules", engine_tags)
+        else:
+            # Fallback: Load threat_scores from YAML via intel_module (slow path)
+            threat_rules = self.intel.get('threat_scores', [])
+            for rule in threat_rules:
+                pattern = rule.get('pattern', '')
+                score = int(rule.get('score', 0))
+                rule_tags = rule.get('tags', [])
+                match_mode = rule.get('match_mode', 'contains')
+                
+                if not pattern:
+                    continue
+                
+                is_match = False
+                if match_mode == 'contains':
+                    is_match = pattern.lower() in path_lower
+                elif match_mode == 'exact':
+                    is_match = filename == pattern.lower()
+                elif match_mode == 'startswith':
+                    is_match = path_lower.startswith(pattern.lower())
+                elif match_mode == 'endswith':
+                    is_match = path_lower.endswith(pattern.lower())
+                elif match_mode == 'regex':
+                    try:
+                        is_match = bool(re.search(pattern, path_lower, re.IGNORECASE))
+                    except re.error:
+                        pass
+                
+                if is_match:
+                    adjusted += score
+                    tags.extend(rule_tags)
         
         # [Case 6] OpenSSH Documentation Noise Filter
         if "openssh" in path_lower and ("manual" in path_lower or ".htm" in path_lower):
@@ -427,7 +441,9 @@ class LachesisAnalyzer:
         if any(dev_path in norm_path for dev_path in dev_tool_paths):
             return True
 
-        for trash in GARBAGE_PATTERNS:
+        # [v2.0] Load garbage patterns from YAML
+        garbage_patterns = self.intel.get('garbage_patterns', [])
+        for trash in garbage_patterns:
             if trash in norm_path:
                 return True
 
@@ -481,6 +497,22 @@ class LachesisAnalyzer:
             "severity": severity,
             "ioc_counts": {}
         }
+
+    def export_score_breakdown(self, output_path: str, case_name: str = "") -> str:
+        """
+        [v2.2] Export score ledgers to markdown file.
+        Only includes events with score >= 500.
+        
+        Args:
+            output_path: Directory to write the MD file
+            case_name: Case identifier for filename
+            
+        Returns:
+            Path to generated file, or empty string if no high-score events
+        """
+        if self._ledger_manager:
+            return self._ledger_manager.export_to_markdown(output_path, threshold=500, case_name=case_name)
+        return ""
 
     def process_events(self, analysis_result, dfs):
         raw_events = analysis_result.get("events", [])
@@ -698,19 +730,15 @@ class LachesisAnalyzer:
                 ("wmic.exe", "WMI_EXECUTION", 50),
                 ("psexec", "LATERAL_MOVEMENT", 250),
                 ("plink", "REMOTE_ACCESS", 300),
-<<<<<<< HEAD
                 # [FIX] Exact Match for Sync to avoid mobsync/tzsync noise
                 ("sync.exe", "SYSINTERNALS_SYNC", 150, "exact"),
                 ("sync64.exe", "SYSINTERNALS_SYNC", 150, "exact"),
                 ("sysinternals", "SYSINTERNALS_TOOL", 150),
-=======
-                ("sync", "SYNC_TOOL", 150),
                 # [Case 6] Metasploit & Staging
                 ("back_door.rb", "METASPLOIT_SCRIPT", 800),
                 ("exploit.", "METASPLOIT_FRAMEWORK", 800),
                 ("7za.exe", "STAGING_TOOL", 600),
                 ("choco.exe", "STAGING_TOOL", 400),
->>>>>>> 7dcf25be3750f579d5703c6a87d8ef6c97ce252f
             ]
             
             # [Optimization] Construct Vectorized Filter for Pre-filtering
@@ -1270,14 +1298,9 @@ class LachesisAnalyzer:
         
         self.visual_iocs_hashes.add(ioc_key)
         
-
-<<<<<<< HEAD
         if is_critical or "setmace" in path.lower():
              # [PERFORMANCE FIX] Removed file I/O logging to prevent 78s stall
-             # print(f"[DEBUG-ADD] Adding IOC: {ioc_dict['Value']} (Reason: {tag})")
              pass
-=======
->>>>>>> 7dcf25be3750f579d5703c6a87d8ef6c97ce252f
                  
         self.visual_iocs.append(ioc_dict)
 

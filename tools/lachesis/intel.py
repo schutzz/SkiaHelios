@@ -170,6 +170,9 @@ class LachesisIntel:
         self.intel_sigs = self.full_config.get("signatures", [])
         self.lachesis_conf = self.full_config.get("lachesis_config", {})
         
+        # [v2.0] Load and validate scoring_rules.yaml with Pydantic
+        self._load_validated_scoring_rules()
+        
         # Load Config Values
         self.garbage_paths = self.lachesis_conf.get("garbage_paths", [])
         self.trusted_roots = self.lachesis_conf.get("trusted_system_roots", [])
@@ -177,6 +180,41 @@ class LachesisIntel:
         self.infra_ips = set(self.lachesis_conf.get("infra_ips", []))
         self.force_include_tags = self.lachesis_conf.get("force_include_tags", [])
         self.force_include_types = self.lachesis_conf.get("force_include_types", [])
+
+    def _load_validated_scoring_rules(self):
+        """[v2.0] Load scoring_rules.yaml with Pydantic validation"""
+        try:
+            from tools.rule_validator import validate_scoring_rules
+            scoring_path = Path(__file__).parent.parent.parent / "rules" / "scoring_rules.yaml"
+            validated_rules = validate_scoring_rules(str(scoring_path))
+            
+            # Merge into full_config for access via self.get()
+            self.full_config["threat_scores"] = validated_rules.get("threat_scores", [])
+            self.full_config["garbage_patterns"] = validated_rules.get("garbage_patterns", [])
+            self.full_config["unc_lateral_tools"] = validated_rules.get("unc_lateral_tools", [])
+            self.full_config["context_boosts"] = validated_rules.get("context_boosts", {})
+        except ImportError:
+            print("    [!] rule_validator not available. Loading without Pydantic validation.")
+            self._load_scoring_rules_fallback()
+        except SystemExit as e:
+            # Re-raise fatal validation errors
+            raise e
+        except Exception as e:
+            print(f"    [!] Scoring rules validation warning: {e}")
+            self._load_scoring_rules_fallback()
+    
+    def _load_scoring_rules_fallback(self):
+        """Fallback loader without Pydantic validation"""
+        scoring_path = Path(__file__).parent.parent.parent / "rules" / "scoring_rules.yaml"
+        if scoring_path.exists():
+            try:
+                with open(scoring_path, "r", encoding="utf-8") as f:
+                    data = yaml.safe_load(f) or {}
+                self.full_config["threat_scores"] = data.get("threat_scores", [])
+                self.full_config["garbage_patterns"] = data.get("garbage_patterns", [])
+                self.full_config["unc_lateral_tools"] = data.get("unc_lateral_tools", [])
+            except Exception as e:
+                print(f"    [!] Failed to load scoring_rules.yaml: {e}")
 
     def get(self, key, default=None):
         """Access top-level config keys (e.g., correlation_rules)"""
@@ -398,4 +436,44 @@ class IntelManager:
         return [
             "CRITICAL", "EVIL", "WEBSHELL", "RANSOM", "WIPE", 
             "LATERAL", "MIMIKATZ", "EXFIL", "DEFACEMENT", "MALICIOUS", "STAGING_TOOL"
+        ]
+
+    @staticmethod
+    def get_garbage_patterns():
+        """
+        [v2.0] Load garbage patterns from scoring_rules.yaml
+        Falls back to hardcoded patterns if YAML not available.
+        """
+        try:
+            from pathlib import Path
+            yaml_path = Path(__file__).parent.parent.parent / "rules" / "scoring_rules.yaml"
+            if yaml_path.exists():
+                import yaml
+                with open(yaml_path, "r", encoding="utf-8") as f:
+                    data = yaml.safe_load(f)
+                    if data and "garbage_patterns" in data:
+                        return data["garbage_patterns"]
+        except Exception:
+            pass
+        
+        # Fallback patterns
+        return [
+            r"windows\winsxs", 
+            r"windows\assembly", 
+            r"windows\microsoft.net", 
+            r"windows\servicing",
+            r"windows\systemapps",
+            r"windows\inf",
+            r"windows\driverstore",
+            r"driverstore", 
+            r"windows\diagtrack",
+            r"windows\biometry",
+            r"windows\softwaredistribution",
+            r"program files\windowsapps",
+            r"windowsapps", 
+            r"deletedalluserpackages",
+            r"\apprepository",
+            r"\contentdeliverymanager",
+            r"\infusedapps",
+            r"system32\driverstore" 
         ]

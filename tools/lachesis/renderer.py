@@ -154,7 +154,7 @@ class LachesisRenderer:
                 # Context-Aware Scoring (Root Cause Fix) - Phase Timeline
                 # Uses unified adjust_score() for FN/FP balanced filtering
                 # ═══════════════════════════════════════════════════════════
-                from tools.lachesis.sh_analyzer import LachesisAnalyzer, GARBAGE_PATTERNS
+                from tools.lachesis.sh_analyzer import LachesisAnalyzer
                 
                 PHASE_DISPLAY_THRESHOLD = 50  # Same as IOC section
                 
@@ -204,7 +204,7 @@ class LachesisRenderer:
                         
                         # Apply Context-Aware Score Adjustment
                         command_line = str(ev.get('CommandLine', '')) or str(ev.get('cmdline', ''))
-                        adjusted_score, new_tags = LachesisAnalyzer.adjust_score(path, original_score, command_line=command_line)
+                        adjusted_score, new_tags = analyzer.adjust_score(path, original_score, command_line=command_line)
                         
                         # Update event with adjusted score
                         ev['Score'] = adjusted_score
@@ -240,7 +240,7 @@ class LachesisRenderer:
                 # 2. Score Adjustment & Tagging
                 original_score = int(ioc.get("Score", 0) or 0)
                 command_line = str(ioc.get("CommandLine", "")) or str(ioc.get('cmdline', ''))
-                adjusted_score, new_tags = LachesisAnalyzer.adjust_score(target_path, original_score, analyzer.path_penalties, command_line=command_line)
+                adjusted_score, new_tags = analyzer.adjust_score(target_path, original_score, analyzer.path_penalties, command_line=command_line)
                 
                 ioc["Score"] = adjusted_score
                 ioc["Original_Score"] = original_score
@@ -363,8 +363,8 @@ class LachesisRenderer:
             traceback.print_exc()
 
     def _group_all_iocs(self, iocs, analyzer=None):
-        refined_iocs = [] # [Hybrid Fix] Dynamic Noise Filter Integration (Local Import)
-        from tools.lachesis.sh_analyzer import GARBAGE_PATTERNS
+        refined_iocs = [] # [Hybrid Fix] Dynamic Noise Filter Integration
+        # [Refactor v2.0] GARBAGE_PATTERNS now loaded from YAML via intel_module
         # [Refactor] Load patterns from Intel module
         from tools.lachesis.intel import IntelManager
 
@@ -577,10 +577,11 @@ class LachesisRenderer:
                 if analyzer._is_noise(ev):
                     continue
             
-            # 2. Redundant Check (Using Shared Pattern List) - Belt & Suspenders
+            # 2. Redundant Check (Using Shared Pattern List from YAML) - Belt & Suspenders
             is_noise = False
             if score < 500 and not any(x in tags for x in ["LATERAL", "RANSOM", "WIPER"]):
-                for g in GARBAGE_PATTERNS:
+                garbage_patterns = IntelManager.get_garbage_patterns()
+                for g in garbage_patterns:
                     if g in norm_check:
                          is_noise = True
                          break
@@ -633,10 +634,12 @@ class LachesisRenderer:
 
             # --- PHASE 0: Score Adjustment (Context-Aware) ---
             # Apply penalty/boost BEFORE filtering to ensure WindowsApps gets reduced
-            from tools.lachesis.sh_analyzer import LachesisAnalyzer
             path_for_adjust = str(ev.get('Value', '') or ev.get('Path', ''))
             original_score = score
-            score, new_tags = LachesisAnalyzer.adjust_score(path_for_adjust, score)
+            if analyzer:
+                score, new_tags = analyzer.adjust_score(path_for_adjust, score)
+            else:
+                new_tags = []
             
             # [Grimoire v6.1] Sensitive & Recon Keyword Boost (Aggressive)
             # Check Full Path for critical keywords that might be missed by simple filename checks

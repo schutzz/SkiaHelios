@@ -45,6 +45,10 @@ class LachesisCore:
         metadata = {"hostname": hostname, "os_info": real_os_info, "primary_user": primary_user}
         renderer.render_report(analysis_data, self.analyzer, self.enricher, origin_stories, dfs_for_ioc, metadata)
         
+        # [v2.2] Export Score Breakdown MD (scores >= 500 only)
+        output_dir = str(Path(output_path).parent)
+        self.analyzer.export_score_breakdown(output_dir, self.case_name)
+        
         json_path = Path(output_path).with_suffix('.json')
         pivot_path = Path(output_path).parent / "Pivot_Config.json"
         renderer.export_json_grimoire(analysis_result, self.analyzer, json_path, primary_user)

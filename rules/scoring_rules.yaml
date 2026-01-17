@@ -1,7 +1,8 @@
 # ============================================================
 #  SkiaHelios Centralized Threat Scoring Rules
-#  scoring_rules.yaml v1.0
-#  Mission: Unified threat scores from sh_analyzer.py THREAT_BOOST_PATTERNS
+#  scoring_rules.yaml v2.0 (Unified)
+#  Mission: Single Source of Truth for all threat scoring
+#  Migrated from: sh_analyzer.py THREAT_BOOST_PATTERNS
 # ============================================================
 
 threat_scores:
@@ -34,7 +35,7 @@ threat_scores:
 
   - pattern: "setmace"
     score: 700
-    tags: ["ANTI_FORENSICS", "TIMESTOMP"]
+    tags: ["ANTI_FORENSICS", "TIMESTOMP", "CRITICAL_TIMESTOMP"]
     target: "Action"
     match_mode: "contains"
 
@@ -46,14 +47,26 @@ threat_scores:
 
   - pattern: "cipher.exe"
     score: 600
-    tags: ["ANTI_FORENSICS", "WIPING"]
+    tags: ["ANTI_FORENSICS", "WIPING", "WIPING_TOOL"]
     target: "FileName"
-    match_mode: "contains"
+    match_mode: "endswith"
 
   - pattern: "vssadmin.exe"
     score: 600
     tags: ["ANTI_FORENSICS", "SHADOW_COPY_KILLER"]
     target: "FileName"
+    match_mode: "endswith"
+
+  - pattern: "wbadmin.exe"
+    score: 600
+    tags: ["ANTI_FORENSICS", "BACKUP_DESTRUCTION"]
+    target: "FileName"
+    match_mode: "endswith"
+
+  - pattern: "attributedialog"
+    score: 800
+    tags: ["ANTI_FORENSICS", "ADS_CREATION"]
+    target: "Action"
     match_mode: "contains"
 
   # ═══════════════════════════════════════════════════════════════
@@ -73,7 +86,7 @@ threat_scores:
 
   - pattern: "procdump"
     score: 500
-    tags: ["CREDENTIAL_THEFT", "PROCDUMP"]
+    tags: ["CREDENTIAL_THEFT", "PROCDUMP", "CREDENTIAL_DUMP"]
     target: "Action"
     match_mode: "contains"
 
@@ -86,11 +99,7 @@ threat_scores:
   # ═══════════════════════════════════════════════════════════════
   # Lateral Movement
   # ═══════════════════════════════════════════════════════════════
-  - pattern: "psexec"
-    score: 400
-    tags: ["LATERAL_MOVEMENT", "PSEXEC"]
-    target: "Action"
-    match_mode: "contains"
+
 
   - pattern: "wmiexec"
     score: 500
@@ -105,7 +114,7 @@ threat_scores:
     match_mode: "contains"
 
   # ═══════════════════════════════════════════════════════════════
-  # Exploitation Frameworks
+  # Exploitation Frameworks / Webshells
   # ═══════════════════════════════════════════════════════════════
   - pattern: "metasploit"
     score: 500
@@ -113,9 +122,15 @@ threat_scores:
     target: "FileName"
     match_mode: "contains"
 
-  - pattern: "exploitable_back_door"
-    score: 600
-    tags: ["BACKDOOR", "CRITICAL"]
+  - pattern: "back_door.rb"
+    score: 800
+    tags: ["EXPLOIT_FRAMEWORK", "METASPLOIT", "METASPLOIT_SCRIPT"]
+    target: "FileName"
+    match_mode: "contains"
+
+  - pattern: "exploit."
+    score: 800
+    tags: ["EXPLOIT_FRAMEWORK", "METASPLOIT", "METASPLOIT_FRAMEWORK"]
     target: "FileName"
     match_mode: "contains"
 
@@ -125,31 +140,67 @@ threat_scores:
     target: "FileName"
     match_mode: "contains"
 
+  - pattern: "c99"
+    score: 800
+    tags: ["WEBSHELL", "CRITICAL_WEBSHELL"]
+    target: "FileName"
+    match_mode: "contains"
+
+  - pattern: "webshell"
+    score: 800
+    tags: ["WEBSHELL", "CRITICAL_WEBSHELL"]
+    target: "FileName"
+    match_mode: "contains"
+
+  - pattern: "phpshell"
+    score: 800
+    tags: ["WEBSHELL", "CRITICAL_WEBSHELL"]
+    target: "FileName"
+    match_mode: "contains"
+
+  - pattern: "b374k"
+    score: 800
+    tags: ["WEBSHELL", "CRITICAL_WEBSHELL"]
+    target: "FileName"
+    match_mode: "contains"
+
+  - pattern: "r57"
+    score: 800
+    tags: ["WEBSHELL", "CRITICAL_WEBSHELL"]
+    target: "FileName"
+    match_mode: "contains"
+
   # ═══════════════════════════════════════════════════════════════
   # Sysinternals / Admin Tools (Context-Aware)
   # ═══════════════════════════════════════════════════════════════
   - pattern: "sync.exe"
-    score: 150
+    score: 300
     tags: ["SYSINTERNALS_SYNC"]
-    target: "Action"
+    target: "FileName"
     match_mode: "exact"
 
-  - pattern: "robocopy"
+  - pattern: "sync64.exe"
+    score: 300
+    tags: ["SYSINTERNALS_SYNC"]
+    target: "FileName"
+    match_mode: "exact"
+
+  - pattern: "robocopy.exe"
     score: 100
-    tags: ["ADMIN_TOOL"]
-    target: "Action"
+    tags: ["ADMIN_TOOL", "FILE_COPY_TOOL"]
+    target: "FileName"
     match_mode: "contains"
 
-  - pattern: "xcopy"
+  - pattern: "xcopy.exe"
     score: 100
-    tags: ["ADMIN_TOOL"]
-    target: "Action"
+    tags: ["ADMIN_TOOL", "FILE_COPY_TOOL"]
+    target: "FileName"
     match_mode: "contains"
 
-  - pattern: "wmic"
+  - pattern: "wmic.exe"
     score: 100
-    tags: ["ADMIN_TOOL"]
-    target: "Action"
+    tags: ["ADMIN_TOOL", "WMI_EXECUTION"]
+    target: "FileName"
     match_mode: "contains"
 
   # ═══════════════════════════════════════════════════════════════
@@ -168,6 +219,12 @@ threat_scores:
     match_mode: "contains"
 
   - pattern: "pscp"
+    score: 300
+    tags: ["REMOTE_ACCESS", "SSH"]
+    target: "Action"
+    match_mode: "contains"
+
+  - pattern: "plink"
     score: 300
     tags: ["REMOTE_ACCESS", "SSH"]
     target: "Action"
@@ -198,6 +255,25 @@ threat_scores:
     match_mode: "contains"
 
   # ═══════════════════════════════════════════════════════════════
+  # Lateral Movement / UNC Paths
+  # ═══════════════════════════════════════════════════════════════
+  - pattern: "^\\\\\\\\[^\\\\]+\\\\"
+    score: 150
+    tags: ["LATERAL_MOVEMENT", "UNC_EXECUTION"]
+    target: "Action"
+    match_mode: "regex"
+    description: "UNC path execution (\\\\server\\share)"
+
+  - pattern: "psexec"
+    score: 300
+    tags: ["LATERAL_MOVEMENT", "PSEXEC"]
+    target: "Action"
+    match_mode: "contains"
+    negative_context:
+      - path_contains: "sysinternals"
+      - path_contains: "program files"
+
+  # ═══════════════════════════════════════════════════════════════
   # Data Exfiltration
   # ═══════════════════════════════════════════════════════════════
   - pattern: "rclone"
@@ -212,8 +288,14 @@ threat_scores:
     target: "Action"
     match_mode: "contains"
 
+  - pattern: "dd.exe"
+    score: 900
+    tags: ["EXFILTRATION", "DATA_EXFIL_TOOL"]
+    target: "FileName"
+    match_mode: "endswith"
+
   # ═══════════════════════════════════════════════════════════════
-  # Recon / Scanning
+  # Recon / Scanning / Forensic Tools
   # ═══════════════════════════════════════════════════════════════
   - pattern: "nmap"
     score: 200
@@ -233,12 +315,18 @@ threat_scores:
     target: "Action"
     match_mode: "contains"
 
+  - pattern: "dcode"
+    score: 400
+    tags: ["FORENSIC_TOOL"]
+    target: "Action"
+    match_mode: "contains"
+
   # ═══════════════════════════════════════════════════════════════
   # Staging / Archive Tools
   # ═══════════════════════════════════════════════════════════════
   - pattern: "7za.exe"
-    score: 300
-    tags: ["STAGING", "ARCHIVE"]
+    score: 600
+    tags: ["STAGING", "ARCHIVE", "STAGING_TOOL"]
     target: "FileName"
     match_mode: "contains"
 
@@ -253,6 +341,60 @@ threat_scores:
     tags: ["STAGING", "ARCHIVE"]
     target: "FileName"
     match_mode: "contains"
+
+  - pattern: "choco.exe"
+    score: 400
+    tags: ["STAGING", "STAGING_TOOL"]
+    target: "FileName"
+    match_mode: "contains"
+
+  # ═══════════════════════════════════════════════════════════════
+  # UNC Path Execution (Network Share)
+  # ═══════════════════════════════════════════════════════════════
+  - pattern: "\\\\\\\\"
+    score: 150
+    tags: ["UNC_EXECUTION", "NETWORK_SHARE"]
+    target: "Target_Path"
+    match_mode: "startswith"
+
+# ═══════════════════════════════════════════════════════════════
+# UNC Lateral Movement Tool List (for context boost)
+# ═══════════════════════════════════════════════════════════════
+unc_lateral_tools:
+  - "dcode"
+  - "robocopy"
+  - "xcopy"
+  - "psexec"
+  - "wmic"
+  - "sync"
+  - "bcwipe"
+  - "dd.exe"
+  - "putty"
+  - "plink"
+  - "ssh"
+
+# ═══════════════════════════════════════════════════════════════
+# Garbage / Noise Patterns (for filtering)
+# ═══════════════════════════════════════════════════════════════
+garbage_patterns:
+  - "windows\\winsxs"
+  - "windows\\assembly"
+  - "windows\\microsoft.net"
+  - "windows\\servicing"
+  - "windows\\systemapps"
+  - "windows\\inf"
+  - "windows\\driverstore"
+  - "driverstore"
+  - "windows\\diagtrack"
+  - "windows\\biometry"
+  - "windows\\softwaredistribution"
+  - "program files\\windowsapps"
+  - "windowsapps"
+  - "deletedalluserpackages"
+  - "\\apprepository"
+  - "\\contentdeliverymanager"
+  - "\\infusedapps"
+  - "system32\\driverstore"
 
 # ═══════════════════════════════════════════════════════════════
 # Context Boost Patterns (Admin Share Access)

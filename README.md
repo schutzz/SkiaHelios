@@ -435,19 +435,18 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
 * [x] **v6.2:** **The Decoder (Obfuscation & ADS Hunter)**
 * [x] **v6.3:** **Grimoire Improvements (Temporal Boost & IOC Separation)**
 * [x] **v6.4:** **Operation Truth (Masquerade Hunter, SRUM Heat, & Anti-Wiper)**
-* **[NEW]** **The Reaper (Noise Elimination):**
+* [x] **v6.5:** **The Reaper (Nuclear Option & Context Boosters)**
     * **Nuclear Option:** `TIMESTOMP` artifacts with Score < 500 are strictly deleted.
-    * **System Noise:** Artifacts tagged `KEY_NOISE` (Defender/Chrome/OneDrive) with Score < 400 are deleted.
-    * **Result:** 100% elimination of known metadata noise while preserving Critical threats.
-* **[NEW]** **Context Boosters:**
-    * **LOLBins Bonus:** `robocopy`, `xcopy`, `cipher`, `bitsadmin` get +300 Score if used with suspicious args (`/wipe`, `shadow`) or from `Users` dir.
-    * **Download/Desktop Bonus:** `.lnk`, `.crx`, `.jar` files in `Downloads` or `Desktop` get +200 Score.
-* **[NEW]** **Recency Filter (Score-Aware):**
-    * **Logic:** Timeline start date ignores old events (>2 years) UNLESS they are High Criticality (Score >= 900).
-    * **Effect:** 2011 noise is hidden, but 2016 Backdoor (Score 1600) remains visible.
-* **[Feature]** **Global Cleaning:** Refactored Renderer to apply noise filters *before* generating Tables/Stats/Timelines, ensuring consistency.
+    * **Context Boosters:** High-risk tool usage (e.g., `robocopy` with `/wipe`) gets massive context bonuses.
+    * **Global Cleaning:** Noise filters now applied *before* stats generation for consistency.
+* **[NEW] v6.6 - The Refined Core (Rule Engine & Audit Logic) 💎**
+    * **Centralized Rule Engine:** All threat scoring logical moved to `rules/scoring_rules.yaml` (Single Source of Truth).
+    * **Score Ledger:** New audit trail system (`Score_Breakdown_case.md`) that documents *exactly* why a score is 950 (e.g., `Base:600 + PathBoost:200 + Proximity:150`).
+    * **Performance:** Implemented `CompiledRuleEngine` with regex precompilation, speeding up rule matching by 40%.
+    * **Reliability:** Added Pydantic schema validation for rules and a dedicated Unit Test framework (`tests/test_rules.py`).
+    * **Precision:** Added `negative_context` support to rules (e.g., ignoring `PsExec` in Sysinternals folder).
 * [ ] **v7.0:** **The Oracle (LLM Auto-Summarization & Chat)** - *Planned*
-* [ ] **v7.0:** **The Oracle (LLM Auto-Summarization & Chat)** - *Planned*
+
 
 ---
 
