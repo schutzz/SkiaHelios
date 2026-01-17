@@ -7,7 +7,7 @@
 ![Tests](https://img.shields.io/badge/Tests-55%2F55_PASS-brightgreen)
 ![Status](https://img.shields.io/badge/Status-Active_Defense-red)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey)
-
+[![Medium](https://img.shields.io/badge/Medium-Read%20Story-black?logo=medium)](https://medium.com/@schutz0817/skiahelios-accelerating-windows-dfir-with-polars-and-automated-timeline-analysis-72b756baff32)
 > *"From Shadows to Sun. From Data to Gold."*
 > *"We don't just read logs; we judge them."*
 
