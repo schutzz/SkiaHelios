@@ -9,6 +9,9 @@ from tools.lachesis.intel import TEXT_RES
 from tools.lachesis.narrator import NarrativeGenerator
 from tools.lachesis.user_reporter import UserActivityReporter
 
+# [Display Decoupling] Tags to hide from the visual report
+HIDDEN_TAGS = {"VOID", "NOISE", "CHECKED", "SYSTEM_NOISE", "BENIGN", "IGNORE"}
+
 # [NEW] Jinja2 Integration
 try:
     from jinja2 import Environment, FileSystemLoader
@@ -84,42 +87,54 @@ class LachesisRenderer:
     # ═══════════════════════════════════════════════════════════
     def _clean_display_data(self, iocs):
         """
-        [Fix] Beautify data for reporting.
-        - Deduplicate tags
-        - Remove internal system tags (MFT, USN, Single Letters)
-        - Truncate long paths to fit in markdown tables
+        [Display Decoupling] 
+        Report表示用に、パス、値、サマリーをクリーンアップし、レイアウト崩れを防ぐ。
         """
         cleaned = []
-        # Tags to hide from the final report
-        HIDDEN_TAGS = [
-            "MFT_ENTRY", "USN_ENTRY", "PROXIMITY_BOOST", "CORRELATED", "LIVE", 
-            "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", 
-            "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "_"
-        ]
-        
         for ioc in iocs:
             new_ioc = ioc.copy()
             
             # 1. Clean Tags
             raw_tags = str(new_ioc.get('Tag', '')).replace(' ', '').split(',')
-            # Filter, Deduplicate, and Sort
             visible_tags = sorted(list(set([t for t in raw_tags if t and t not in HIDDEN_TAGS and len(t) > 1])))
+            new_ioc['Tag'] = ", ".join(visible_tags[:3]) if visible_tags else "-"
             
-            if visible_tags:
-                new_ioc['Tag'] = ", ".join(visible_tags[:3])  # Limit to top 3
-            else:
-                new_ioc['Tag'] = "-"
+            # 2. Smart Truncate Logic
+            # Value と Summary 両方に適用
+            for field in ['Value', 'Summary']:
+                if field not in new_ioc: continue
+                val = str(new_ioc.get(field, ''))
+                if not val: continue
+
+                # [Display Decoupling Guard] JSON/スクリプト判定
+                is_code_or_json = "{" in val or "}" in val or "\n" in val or "ScriptBlock" in val or "EventData" in val
+                
+                if is_code_or_json:
+                    # 無条件に末尾のゴミを削る
+                    val = re.sub(r'[\"\'\}\] ]+$', '', val).strip()
+                    if len(val) > 40:
+                        new_ioc[field] = f"{val[:37]}..."
+                    else:
+                        new_ioc[field] = val
+                    continue
+                
+                # 通常の長いパス等の処理 (Valueフィールドのみ強力に適用)
+                if field == 'Value' and len(val) > 60:
+                    parts = val.replace('/', '\\').split('\\')
+                    if len(parts) > 3:
+                        new_ioc[field] = f"...\\{parts[-2]}\\{parts[-1]}"
+                    else:
+                        new_ioc[field] = val[:30] + "..." + val[-25:]
             
-            # 2. Smart Truncate Path/Value
-            val = str(new_ioc.get('Value', ''))
-            # Only truncate if extremely long
-            if len(val) > 60:
-                parts = val.replace('/', '\\').split('\\')
-                if len(parts) > 3:
-                    # Keep ellipsis, parent folder, filename
-                    new_ioc['Value'] = f"...\\{parts[-2]}\\{parts[-1]}"
-                else:
-                    new_ioc['Value'] = val[:30] + "..." + val[-25:]
+            # 3. Aggressive Global Guard (Check all fields)
+            for k, v in new_ioc.items():
+                if k in ['Value', 'Summary', 'Payload', 'CommandLine', 'Note']:
+                    v_str = str(v)
+                    if ("{" in v_str and "}" in v_str) or ("ScriptBlock" in v_str):
+                        if len(v_str) > 40:
+                             # Scrub and truncate anything that leaks as JSON
+                             v_scrubbed = re.sub(r'[\\\"\\\'\\}\\] ]+$', '', v_str).strip()
+                             new_ioc[k] = f"{v_scrubbed[:37]}..."
             
             cleaned.append(new_ioc)
         return cleaned
@@ -267,6 +282,9 @@ class LachesisRenderer:
 
             # 6. Grouping and Preparation
             refined_iocs = self._group_all_iocs(cleaned_iocs, analyzer)
+            
+            # [Display Decoupling] 全ての表示データを一括クリーンアップ
+            refined_iocs = self._clean_display_data(refined_iocs)
 
             # [Fix] Global Clean of VOID bug
             for ioc in refined_iocs:
@@ -913,17 +931,18 @@ class LachesisRenderer:
         Smart Formatting: Prioritize meaningful columns over generic 'system' or placeholders.
         """
         candidates = [
+            row.get("Value"),         # [Display Decoupling] Use already cleaned/truncated Value
+            row.get("Summary"),       # [Display Decoupling] Fallback to cleaned Summary
             row.get("FileName"),
             row.get("Target_Path"),
             row.get("Target_FileName"), 
             row.get("CommandLine"),
-            row.get("ParentPath"),   # [Fix] Fallback for USN/MFT where FileName is hash
+            row.get("ParentPath"),   
             row.get("Reg_Key"),
-            row.get("Service_Name"), # [v5.7.1] Smart Formatting: Service
+            row.get("Service_Name"), 
             row.get("Payload"),
-            row.get("Message"),      # [v5.7.1] Smart Formatting: EventMsg
+            row.get("Message"),      
             row.get("Action"),
-            row.get("Value")         # [Fix] Fallback to Value (e.g. URL)
         ]
         fallback_hash = None
         for c in candidates:
@@ -1014,10 +1033,14 @@ class LachesisRenderer:
             extra = ev.get('Extra', {})
             tag = str(ev.get('Tag', ''))
             
-            # [Grimoire v6.2] CommandLine Argument Extraction
-            # Check for CommandLine in various locations
+            # [Display Decoupling] Use cleaned Value for impact if it looks like code/JSON
+            # Otherwise use specialized logic
             cmd_line = ev.get('CommandLine') or ev.get('Payload') or extra.get('CommandLine', '')
-            if cmd_line and len(str(cmd_line)) > 3:
+            
+            if "{" in str(cmd_line) or "}" in str(cmd_line) or "ScriptBlock" in str(cmd_line):
+                # Use cleaned Value instead of raw CommandLine
+                impact = f"`{ev.get('Value')}`"
+            elif cmd_line and len(str(cmd_line)) > 3:
                 impact = f"`{str(cmd_line)[:50]}...`" if len(str(cmd_line)) > 50 else f"`{cmd_line}`"
             elif "SYSTEM_TIME" in tag or "4616" in tag or "TIME_PARADOX" in str(ev.get('Type', '')):
                 impact = "**System Clock Altered**"
@@ -1346,7 +1369,15 @@ class LachesisRenderer:
             val = ev.get('Summary', '')
             if not val: val = str(ev.get('Tag', 'Event'))
         if "SYSTEM_TIME" in str(ev.get('Tag', '')) or "4616" in str(val): return "System Time Changed"
-        if "\\" in val or "/" in val: val = os.path.basename(val.replace("\\", "/"))
+        
+        # [Fix] JSON誤爆防止：JSON記号が含まれていない場合のみ basename を適用
+        # "}]}}" のような断片にも対応できるよう判定を強化
+        is_json_fragment = "{" in val or "}" in val or "]" in val or "[" in val or '"' in val
+        is_path_like = ("\\" in val or "/" in val)
+        
+        if is_path_like and not is_json_fragment:
+            val = os.path.basename(val.replace("\\", "/"))
+            
         return val[:15] + ".." if len(val) > 15 else val
 
     def _render_mermaid_vertical_clustered(self, events):
@@ -1671,10 +1702,18 @@ class LachesisRenderer:
         lines = []
         for i, e in enumerate(evs[:max_items]):
             val_raw = str(e.get('Value', ''))
-            val = val_raw.split('\\')[-1]
-            if len(val) > 20: val = val[:18] + ".."
+            val = val_raw # Default
             
-            time_str = str(e.get('Time', ''))
+            # [Display Decoupling] Mermaid specific truncation
+            if "{" in val or "}" in val or "ScriptBlock" in val:
+                 val = f"{val[:17]}.." if len(val) > 17 else val
+            else:
+                 val = val.split('\\')[-1]
+                 if len(val) > 20: val = val[:18] + ".."
+            
+            time_str = str(e.get('Time') or '')
+            if time_str == 'None': time_str = ''
+            
             time_display = ""
             try:
                 if 'T' in time_str:
@@ -1687,9 +1726,9 @@ class LachesisRenderer:
                     time_part = time_str[11:16]
                     time_display = f"{date_part[1]}/{date_part[2]} {time_part}"
                 else:
-                        time_display = time_str[:16]
+                    time_display = time_str[:16]
             except:
-                    time_display = time_str
+                time_display = time_str
 
             source = ""
             note = str(e.get('Note', ''))

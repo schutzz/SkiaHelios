@@ -1,4 +1,4 @@
-# SkiaHelios v6.7 - Grimoire Engine (Console History & Phantom Drive Detection)
+# SkiaHelios v6.9.5 - Grimoire Engine (Advanced Console History & Generalized IOC)
 
 ![SkiaHelios CI](https://github.com/schutzz/SkiaHelios/actions/workflows/test.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
@@ -13,9 +13,9 @@
 
 **SkiaHelios** is a high-resolution, modular DFIR (Digital Forensics & Incident Response) framework built for **speed**, **causality**, **origin tracing**, and **visual narrative**.
 
-Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** orchestrated by **"Hekate"**, supported by **"Chronos" (The Time Lord feat. Icarus Paradox)**, **"Hercules" (The Referee)**, the **"PlutosGate" (Network & Recon Hunter)**, and the **"YARA WebShell Scanner"** to detect advanced threats including **Account Takeover**, **Privilege Escalation**, **Evidence Wiping**, **Web Intrusion Chains**, **Cross-Artifact Tampering**, and **Removable Drive Execution (Phantom Drive)**.
+Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** orchestrated by **"Hekate"**, supported by **"Chronos" (The Time Lord)**, **"Hercules" (The Referee)**, the **"PlutosGate" (Network & Recon Hunter)**, and the **"YARA WebShell Scanner"** to detect advanced threats including **Account Takeover**, **Privilege Escalation**, **Evidence Wiping**, **Web Intrusion Chains**, **Cross-Artifact Tampering**, and **Removable Drive Execution (Phantom Drive)**.
 
-**Current Version:** v6.7 (Phantom Drive & Console History Detection)
+**Current Version:** v6.9.5 (Advanced Console History & IoC Generalization)
 
 ---
 
@@ -128,7 +128,10 @@ graph TD
 ### 1. The Triad Architecture (Time, Space, Narrative)
 * **Clotho (Parser):** High-speed ingestion of KAPE artifacts (MFT, USN, EventLogs, Registry, SRUM) using Rust-based Polars. Optimized for large datasets (millions of rows).
 * **Atropos (Analyzer):** "Themis" rule-based logic to cut the thread of life (separate Signal from Noise). Uses a dual-pass scoring system.
-* **Lachesis (The Weaver - Modular v6.1):** The reporting engine has been refactored into a modular architecture for scalability:
+* **Lachesis (The Weaver - Modular v6.9):** The reporting engine has been refactored for **Semantic Visibility**:
+    * **IoC Generalization (v6.9):** Automatically extracts `IP_TRACE` and `DOMAIN_TRACE` from any detected artifact using high-precision regex without hardcoding.
+    * **Dynamic Contextual Labeling:** Instead of generic "Hosts Modification", reports now show `📝 Hosts Change: 192.168.137.129`, preventing deduplication from hiding critical evidence.
+    * **PowerShell Escape Cleaning:** Natively handles backticks (`` `n ``, `` `t ``) and tab delimiters in `history.txt` to ensure 100% extraction accuracy.
     * **Verb-Based Visualization (v6.1):** Replaced legacy Mermaid graphs with a **Verb-Based Sequence Diagram** (Download → Execute → Discover → Cleanup), visualizing the attack flow with precise timestamps and artifact sources (`[UA]`, `[AC]`).
     * **Intent-Based Analysis:** Analyst Notes now explain the *likely intent* of tools (e.g., "Possible Hands-on-Keyboard Intrusion") rather than just describing the artifact.
     * **MidasTouch (Docs Engine):** Reintegrated **SH_MidasTouch.py** to auto-generate formatted DOCX reports and "Team Sync Packages" (Evidence Zips).
@@ -243,6 +246,20 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
 
 ## 📜 Complete Changelog
 
+### v6.9.5 - Advanced Console History & IoC Generalization 🦁🛡️
+* **[NEW]** **Generalized IoC Extraction:**
+    * **Automated Domain Discovery:** Regex-based extraction of `.local`, `.com`, `.net` etc., from any event summary/detail.
+    * **PowerShell Hygiene:** Added logic to strip `` `n ``, `` `t `` and `\t` delimiters that previously blocked IP/Domain word boundaries.
+    * **Visibility Score (400):** Extracted network indicators found in high-risk contexts (like Hosts changes) are boosted to bypass noise filters.
+* **[NEW]** **Dynamic Semantic Labeling:**
+    * **Hosts Change Transparency:** Reports now dynamically include the target IP/Domain in the event summary (e.g., `📝 Hosts Change: 192.168.137.129`).
+    * **Deduplication Bypass:** Prevents multiple hosts file changes from being "collapsed" into a single generic entry in the report.
+* **[FIX]** **ConsoleHost History Parsing:**
+    * **Action/Value Priority:** Fixed command extraction priority to ensure the raw command is always preserved in the `Payload` field even when `Source=History`.
+    * **Tab Delimiter Handling:** Resolved issues where tab characters in PowerShell commands were incorrectly attached to extracted domains (e.g., `twww.ccdfir.local` → `www.ccdfir.local`).
+* **[FIX]** **Analysis Stability:**
+    * **UnboundLocalError Fix:** Resolved a variable shadowing issue with `re` / `json` imports in `sh_analyzer.py`.
+
 ### v6.7 - Phantom Drive & Console History Detection 👻💻
 * **[NEW]** **ConsoleHostDetector (v6.7):** PowerShell履歴ファイル直接解析モジュール。
     * **Phantom Drive Detection:** `A:\`, `B:\` ドライブからの実行を検出し `REMOVABLE_DRIVE_EXECUTION` (Score +500) としてタグ付け。
@@ -251,7 +268,7 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
     * **Raw Directory Support:** `--raw` 引数によりKAPE生データディレクトリから `ConsoleHost_history.txt` を直接読み取り。
 * **[NEW]** **CorrelationDetector (v6.7):** クロスアーティファクト相関分析モジュール。
     * **SRUM Traffic Validation:** LATERAL_MOVEMENT タグを持つイベントをSRUMデータと照合し、実際の通信が確認された場合 `TRAFFIC_CONFIRMED` (Score +500) を付与。
-    * **Execution Confirmation:** Prefetch/ShimCache との照合により `EXECUTION_CONFIRMED` タグを付与。
+    * **Execution Confirmation:** Prefetch/ShimCache ととの照合により `EXECUTION_CONFIRMED` タグを付与。
 * **[FIX]** **NoiseFilter Enhancement:** クリティカルタグパターンを拡張。
     * **Protected Tags:** `PHANTOM_DRIVE`, `DEFENDER_DISABLE`, `HOSTS_FILE`, `HISTORY_DETECTED`, `CONFIRMED`, `EXECUTION_CONFIRMED`, `REMOVABLE_DRIVE` を保護リストに追加。
     * **Noise Pattern Cleanup:** `win-updates`, `preprovisioner`, `(?i)^A:\\` をノイズリストから削除。

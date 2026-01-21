@@ -115,7 +115,7 @@
 {% endif %}
 {# P2: Show primary tag only (first tag before comma) #}
 {% set primary_tag = ev.Tag.split(',')[0] if ev.Tag else ev.Type %}
-| {{ ev.Time.replace('T', ' ')[:16] if ev.Time else '-' }} | {{ primary_tag[:20] }} | **{{ ev.Value.split('\\')[-1][-40:] }}** | `{{ ev.Path[-35:] if ev.Path else '-' }}` | {{ ev.Score }} |
+| {{ ev.Time.replace('T', ' ')[:16] if ev.Time else '-' }} | {{ primary_tag[:20] }} | **{{ ev.Value }}** | `{{ ev.Path[-35:] if ev.Path else '-' }}` | {{ ev.Score }} |
 {% endfor %}
 
 > 📦 **低スコアイベント (Score < 400)** は可読性のため省略されています。詳細は `Timeline_Full.csv` を参照してください。

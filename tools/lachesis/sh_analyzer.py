@@ -1,5 +1,6 @@
 import re
 import os
+import json
 import polars as pl
 from datetime import datetime, timedelta
 from tools.lachesis.intel import TEXT_RES
@@ -341,6 +342,71 @@ class LachesisAnalyzer:
             if val and val.lower() not in ["none", "n/a", "null", ""]:
                 return val
         return ""
+
+    def _clean_json_garbage(self, text):
+        """
+        [Fix] JSON形式のログから、人間が読める 'Script' や 'Command' 部分だけを抽出する
+        """
+        if not text: return text
+        
+        # 0. 末尾のJSON的なゴミを一括除去 (}}]}} 等)
+        # 特にパスの末尾にゴミがついているケースに対応
+        if len(text) < 100:
+            text = re.sub(r'[\"\'\}\] ]+$', '', text).strip()
+            # パスっぽいが先頭にゴミがある場合
+            text = re.sub(r'^[\[\{\"\' ]+', '', text).strip()
+
+        # 1. 明らかな非JSONはスルー（高速化）
+        if "{" not in text and "}" not in text:
+            return text
+
+        # 2. 特有の構造から抽出を試みる
+        try:
+            # [v6.8] Path を最優先にして、スクリプト全文ではなくファイル名を抽出
+            keys = ["Path", "CommandLine", "Command", "Value", "#text"]
+            
+            # パターンA: 標準的な "Key": "Value"
+            # パターンB: "@Name": "Key", "#text": "Value" (XML/JSON変換形式)
+            for key in keys:
+                # パターンBを優先（より特定的）
+                pat_b = rf'"@Name":\s*"{key}",\s*"#text":\s*"([^"]+)"'
+                match = re.search(pat_b, text, re.IGNORECASE)
+                if not match:
+                    # パターンA
+                    pat_a = rf'"{key}":\s*"([^"]+)"'
+                    match = re.search(pat_a, text, re.IGNORECASE)
+                
+                if match:
+                    clean = match.group(1).replace(r'\"', '"').replace(r'\n', ' ').replace(r'\r', '').strip()
+                    if re.match(r'^\d+$', clean): continue # 数字のみはスキップ
+                    
+                    # 先頭のコメント除去
+                    if clean.startswith("#"):
+                         clean = re.sub(r'^#.*$', '', clean, flags=re.MULTILINE).strip()
+                    
+                    # 抽出に成功したがまだJSONの断片（}]}}など）が含まれている場合、それ以降をカット
+                    if '"' in clean or "}" in clean or "]" in clean:
+                         # 最初に見つかった閉じ記号で切る
+                         clean = re.split(r'["}]', clean)[0].strip()
+
+                    return clean[:80] + "..." if len(clean) > 80 else clean
+
+        except:
+            pass
+
+        # 3. マッチしなかったがJSONっぽい場合
+        if ("{" in text or "}" in text):
+             if len(text) > 80:
+                 # スクリプト名らしきものを探す (A:\...ps1 など)
+                 file_match = re.search(r'([a-zA-Z]:\\[^"\}]+\.ps1)', text)
+                 if file_match:
+                     return file_match.group(1)
+                 return "[Complex Data Object]"
+             else:
+                 # 短いゴミ付き文字列ならゴミを削って返す
+                 return re.sub(r'[\"\'\}\] ]+$', '', text).strip()
+
+        return text
 
     def _is_noise(self, ioc):
         fname = str(ioc.get("Value", "")).lower()
@@ -1203,13 +1269,22 @@ class LachesisAnalyzer:
                      })
 
     def _extract_visual_iocs_from_events(self, events):
+        # [v6.9.3] Universal Indicator Extraction (No Hardcoding)
         re_ip = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b')
+        # General FQDN/local domain pattern (e.g., ccdfir.local, google.com)
+        re_domain = re.compile(r'\b([a-zA-Z0-9.-]+\.(?:local|com|net|org|edu|gov|io|biz|info))\b', re.IGNORECASE)
+        
         infra_ips = self.intel.infra_ips
         if not infra_ips:
             infra_ips = {"10.0.2.15", "10.0.2.2", "127.0.0.1", "0.0.0.0", "::1"} 
+
         for ev in events:
+            # [Fix] Pre-process content to handle common PowerShell escapes that break word boundaries
             content = ev['Summary'] + " " + str(ev.get('Detail', ''))
-            ips = re_ip.findall(content)
+            content_clean = content.replace("`n", " ").replace("`t", " ").replace("`r", " ")
+            
+            # 1. IP Traces
+            ips = re_ip.findall(content_clean)
             for ip in ips:
                 if ip in infra_ips or ip.startswith("127."): 
                     self.infra_ips_found.add(ip); continue
@@ -1219,8 +1294,36 @@ class LachesisAnalyzer:
                         p1 = int(parts[0]); p2 = int(parts[1])
                         if p1 < 10 and ip != "1.1.1.1" and ip != "8.8.8.8" and ip != "8.8.4.4": continue 
                     except: continue
+                
+                # [Context Boost] Add note if found in a hosts-related event
+                is_hosts_context = "HOSTS" in str(ev.get('Tag', '')).upper()
+                note = f"Detected in {ev['Source']}"
+                if is_hosts_context:
+                    note = f"📍 Extracted from suspected Hosts modification ({ev['Source']})"
+
                 self._add_unique_visual_ioc({
-                    "Type": "IP_TRACE", "Value": ip, "Path": "Network", "Note": f"Detected in {ev['Source']}"
+                    "Type": "IP_TRACE", "Value": ip, "Path": "Network", 
+                    "Note": note, "Score": 400 if is_hosts_context else 300, "Tag": "IP_IOC"
+                })
+
+            # 2. Domain Traces (Automated Extraction)
+            # Use content_clean to avoid `twww.domain.com
+            domains = re_domain.findall(content_clean)
+            for domain in domains:
+                domain = domain.strip()
+                dom_lower = domain.lower()
+                
+                # Skip noise/system infrastructure
+                if any(x in dom_lower for x in ["microsoft.com", "windows.com", "bing.com", "localhost"]): continue
+                
+                is_hosts_context = "HOSTS" in str(ev.get('Tag', '')).upper()
+                note = f"Detected in {ev['Source']}"
+                if is_hosts_context:
+                    note = f"🌐 Extracted from suspected Hosts modification ({ev['Source']})"
+
+                self._add_unique_visual_ioc({
+                    "Type": "DOMAIN_TRACE", "Value": domain, "Path": "Network",
+                    "Note": note, "Score": 400 if is_hosts_context else 300, "Tag": "DOMAIN_IOC"
                 })
             
             is_dual = self.intel.is_dual_use(ev.get('Summary', ''))
@@ -1270,15 +1373,35 @@ class LachesisAnalyzer:
                             type_label = "EXECUTION"
                             reason_label = "Execution"
 
+                        # [Implementation: Display Decoupling]
+                        # Disconnect raw evidence (for storage) from display value (for report)
+                        raw_summary = ev.get('Summary', '')
+                        raw_val = str(kws[0]) if kws else raw_summary
+                        
+                        # Apply heavy cleaning for JSON/Scripts
+                        if "{" in raw_val or "}" in raw_val:
+                            cleaned_val = self._clean_json_garbage(raw_val)
+                            # If it's still too messy or leaked through
+                            if len(cleaned_val) > 200 or "{" in cleaned_val:
+                                cleaned_val = self._clean_json_garbage(raw_summary)
+                        else:
+                            cleaned_val = raw_val
+
+                        # Final safety cap for the Analyzer stage
+                        if len(cleaned_val) > 300:
+                            cleaned_val = cleaned_val[:300] + "..."
+
                         self._add_unique_visual_ioc({
-                            "Type": type_label, "Value": kws[0], "Path": "Process" if type_label=="EXECUTION" else "File", 
+                            "Type": type_label, 
+                            "Value": cleaned_val, # Decoupled display value 
+                            "Path": "Process" if type_label=="EXECUTION" else "File", 
                             "Note": f"{reason_label} ({ev['Source']})",
                             "Reason": reason_label,
                             # [FIX] Use raw time (events usually have it normalized)
                             "Time": ev.get('Time'),
                             "Score": score,
                             "Tag": tag,
-                            "Summary": ev.get('Summary', ''),
+                            "Summary": self._clean_json_garbage(raw_summary),
                             "FileName": ev.get('FileName'),
                             "Target_FileName": ev.get('Target_FileName'),
                             "Target_Path": ev.get('Target_Path'),
@@ -1291,6 +1414,130 @@ class LachesisAnalyzer:
     def _add_unique_visual_ioc(self, ioc_dict):
         tag = str(ioc_dict.get("Tag", "")).upper()
         path = str(ioc_dict.get("Path", "")).upper()
+        val = str(ioc_dict.get("Value", ""))
+        val_lower = val.lower()
+        
+        # [v6.9] Semantic Value Override - Transform raw values into human-readable labels
+        # Store original value in Payload for evidence preservation
+        original_value = val
+        
+        # 1. Defender Tampering - Extract actual command from JSON or Action field
+        if "DEFENDER_DISABLE" in tag:
+            extracted_cmd = None
+            source_path = None
+            source_field = str(ioc_dict.get("Source", ""))
+            action_field = str(ioc_dict.get("Action", ""))
+            
+            # [Case 10 Fix] ConsoleHost_history events have command in Action field primarily
+            # Value field might have been overwritten with the path in _extract_visual_iocs_from_events
+            if "history" in source_field.lower():
+                # Use Action field if available, otherwise fallback to Value
+                cmd_candidate = action_field if action_field and len(action_field) > 5 else val
+                if cmd_candidate and not cmd_candidate.startswith("{"):
+                    extracted_cmd = cmd_candidate[:500]
+                    source_path = str(ioc_dict.get("Target_Path", ""))
+                
+            # For ScriptBlock events, try to parse JSON from Value
+            elif val.startswith("{"):
+                try:
+                    data = json.loads(val)
+                    if "EventData" in data and "Data" in data["EventData"]:
+                        for item in data["EventData"]["Data"]:
+                            if isinstance(item, dict):
+                                name = item.get("@Name", "")
+                                text = str(item.get("#text", ""))
+                                if name == "Path" and text:
+                                    source_path = text
+                                elif name == "ScriptBlockText" and text:
+                                    # Handle both real newlines and escaped newlines
+                                    text_norm = text.replace("\\n", "\n").replace("\\r", "\r")
+                                    # Search for actual Defender commands
+                                    patterns = [
+                                        r'Set-MpPreference\s+-DisableRealtimeMonitoring\s+\$true',
+                                        r'Set-MpPreference\s+-ExclusionPath',
+                                        r'Add-MpPreference\s+-ExclusionPath',
+                                        r'-DisableRealtimeMonitoring\s+\$true',
+                                    ]
+                                    for pattern in patterns:
+                                        match = re.search(pattern, text_norm, re.IGNORECASE)
+                                        if match:
+                                            # Get surrounding context (40 chars before, 60 after)
+                                            start = max(0, match.start() - 40)
+                                            end = min(len(text_norm), match.end() + 60)
+                                            extracted_cmd = text_norm[start:end].strip()[:200]
+                                            break
+                                    # Fallback: show first mppreference occurrence with context
+                                    if not extracted_cmd and "mppreference" in text_norm.lower():
+                                        idx = text_norm.lower().find("mppreference")
+                                        if idx >= 0:
+                                            start = max(0, idx - 20)
+                                            end = min(len(text_norm), idx + 100)
+                                            extracted_cmd = text_norm[start:end].strip()[:200]
+                except:
+                    pass
+            
+            # Build Payload with both command and source
+            if extracted_cmd:
+                payload = extracted_cmd
+                if source_path:
+                    payload = f"Source: {source_path}\nCommand: {extracted_cmd}"
+                ioc_dict["Payload"] = payload
+            elif source_path:
+                ioc_dict["Payload"] = f"Source: {source_path}"
+            else:
+                ioc_dict["Payload"] = original_value
+            ioc_dict["Value"] = "🛡️ Defender Tampering (Realtime Disable)"
+        
+        # 2. Hosts File Modification - Dynamic Labeling to prevent duplication loss
+        elif "HOSTS_FILE_MODIFICATION" in tag:
+            source_field = str(ioc_dict.get("Source", ""))
+            action_field = str(ioc_dict.get("Action", ""))
+            
+            # [Fix] Extract specific value for dynamic labeling
+            label_val = ""
+            # Priority: Action field (raw command) > original_value (summarized)
+            cmd_candidate = action_field if action_field and len(action_field) > 5 else original_value
+            
+            # Improved Regex: Capture IP or Domain, allowing for surrounding delimiters like \t or \n
+            match = re.search(r'((?:\d{1,3}\.){3}\d{1,3}|[a-zA-Z0-9.-]+\.(?:local|com|net|org))', cmd_candidate)
+            if match: 
+                extracted = match.group(1).strip()
+                label_val = f": {extracted}"
+            
+            if "history" in source_field.lower():
+                target_path = str(ioc_dict.get("Target_Path", ""))
+                if target_path:
+                    ioc_dict["Payload"] = f"Source: {target_path}\nCommand: {cmd_candidate}"
+                else:
+                    ioc_dict["Payload"] = cmd_candidate
+            else:
+                ioc_dict["Payload"] = original_value
+            
+            # Decouple Display Value - Dynamic Label prevents O(1) deduplication
+            ioc_dict["Value"] = f"📝 Hosts Change{label_val}"
+        
+        # 3. A: Drive / Phantom Drive - Generalized keyword-based labeling
+        # [FIX v6.9.1] Removed hardcoded filenames, using keyword patterns instead
+        elif val.startswith("A:\\") or val.startswith("A:/") or "A:\\\\" in val:
+            ioc_dict["Payload"] = original_value
+            
+            # Extract filename for display
+            fname = val.split("\\")[-1] if "\\" in val else val.split("/")[-1]
+            
+            # Keyword-based generalized labeling (no hardcoded filenames)
+            if any(kw in val_lower for kw in ["update", "patch", "upgrade"]):
+                label = "🚨 Fake Update Suspicion"
+            elif any(kw in val_lower for kw in ["setup", "install", "provision", "deploy"]):
+                label = "🔧 Attack Tooling Setup"
+            elif any(kw in val_lower for kw in ["winrm", "remote", "ssh", "psexec", "wmi"]):
+                label = "🌐 Remote Access Setup"
+            elif any(kw in val_lower for kw in ["persist", "autologon", "startup", "schedule"]):
+                label = "🔁 Persistence Mechanism"
+            else:
+                label = "💾 Phantom Drive Execution"
+            
+            ioc_dict["Value"] = f"{label} ({fname})"
+        
         is_critical = "TIMESTOMP" in tag or "CRITICAL" in tag or "REMOTE_ACCESS" in tag or "LATERAL" in tag
         is_critical = is_critical or "SETMACE" in path or "PUTTY" in path
 
@@ -1418,14 +1665,91 @@ class LachesisAnalyzer:
     def generate_ioc_insight(self, ioc):
         ioc_type = str(ioc.get('Type', '')).upper()
         tag = str(ioc.get('Tag', '')).upper()
-        
-        if "ANTI_FORENSICS" in ioc_type:
-            return "🚨 **Evidence Destruction**: 証拠隠滅ツールです。実行回数やタイムスタンプを確認してください。"
-        
         val = str(ioc.get('Value', ''))
         val_lower = val.lower()
         reason = str(ioc.get('Reason', '')).upper()
         path = str(ioc.get('Path', ''))
+        payload = str(ioc.get('Payload', ''))  # Raw command data if available
+        
+        # [v6.9.1] Phantom Drive Detection - Generalized keyword-based labeling
+        is_phantom_drive = val.startswith("A:\\") or val.startswith("A:/") or "A:\\\\" in val
+        is_phantom_drive = is_phantom_drive or any(kw in val_lower for kw in ["phantom drive", "fake update", "attack tooling", "remote access setup"])
+        
+        if is_phantom_drive:
+            insights = ["💾 **Phantom Drive Execution Detected** (外部メディアからの実行)"]
+            insights.append(f"- **Artifact**: `{val}`")
+            
+            # Keyword-based insight (no hardcoded filenames)
+            if any(kw in val_lower for kw in ["update", "patch", "upgrade"]):
+                insights.append("- 🚨 **Fake Update Suspicion**: 更新プログラムを装った偽装スクリプトの可能性があります。")
+            elif any(kw in val_lower for kw in ["setup", "install", "provision", "deploy"]):
+                insights.append("- 🔧 **Attack Tooling**: セットアップ・展開用スクリプトと推定されます。")
+            elif any(kw in val_lower for kw in ["winrm", "remote", "ssh", "psexec", "wmi"]):
+                insights.append("- 🌐 **Remote Access**: リモートアクセスを有効化するスクリプトです。")
+            elif any(kw in val_lower for kw in ["persist", "autologon", "startup", "schedule"]):
+                insights.append("- 🔁 **Persistence**: 永続化メカニズムに関連するスクリプトです。")
+            
+            insights.append("- ⚠️ **Impact**: 外部メディア（USB等）からの実行により、Cドライブのフォレンジック痕跡を回避しています。")
+            insights.append("- 🔍 **Next Step**: USBデバイスの接続履歴（setupapi.dev.log, USBSTOR）を調査してください。")
+            return "<br/>".join(insights)
+        
+        # [v6.9.1] Defense Evasion Detection (ConsoleHost_history.txt) - NO HARDCODED COMMANDS
+        if "consolehost_history" in val_lower:
+            insights = ["📜 **PowerShell Command History Detected** (ConsoleHost_history.txt)"]
+            insights.append("- **File**: PowerShell の履歴ファイルを検知しました。")
+            
+            # Display actual payload if available
+            if payload and payload != val and "[complex" not in payload.lower():
+                insights.append("")
+                insights.append("📝 **Raw Evidence**:")
+                insights.append("```")
+                insights.append(f"{payload[:500]}" if len(payload) > 500 else payload)
+                insights.append("```")
+            else:
+                insights.append("- ⚠️ 元データにコマンド内容が含まれていません。ファイルを直接確認してください。")
+            
+            insights.append("")
+            insights.append("- 🔍 **Next Step**: このファイルの内容を直接確認し、実行されたコマンドを特定してください。")
+            return "<br/>".join(insights)
+
+        # [v6.9.1] Defender Tampering - NO HARDCODED COMMANDS
+        if "DEFENDER_DISABLE" in tag or "defender tampering" in val_lower:
+            insights = ["🛡️ **Defender Tampering Detected** (リアルタイム保護の無効化)"]
+            insights.append("- **Detection**: DEFENDER_DISABLE タグに基づく検知です。")
+            insights.append("- ⚠️ **Severity**: CRITICAL")
+            
+            # Display actual payload if available - NO HARDCODED FALLBACK
+            if payload and payload != val and "[complex" not in payload.lower():
+                insights.append("")
+                insights.append("📝 **Raw Evidence**:")
+                insights.append("```")
+                insights.append(f"{payload[:500]}" if len(payload) > 500 else payload)
+                insights.append("```")
+            else:
+                insights.append("- ⚠️ 元データにコマンド内容が含まれていません。イベントログを直接確認してください。")
+            
+            insights.append("")
+            insights.append("- 🔍 **Next Step**: イベントログ (Microsoft-Windows-Windows Defender/Operational) を確認してください。")
+            return "<br/>".join(insights)
+
+        # [v6.9.1] Hosts File Modification - Generalized (no hardcoded domains/IPs)
+        if "HOSTS_FILE_MODIFICATION" in tag:
+            insights = ["📝 **Hosts File Modification Detected**"]
+            insights.append("- **Target**: `%SystemRoot%\\System32\\drivers\\etc\\hosts`")
+            insights.append("- ⚠️ **Impact**: DNS解決を改ざんし、C2通信やフィッシングに利用された可能性があります。")
+            insights.append("- 🔍 **Next Step**: hostsファイルの内容を確認し、不審なドメイン/IPマッピングを特定してください。")
+            
+            if payload and payload != val and "[complex" not in payload.lower():
+                insights.append("")
+                insights.append("📝 **Raw Evidence**:")
+                insights.append("```")
+                insights.append(f"{payload[:300]}" if len(payload) > 300 else payload)
+                insights.append("```")
+            
+            return "<br/>".join(insights)
+
+        if "ANTI_FORENSICS" in ioc_type:
+            return "🚨 **Evidence Destruction**: 証拠隠滅ツールです。実行回数やタイムスタンプを確認してください。"
         
         if "SAM_SCAVENGE" in tag or "SAM_SCAVENGE" in ioc_type:
             insights = ["☠️ **Chain Scavenger Detection** (Dirty Hive Hunter)"]
