@@ -31,9 +31,13 @@ class NoiseFilter(BaseDetector):
             if "Judge_Verdict" not in cols:
                 df = df.with_columns(pl.lit("").alias("Judge_Verdict"))
             
-            # [FIX] Protect critical forensic tags from noise filtering
-            # If Tag contains NEW_USER_CREATION or other critical tags, don't treat as noise
-            has_critical_tag = pl.col("Tag").fill_null("").str.contains("(?i)NEW_USER_CREATION|CRITICAL|ANTI_FORENSICS|LATERAL_MOVEMENT|STAGING_TOOL")
+            # [v6.2 Case10 Fix] 拡張クリティカルタグパターン
+            # Phantom Drive, Defender無効化, Hosts改ざん等の新規タグを保護
+            has_critical_tag = pl.col("Tag").fill_null("").str.contains(
+                r"(?i)(CRITICAL|METASPLOIT|COBALT|MIMIKATZ|WEBSHELL|BACKDOOR|RANSOM|WIPING|"
+                r"ANTI_FORENSICS|PHANTOM_DRIVE|DEFENDER_DISABLE|HOSTS_FILE|HISTORY_DETECTED|"
+                r"CONFIRMED|EXECUTION_CONFIRMED|REMOVABLE_DRIVE|NEW_USER_CREATION|LATERAL_MOVEMENT|STAGING_TOOL)"
+            )
             
             # [Case 6 Fix] Protect critical staging tool filenames from noise filtering
             # Even if they are in chocolatey/temp paths, 7za.exe and similar tools are forensically important

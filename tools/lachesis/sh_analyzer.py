@@ -524,8 +524,12 @@ class LachesisAnalyzer:
         medium_events = []
 
         for ev in raw_events:
-            try: score = int(float(ev.get('Criticality', 0)))
+            try:
+                # [Fix] support both Score (v6.1+) and Criticality (Legacy/Triad-specific)
+                score_val = ev.get('Score') or ev.get('Criticality', 0)
+                score = int(float(score_val))
             except: score = 0
+
             summary = ev.get('Summary', '')
             tag = str(ev.get('Tag', '')).upper()
             is_dual = self.intel.is_dual_use(summary)
@@ -563,7 +567,6 @@ class LachesisAnalyzer:
         self.visual_iocs = []
         self._extract_visual_iocs_from_pandora(dfs)
         self._extract_visual_iocs_from_timeline(dfs) 
-        print(f"[DEBUG-ANALYZER] Visual IOCs after Timeline: {len(self.visual_iocs)}")
         self._extract_visual_iocs_from_chronos(dfs)
         self._extract_visual_iocs_from_aion(dfs)
         self._extract_visual_iocs_from_plutos_srum(dfs)
@@ -1223,16 +1226,18 @@ class LachesisAnalyzer:
             is_dual = self.intel.is_dual_use(ev.get('Summary', ''))
             tag = str(ev.get('Tag', '')).upper()
             summary_lower = str(ev.get('Summary', '')).lower()
+            category = str(ev.get('Category', '')).upper()  # [FIX v6.7] Handle None
             
-            is_af = "ANTI_FORENSICS" in tag or "ANTIFORENSICS" in tag or "TIMESTOMP" in tag
+            is_af = "ANTI_FORENSICS" in tag or "ANTIFORENSICS" in tag or "TIMESTOMP" in tag or "HOSTS" in tag
             is_remote = "REMOTE_ACCESS" in tag or "SSH" in tag or "putty" in summary_lower or "winscp" in summary_lower
-            is_lateral = "LATERAL" in tag or ev['Category'].upper() == "LATERAL" or "\\\\" in summary_lower
+            is_lateral = "LATERAL" in tag or category == "LATERAL" or "\\\\" in summary_lower
             is_webshell = "WEBSHELL" in tag or "OBFUSCATION" in tag
-            score = ev.get('Criticality', 0)
+            score_val = ev.get('Score') or ev.get('Criticality', 0)
+            score = int(float(score_val))
 
             allowed_cats = ['EXEC', 'ANTI', 'FILE', 'LATERAL', 'PERSIST', 'EXECUTION', 'LOG_ENTRY', 'ARTIFACT_WRITE']
             
-            if (score >= 90 or is_dual or is_af or is_webshell or is_remote or is_lateral) and ( any(c in ev['Category'].upper() for c in allowed_cats) or "CRITICAL" in tag):
+            if (score >= 90 or is_dual or is_af or is_webshell or is_remote or is_lateral) and ( any(c in category for c in allowed_cats) or "CRITICAL" in tag):
                 kws = ev.get('Keywords', [])
                 if not kws:
                      tgt = ev.get('Target_Path') or ev.get('FileName') or ev.get('Summary')
@@ -1241,6 +1246,7 @@ class LachesisAnalyzer:
                 if kws:
                     kw = str(kws[0]).lower()
                     is_crit_bypass = "TIMESTOMP" in tag or "REMOTE_ACCESS" in tag or "CRITICAL" in tag
+                    
                     if is_crit_bypass or not self.intel.is_noise(kw):
                         if is_af:
                             type_label = "ANTI_FORENSICS"

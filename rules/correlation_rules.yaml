@@ -1,0 +1,77 @@
+# ============================================================
+#  SkiaHelios Correlation Rules v1.0
+#  Purpose: Correlate stateless history (ConsoleHost) with
+#           timestamped events (EID 4104/4688) to confirm intent.
+# ============================================================
+
+correlation_rules:
+  # ------------------------------------------------------------
+  # 1. Removable Media & Hidden Execution (Case 10 Key)
+  # ------------------------------------------------------------
+  - id: "CORR_PHANTOM_DRIVE"
+    name: "Execution from Removable Drive (A:/B:)"
+    description: "Detects execution attempts from legacy/removable drives often used to bypass logging."
+    history_trigger:
+      keywords: ["A:\\", "B:\\", "A:/", "B:/"]
+      is_regex: true
+    event_validator:
+      event_ids: [4104, 4688]
+      search_pattern: "(?i)(A|B):[\\\\/]" # Log payload search
+    score: 1000
+    tags: ["LATERAL_MOVEMENT", "DEFENSE_EVASION", "USB_EXECUTION"]
+
+  # ------------------------------------------------------------
+  # 2. Defense Evasion: Defender Tampering (Case 10 Key)
+  # ------------------------------------------------------------
+  - id: "CORR_DEFENDER_DISABLE"
+    name: "Windows Defender Disabling"
+    description: "Correlates commands used to disable Realtime Monitoring or add Exclusion paths."
+    history_trigger:
+      keywords: ["Add-MpPreference", "Set-MpPreference", "DisableRealtimeMonitoring", "ExclusionPath"]
+    event_validator:
+      event_ids: [4104]
+      search_pattern: "(?i)(Add|Set)-MpPreference.*(Disable|Exclusion)"
+    score: 1000
+    tags: ["DEFENSE_EVASION", "SECURITY_DISABLE"]
+
+  # ------------------------------------------------------------
+  # 3. Network Configuration Tampering (Case 10 Key)
+  # ------------------------------------------------------------
+  - id: "CORR_HOSTS_TAMPERING"
+    name: "Hosts File Modification"
+    description: "Detects attempts to modify the local hosts file for redirection."
+    history_trigger:
+      keywords: ["drivers\\etc\\hosts", "drivers/etc/hosts"]
+    event_validator:
+      event_ids: [4104, 4688]
+      search_pattern: "(?i)etc.*hosts"
+    score: 1000
+    tags: ["IOC", "NETWORK_MANIPULATION"]
+
+  # ------------------------------------------------------------
+  # 4. Registry Persistence / Config (Case 10 Key)
+  # ------------------------------------------------------------
+  - id: "CORR_UPDATE_DISABLE"
+    name: "Windows Update Disabled via Registry"
+    description: "Detects registry keys set to disable Windows Auto Update."
+    history_trigger:
+      keywords: ["NoAutoUpdate", "WindowsUpdate\\AU"]
+    event_validator:
+      event_ids: [4104, 4688]
+      search_pattern: "(?i)NoAutoUpdate.*1"
+    score: 800
+    tags: ["PERSISTENCE", "SECURITY_WEAKENING"]
+
+  # ------------------------------------------------------------
+  # 5. Suspicious Network Activity (Generic)
+  # ------------------------------------------------------------
+  - id: "CORR_NETWORK_TEST"
+    name: "Network Connectivity Test (Ping/Curl)"
+    description: "Detects manual network testing which often precedes C2 connection."
+    history_trigger:
+      keywords: ["ping ", "curl ", "Invoke-WebRequest", "wget"]
+    event_validator:
+      event_ids: [4104, 4688]
+      search_pattern: "(?i)(ping|curl|wget|iwr).*"
+    score: 300
+    tags: ["DISCOVERY", "NETWORK_CONNECTION"]

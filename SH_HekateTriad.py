@@ -39,12 +39,19 @@ def main():
     # Source Dirs
     parser.add_argument("--kape", help="KAPE Raw Directory")
     parser.add_argument("--csv", help="KAPE CSV Directory")
+    parser.add_argument("--dir", help="Compatibility Alias for --csv or --kape")
     
     parser.add_argument("--docx", action="store_true")
     parser.add_argument("--lang", default="jp", choices=["jp", "en"], help="Report Language")
     parser.add_argument("--input", dest="timeline_input", help="Alias for timeline to satisfy Clotho")
 
     args = parser.parse_args()
+
+    # [v6.7] Dir normalization
+    if args.dir:
+        if not args.csv: args.csv = args.dir
+        if not args.kape: args.kape = args.dir
+
 
     # Ensure output directory exists
     if not os.path.exists(args.outdir):
@@ -192,6 +199,7 @@ def main():
                     "Summary": row.get('Action', '') or row.get('Description', '') or row.get('Summary', ''),
                     "Source": row.get('Source', row.get('Artifact_Type', 'Log')),
                     "Criticality": score,
+                    "Score": score, # Added Score
                     "Tag": tag,
                     "Keywords": [row.get('Target_Path')] if row.get('Target_Path') else [],
                     # [Fix] Preserve fields for Smart Formatting (Lachesis Renderer)
@@ -207,6 +215,9 @@ def main():
                 elif "ANTI_FORENSICS" in tag:
                         ev['Category'] = "ANTI"
                         verdict_flags.add("ANTI-FORENSICS")
+                elif "HOSTS" in tag:
+                        ev['Category'] = "ANTI"  # 防御回避/改ざんとして扱う
+                        verdict_flags.add("TAMPERING")
                 events.append(ev)
 
         except Exception as e:
@@ -227,6 +238,7 @@ def main():
                         "Summary": row.get('Action', '') or row.get('Description', '') or row.get('Summary', ''),
                         "Source": row.get('Source', row.get('Artifact_Type', 'Log')),
                         "Criticality": score,
+                        "Score": score, # Added Score
                         "Tag": tag,
                         "Keywords": [row.get('Target_Path')] if row.get('Target_Path') else [],
                         "FileName": row.get('FileName'),
@@ -241,6 +253,9 @@ def main():
                     elif "ANTI_FORENSICS" in tag:
                             ev['Category'] = "ANTI"
                             verdict_flags.add("ANTI-FORENSICS")
+                    elif "HOSTS" in tag:
+                            ev['Category'] = "ANTI"  # 防御回避/改ざんとして扱う
+                            verdict_flags.add("TAMPERING")
                     events.append(ev)
 
     # [2] Backup Source: Pandora (Ghost Report)
@@ -272,6 +287,7 @@ def main():
                         "Summary": f"Artifact Discovery: {file_name}",
                         "Source": "Pandora (Backup)",
                         "Criticality": min(score, 300), 
+                        "Score": min(score, 300), # Added Score
                         "Tag": ",".join(sorted(set([t.strip() for t in str(tag).split(",") if t.strip()]))), 
                         "Keywords": [file_name],
                         "FileName": file_name,
@@ -338,6 +354,7 @@ def main():
                             "Summary": f"LNK Access: {row.get('Target_Path')}",
                             "Source": "LNK",
                             "Criticality": 80,
+                            "Score": 80, # Added Score
                             "Tag": "CONFIDENTIAL_ACCESS" if "confidential" in str(row.get("Target_Path")).lower() else "LATERAL_MOVEMENT",
                             "FileName": row.get("SourceFileName"),
                             "Target_Path": row.get("Target_Path")
@@ -537,10 +554,15 @@ def main():
 
             # [User Request] 1. Strict Date Filter (Kill the Ghost)
             # Remove events significantly older than the main timeline cluster (e.g. >1 year gap)
-            if high_critical_times:
+            # [Case 10 Fix] Bypass for PowerShell History AND ScriptBlock - these events are critical forensic evidence
+            source_str = str(e.get('Source', ''))
+            is_ps_history = "PowerShell History" in source_str or "PowerShell (ScriptBlock)" in source_str
+            
+            if high_critical_times and not is_ps_history:
                  main_year = center.year # center calculated from median above
                  if dt_e.year < main_year - 1:
                      continue 
+
 
             # [User Request] 2. USN Demotion (Downgrade USN Events)
             # Reduce noise from FileCreate histories by removing tags and lowering score.

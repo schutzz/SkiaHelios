@@ -19,6 +19,8 @@ from tools.detectors.noise_filter import NoiseFilter
 from tools.detectors.activity_timeline_detector import ActivityTimelineDetector, LotLClusterDetector
 from tools.detectors.obfuscation_detector import ObfuscationDetector
 from tools.detectors.ads_detector import ADSDetector
+from tools.detectors.console_host_detector import ConsoleHostDetector
+from tools.detectors.correlation_detector import CorrelationDetector
 
 # ============================================================
 #  SH_HerculesReferee v5.0 [HERCULES UNBOUND]
@@ -84,8 +86,9 @@ class NetworkCorrelator:
 
 
 class HerculesReferee:
-    def __init__(self, kape_dir, triage_mode=False):
+    def __init__(self, kape_dir, raw_dir=None, triage_mode=False):
         self.kape_dir = Path(kape_dir)
+        self.raw_dir = Path(raw_dir) if raw_dir else self.kape_dir  # [FIX] Raw Dir for ConsoleHost
         self.triage_mode = triage_mode
         self.loader = ThemisLoader(["rules/triage_rules.yaml", "rules/sigma_process_creation.yaml"])
         self.hestia = Hestia()
@@ -104,6 +107,8 @@ class HerculesReferee:
             NetworkDetector(self.config),
             UserActivityDetector(self.config),
             ActivityTimelineDetector(self.config),   # NEW: InFocus analysis
+            ConsoleHostDetector(self.config, kape_dir=self.raw_dir),  # [FIX] Use raw_dir for history
+            CorrelationDetector(self.config),
             LotLClusterDetector(self.config),        # NEW: LotL cluster detection
             NoiseFilter(self.config) # Last to filter/silence
         ]
@@ -123,7 +128,70 @@ class HerculesReferee:
 
     def _load_evtx_csv(self):
         csvs = list(self.kape_dir.rglob("*EvtxECmd*.csv"))
-        return pl.read_csv(csvs[0], ignore_errors=True, infer_schema_length=0) if csvs else None
+        if not csvs: return None
+        # [v6.7] Combine all EvtxECmd CSVs if multiple exist
+        dfs = []
+        for c in csvs:
+            try:
+                dfs.append(pl.read_csv(c, ignore_errors=True, infer_schema_length=0))
+            except: pass
+        return pl.concat(dfs, how="diagonal") if dfs else None
+
+    def _ingest_ps_scriptblocks(self, df):
+        """
+        [v6.7] Ingest critical 4104 PowerShell ScriptBlock events from EvtxECmd CSV.
+        NOTE: Raw Payload is passed directly to Value/Summary for detection purposes.
+        """
+        print("    -> [Hercules] Ingesting critical PowerShell ScriptBlocks (4104)...")
+        df_evtx = self._load_evtx_csv()
+        if df_evtx is None: return df
+        
+        eid_col = "EventId" if "EventId" in df_evtx.columns else "EventID"
+        if eid_col not in df_evtx.columns: return df
+
+        # Filter for EID 4104 (ScriptBlock)
+        content_col = "ScriptBlockText" if "ScriptBlockText" in df_evtx.columns else "Payload"
+        
+        script_block_hits = df_evtx.filter(
+            (pl.col(eid_col).cast(pl.Int64, strict=False) == 4104) &
+            (
+                pl.col(content_col).str.contains(r"(?i)(win-updates|preprovisioner|[AB]:|Set-MpPreference|drivers.etc.hosts)")
+            )
+        )
+        
+        if script_block_hits.height == 0:
+            return df
+            
+        print(f"       >> Found {script_block_hits.height} critical ScriptBlock events.")
+        
+        rows = script_block_hits.to_dicts()
+        
+        new_rows = []
+        for row in rows:
+            payload = row.get("Payload", "")
+            content = row.get(content_col, "") or ""
+            
+            ts_col_name = "TimeCreated" if "TimeCreated" in df_evtx.columns else "Timestamp_UTC"
+            new_row = {
+                "Timestamp_UTC": row.get(ts_col_name),
+                "Source": "PowerShell (ScriptBlock)",
+                "Type": "EXECUTION",
+                "Category": "Execution",
+                # Raw payload for detection (original behavior before v6.7.2)
+                "Summary": str(content),
+                "Action": str(content),
+                "Value": str(payload),
+                "Target_Path": str(payload),
+                "Threat_Score": 0,
+                "Tag": "SCRIPTBLOCK_EXEC"
+            }
+            new_rows.append(new_row)
+        
+        ps_df = pl.DataFrame(new_rows)
+        
+        return pl.concat([df, ps_df], how="diagonal")
+
+
 
     def _extract_os_from_registry(self):
         # ... (Simplified for brevity, logic maintained)
@@ -401,9 +469,12 @@ class HerculesReferee:
     def judge(self, timeline_df, chronos_file=None):
         print("    -> [Hercules] Judging events with Modular Detectors...")
         
-        # [Fix] Standardize FileName column if missing (ChaosGrasp uses Target_Path)
         if "FileName" not in timeline_df.columns and "Target_Path" in timeline_df.columns:
             timeline_df = timeline_df.with_columns(pl.col("Target_Path").alias("FileName"))
+            
+        # [v6.7 NEW] Ingest critical ScriptBlocks
+        timeline_df = self._ingest_ps_scriptblocks(timeline_df)
+
             
         # [FIX v11.0] Merge Chronos Scores (Chronos_Score, Threat_Score, Threat_Tag)
         # Hercules must inherit scores from Chronos processing (Time_Anomalies.csv)
@@ -849,10 +920,18 @@ class HerculesReferee:
         self._extract_os_from_registry()
         try:
             df_timeline = pl.read_csv(timeline_csv, ignore_errors=True, infer_schema_length=0)
-            df_ghosts = pl.read_csv(ghost_csv, ignore_errors=True, infer_schema_length=0)
+            
+            # Optional Ghost Report
+            df_ghosts = None
+            if ghost_csv and Path(ghost_csv).exists():
+                df_ghosts = pl.read_csv(ghost_csv, ignore_errors=True, infer_schema_length=0)
+            else:
+                print(f"    [i] Ghost report not found: {ghost_csv}, skipping ghost correlation")
+                
             df_evtx = self._load_evtx_csv()
             if not self.os_info.startswith("Windows"): self._extract_os_info_evtx(df_evtx)
         except Exception as e: print(f"[-] Error loading inputs: {e}"); return
+
 
         # Merge Logic (Simplified)
         if "Action" in df_timeline.columns:
@@ -996,13 +1075,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--timeline", required=True)
     parser.add_argument("--ghosts", required=True)
-    parser.add_argument("--dir", required=True)
+    parser.add_argument("--dir", required=True, help="CSV Directory")
+    parser.add_argument("--raw", help="Raw KAPE Target Directory (for ConsoleHost_history.txt)")
     parser.add_argument("--chronos", help="Chronos Output (Time_Anomalies.csv) for Score Inheritance")
     parser.add_argument("-o", "--out", default="Hercules_Judged_Timeline.csv")
     parser.add_argument("--triage", action="store_true")
     args = parser.parse_args()
     
-    referee = HerculesReferee(kape_dir=args.dir, triage_mode=args.triage)
+    referee = HerculesReferee(kape_dir=args.dir, raw_dir=args.raw, triage_mode=args.triage)
     referee.execute(args.timeline, args.ghosts, args.out, chronos_file=args.chronos)
 
 if __name__ == "__main__":

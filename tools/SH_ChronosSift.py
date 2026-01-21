@@ -12,20 +12,16 @@ from tools.SH_HestiaCensorship import Hestia
 from tools.SH_IcarusParadox import IcarusParadox, IcarusConfig, IcarusDirection
 
 # ============================================================
-#  SH_ChronosSift v3.5 [Plan B: Precision Correlation Model]
+#  SH_ChronosSift v3.6 [Plan B: Compatibility Patch]
 #  Mission: Timeline Anomaly Detection & Artifact Cross-Check
-#  Update: Microburst Detection + Execution Evidence Cross-Check
-#  
-#  Plan B Logic:
-#    A. Microburst Detection (秒単位50件以上 → Update Storm)
-#    B. Execution Evidence Cross-Check (System32のみ、実行証拠なし → 白)
+#  Update: Fixed Icarus USN Type Mismatch (Datetime vs String)
 # ============================================================
 
 def print_logo():
     print(r"""
        (   )
       (  :  )   < CHRONOS SIFT >
-       (   )     v3.5 - Plan B
+       (   )     v3.6 - Plan B
         " "      "Time bows to the Law."
     """)
 
@@ -270,15 +266,6 @@ class ChronosEngine:
         return lf
 
     def check_null_timestamps(self, lf):
-        """
-        [Logic v4: Context-Based Scoring + Whitelist]
-        1. Whitelisted files (installers, VM tools) -> Score 0
-        2. SysInternals tools -> Context-based (30 for forensic hosts, 100 for general)
-        3. Other executables with Null Time -> Score 300 (CRITICAL)
-        4. LNK Files:
-           - Double Extension (.jpg.lnk) -> CRITICAL (Phishing/Masquerade)
-           - Single Extension (Chrome.lnk) -> Score 0 (Innocent)
-        """
         # Collect to apply per-row logic, then convert back
         df = lf.collect()
         
@@ -447,10 +434,16 @@ class ChronosEngine:
                   .alias("Anomaly_Extreme")
             ])
 
-            # Smart Filter: Keep valid dates OR extreme anomalies
+            # Smart Filter: Keep valid dates OR extreme anomalies OR HIGH-VALUE ARTIFACTS
+            # [FIX v8.2] Do NOT delete rows that already have high Threat_Score or critical tags
+            is_high_value = (
+                (pl.col("Threat_Score") >= 500) | 
+                pl.col("Threat_Tag").str.contains("METASPLOIT|COBALT|MIMIKATZ|EXPLOIT|C2|CRITICAL")
+            )
             lf = lf.filter(
                 (pl.col("si_dt").is_not_null() & pl.col("fn_dt").is_not_null()) | 
-                (pl.col("Anomaly_Extreme") != "")
+                (pl.col("Anomaly_Extreme") != "") |
+                is_high_value  # [FIX v8.2] High-value artifacts bypass timestamp filter
             )
 
             lf = lf.with_columns((pl.col("fn_dt") - pl.col("si_dt")).dt.total_seconds().fill_null(0).alias("diff_sec"))
@@ -473,16 +466,18 @@ class ChronosEngine:
                   .otherwise(pl.lit("")).alias("Anomaly_Zero")
             ])
             
+            # [FIX v9.0] Chronos_Score should PRESERVE existing Threat_Score from Sigma rules
+            # The old logic used .otherwise(0) which destroyed Sigma scores for files without timestamp anomalies
             score_expr = (
                 pl.when(pl.col("Anomaly_Time") == "CRITICAL_SYSTEM_ROLLBACK").then(300)
                 .when(pl.col("Threat_Tag") == "NOISE_ARTIFACT").then(0)
                 .when(pl.col("Threat_Tag") == "INFO_VM_TIME_SYNC").then(0)
                 .when(pl.col("Threat_Tag") == "INFO_NULL_TIMESTAMP").then(0)
-                .when(pl.col("Anomaly_Time") == "INFO_UPDATE_PATTERN").then(0) # [FIX] Score 0 for updates
+                .when(pl.col("Anomaly_Time") == "INFO_UPDATE_PATTERN").then(0)
                 .when(pl.col("Threat_Tag").str.contains("CRITICAL")).then(300) 
                 .when(pl.col("Anomaly_Time") == "CRITICAL_ARTIFACT").then(200)
-                .when(pl.col("Anomaly_Time") == "TIMESTOMP_BACKDATE").then(200) # [FIX] Score 200 for backdate
-                .otherwise(0)
+                .when(pl.col("Anomaly_Time") == "TIMESTOMP_BACKDATE").then(200)
+                .otherwise(pl.col("Threat_Score"))  # [FIX v9.0] Preserve existing Sigma score
             )
             lf = lf.with_columns(score_expr.alias("Chronos_Score"))
         else:
@@ -490,10 +485,11 @@ class ChronosEngine:
             lf = lf.with_columns([
                 pl.lit("").alias("Anomaly_Time"),
                 pl.lit("").alias("Anomaly_Zero"),
-                pl.lit(0).alias("Chronos_Score")
+                # [FIX v12.0] Preserve Threat_Score even if timestamps are missing
+                pl.col("Threat_Score").alias("Chronos_Score")
             ])
         
-        return lf.drop(["_dt", "_prev_dt", "_time_diff", "UpdateSequenceNumber_Int"])
+        return lf
 
     def _detect_system_time_context(self, lf):
         """
@@ -601,82 +597,6 @@ class ChronosEngine:
         ])
 
         return df.drop(["_pp", "_fn"])
-
-    def _detect_mft_timestomp(self, lf):
-        # 7. MFT Timestomp 検知 (Extreme Future etc.)
-        cols = lf.collect_schema().names()
-        si_cr, fn_cr = "SI_CreationTime", "FileName_Created"
-        
-        if "SI_CreationTime_Raw" in cols and "si_dt" in cols:
-            extreme_cond = (
-                (pl.col("SI_CreationTime_Raw").is_not_null()) & 
-                (pl.col("si_dt").is_null()) &
-                (pl.col("SI_CreationTime_Raw").str.len_chars() > 10)
-            ) | (pl.col("si_dt").dt.year() > 2030)
-
-            lf = lf.with_columns([
-                pl.when(extreme_cond)
-                  .then(pl.lit("TIMESTOMP_FUTURE_EXTREME"))
-                  .otherwise(pl.lit(""))
-                  .alias("Anomaly_Extreme")
-            ])
-
-            # Smart Filter: Keep valid dates OR extreme anomalies OR HIGH-VALUE ARTIFACTS
-            # [FIX v8.2] Do NOT delete rows that already have high Threat_Score or critical tags
-            is_high_value = (
-                (pl.col("Threat_Score") >= 500) | 
-                pl.col("Threat_Tag").str.contains("METASPLOIT|COBALT|MIMIKATZ|EXPLOIT|C2|CRITICAL")
-            )
-            lf = lf.filter(
-                (pl.col("si_dt").is_not_null() & pl.col("fn_dt").is_not_null()) | 
-                (pl.col("Anomaly_Extreme") != "") |
-                is_high_value  # [FIX v8.2] High-value artifacts bypass timestamp filter
-            )
-
-            lf = lf.with_columns((pl.col("fn_dt") - pl.col("si_dt")).dt.total_seconds().fill_null(0).alias("diff_sec"))
-
-            lf = lf.with_columns([
-                pl.when(pl.col("Anomaly_Time") == "CRITICAL_SYSTEM_ROLLBACK")
-                  .then(pl.lit("CRITICAL_SYSTEM_ROLLBACK"))
-                .when(pl.col("Threat_Tag").str.contains("CRITICAL_TIMESTOMP"))
-                  .then(pl.lit("CRITICAL_TIMESTOMP_ATTEMPT"))
-                .when((pl.col("Threat_Score") >= 80) & (pl.col("Threat_Tag") != "NOISE_ARTIFACT"))
-                  .then(pl.lit("CRITICAL_ARTIFACT"))
-                .when(pl.col("diff_sec") < -60)
-                  .then(pl.lit("INFO_UPDATE_PATTERN")) # [FIX] Regular Update
-                .when(pl.col("diff_sec") > self.tolerance)
-                  .then(pl.lit("TIMESTOMP_BACKDATE")) # [FIX] Backdating (MFT is older than Created)
-                .otherwise(pl.lit("")).alias("Anomaly_Time"),
-                
-                pl.when(pl.col("si_dt").dt.microsecond() == 0)
-                  .then(pl.lit("ZERO_PRECISION"))
-                  .otherwise(pl.lit("")).alias("Anomaly_Zero")
-            ])
-            
-            # [FIX v9.0] Chronos_Score should PRESERVE existing Threat_Score from Sigma rules
-            # The old logic used .otherwise(0) which destroyed Sigma scores for files without timestamp anomalies
-            score_expr = (
-                pl.when(pl.col("Anomaly_Time") == "CRITICAL_SYSTEM_ROLLBACK").then(300)
-                .when(pl.col("Threat_Tag") == "NOISE_ARTIFACT").then(0)
-                .when(pl.col("Threat_Tag") == "INFO_VM_TIME_SYNC").then(0)
-                .when(pl.col("Threat_Tag") == "INFO_NULL_TIMESTAMP").then(0)
-                .when(pl.col("Anomaly_Time") == "INFO_UPDATE_PATTERN").then(0)
-                .when(pl.col("Threat_Tag").str.contains("CRITICAL")).then(300) 
-                .when(pl.col("Anomaly_Time") == "CRITICAL_ARTIFACT").then(200)
-                .when(pl.col("Anomaly_Time") == "TIMESTOMP_BACKDATE").then(200)
-                .otherwise(pl.col("Threat_Score"))  # [FIX v9.0] Preserve existing Sigma score
-            )
-            lf = lf.with_columns(score_expr.alias("Chronos_Score"))
-        else:
-            print("    [!] MFT Timestamps not found. Skipping Standard Timestomp detection.")
-            lf = lf.with_columns([
-                pl.lit("").alias("Anomaly_Time"),
-                pl.lit("").alias("Anomaly_Zero"),
-                # [FIX v12.0] Preserve Threat_Score even if timestamps are missing
-                pl.col("Threat_Score").alias("Chronos_Score")
-            ])
-        
-        return lf
 
     def analyze(self, args):
         mode_str = "LEGACY" if args.legacy else "STANDARD"
@@ -859,6 +779,18 @@ class ChronosEngine:
                     try:
                         usn_lf = pl.scan_csv(args.usnj, ignore_errors=True, infer_schema_length=0)
                         mft_reuse = df.lazy()
+                        
+                        # [FIX] Cast timestamps back to String for Icarus compatibility
+                        # Icarus expects Strings to perform its own parsing/regex operations.
+                        time_cols_fix = ["SI_CreationTime", "StandardInformation_Modified"]
+                        # mft_reuse is a LazyFrame from eager DF, so it has concrete schemas.
+                        # We must check which columns exist in the eager DF to be safe.
+                        existing_cols = df.columns
+                        cast_exprs = [pl.col(c).cast(pl.Utf8) for c in time_cols_fix if c in existing_cols]
+                        
+                        if cast_exprs:
+                            mft_reuse = mft_reuse.with_columns(cast_exprs)
+
                         usn_res = self.icarus.inspect_usnj_safe(mft_reuse, usn_lf, suspects).collect()
                         
                         if usn_res.height > 0:

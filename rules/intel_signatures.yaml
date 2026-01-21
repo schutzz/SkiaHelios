@@ -475,12 +475,8 @@ noise_filters:
   - setup.exe
   - install.exe
   - update.exe
-  - win-updates
-  - preprovisioner
-  - post-win-updates
   - finish-actions
   - start-winrm
-  - (?i)^A:\\
   - windows[\\/]system32[\\/]oobe
   - oobe-
   - knockout-helpers.js
@@ -964,3 +960,39 @@ web_intrusion:
   - (?i)juiceshop
   - (?i)bwapp
   - (?i)damn.*vulnerable
+
+# ============================================================
+# [Case 10 Fix] PowerShell History Detection Rules (Boosted)
+# ============================================================
+console_history_rules:
+  # Defender無効化は攻撃の前提となるため、最高レベルに引き上げ
+  - pattern: "(?i)Add-MpPreference"
+    score: 1000
+    tag: "DEFENDER_DISABLE_ATTEMPT"
+  - pattern: "(?i)Set-MpPreference"
+    score: 1000
+    tag: "DEFENDER_DISABLE_ATTEMPT"
+    
+  # Hosts改ざんはC2通信の隠蔽・誘導のため致命的
+  - pattern: "(?i)Add-Content.*hosts"
+    score: 900
+    tag: "HOSTS_FILE_MODIFICATION"
+    
+  # Aドライブ実行
+  - pattern: "(?i)(A|B):\\\\"
+    score: 800
+    tag: "REMOVABLE_DRIVE_EXECUTION"
+    
+  # ダウンローダー
+  - pattern: "(?i)Invoke-WebRequest|iwr\\s"
+    score: 500
+    tag: "DOWNLOAD_ACTIVITY"
+  - pattern: "(?i)Invoke-Expression|iex\\s"
+    score: 600
+    tag: "CODE_EXECUTION"
+    
+  # 偽装スクリプト
+  - pattern: "(?i)win-updates\\.ps1"
+    score: 800
+    tag: "SUSPICIOUS_UPDATE_SCRIPT"
+

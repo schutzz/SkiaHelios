@@ -2,6 +2,7 @@ import argparse
 import subprocess
 import sys
 import os
+import re  # [NEW] 正規表現用
 from pathlib import Path
 import time
 import json
@@ -15,9 +16,9 @@ except ImportError:
     sys.exit(1)
 
 # ============================================================
-#  SH_HeliosConsole v2.4 [Dual-Core Edition]
+#  SH_HeliosConsole v2.5 [Sanitized Edition]
 #  Mission: Orchestrate Standard, Triage, and Deep Dive modes.
-#  Update: Pass BOTH Raw and CSV dirs to Hekate/Clotho.
+#  Update: Auto-sanitize Case Name inputs to prevent path errors.
 # ============================================================
 
 BANNER = r"""
@@ -26,20 +27,20 @@ BANNER = r"""
  | (___ | | _  _  __ _| |__| | ___| |_  ___  ___
   \___ \| |/ /| |/ _` |  __  |/ _ \ | |/ _ \/ __|
   ____) |   < | | (_| | |  | |  __/ | | (_) \__ \
- |_____/|_|\_\|_|\__,_|_|  |_|\___|_|_|\___/|___/ v6.2
+ |_____/|_|\_\|_|\__,_|_|  |_|\___|_|_|\___/|___/ v6.3
 """
 
 # ベンチマーク結果を保存するリスト
 BENCHMARK_RESULTS = []
 
 def run_stage(cmd, stage_name):
+    # (省略: 変更なし)
     print(f"\n>>> [EXECUTING] {stage_name} Stage...")
     
     start_time = time.time()
     peak_memory_mb = 0.0
     
     try:
-        # subprocess.run ではなく Popen を使ってプロセスを制御
         process = subprocess.Popen(
             cmd, 
             stdout=sys.stdout, 
@@ -47,24 +48,19 @@ def run_stage(cmd, stage_name):
             text=True
         )
         
-        # psutilでプロセスをラップ
         ps_proc = psutil.Process(process.pid)
         
-        # プロセス終了まで監視ループ (0.1秒間隔)
         while process.poll() is None:
             try:
-                # メモリ情報取得 (RSS: 物理メモリ使用量)
-                # 子プロセスも含める場合は再帰取得が必要ですが、今回はメインプロセスを計測
                 mem_info = ps_proc.memory_info()
                 current_mb = mem_info.rss / (1024 * 1024)
                 if current_mb > peak_memory_mb:
                     peak_memory_mb = current_mb
             except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass # プロセスが既に死んでいる場合など
+                pass 
             
             time.sleep(0.1)
             
-        # 終了コード確認
         if process.returncode != 0:
             print(f"[!] {stage_name} Failed with return code {process.returncode}")
             sys.exit(1)
@@ -78,23 +74,21 @@ def run_stage(cmd, stage_name):
     
     print(f">>> [DONE] {stage_name} finished in {duration:.4f}s | Peak Mem: {peak_memory_mb:.2f} MB")
     
-    # 結果を記録
     BENCHMARK_RESULTS.append({
         "Stage": stage_name,
         "Duration_Sec": round(duration, 4),
         "Peak_Memory_MB": round(peak_memory_mb, 2),
-        "Command": " ".join(cmd[:2]) + "..." # コマンド概要
+        "Command": " ".join(cmd[:2]) + "..." 
     })
 
 def generate_benchmark_report(out_dir):
-    """宣伝用のかっこいいベンチマークレポートを出力するっス！"""
+    # (省略: 変更なし)
     report_path = out_dir / "Benchmark_Report.md"
     json_path = out_dir / "Benchmark_Stats.json"
     
     total_time = sum(r['Duration_Sec'] for r in BENCHMARK_RESULTS)
     max_mem = max(r['Peak_Memory_MB'] for r in BENCHMARK_RESULTS) if BENCHMARK_RESULTS else 0
     
-    # JSON保存 (データ用)
     with open(json_path, 'w', encoding='utf-8') as f:
         json.dump({
             "Total_Time": total_time,
@@ -102,7 +96,6 @@ def generate_benchmark_report(out_dir):
             "Details": BENCHMARK_RESULTS
         }, f, indent=4)
         
-    # Markdown生成 (宣伝用)
     md_content = f"""# 🚀 SkiaHelios Performance Benchmark
 
 **Case:** {out_dir.name}
@@ -115,7 +108,6 @@ def generate_benchmark_report(out_dir):
 """
     
     for res in BENCHMARK_RESULTS:
-        # メモリ使用量に応じてアイコンを変える遊び心
         mem_icon = "🟢"
         if res['Peak_Memory_MB'] > 1000: mem_icon = "🔴"
         elif res['Peak_Memory_MB'] > 500: mem_icon = "🟡"
@@ -128,6 +120,26 @@ def generate_benchmark_report(out_dir):
         f.write(md_content)
     
     print(f"\n[+] Benchmark Report Generated: {report_path}")
+
+def sanitize_case_name(raw_name):
+    """
+    [FIX] Input Sanitizer
+    Full path input -> Extract folder name
+    Invalid chars -> Replace with underscore
+    """
+    if not raw_name: return "Unnamed_Case"
+    
+    # 1. Remove quotes
+    clean = raw_name.strip('"').strip("'")
+    
+    # 2. Extract basename if path separators exist
+    if "\\" in clean or "/" in clean:
+        clean = Path(clean).name
+        
+    # 3. Replace invalid chars for filenames (Windows specific mostly)
+    clean = re.sub(r'[\\/*?:"<>|]', '_', clean)
+    
+    return clean
 
 def main():
     pipeline_start = time.time()  # Start timing
@@ -157,8 +169,12 @@ def main():
     
     if not args.case:
         print("\n[?] Input Case Name (e.g. Case1_WebSrv):")
-        args.case = input("    > ").strip()
-    
+        raw_case_input = input("    > ").strip()
+        args.case = sanitize_case_name(raw_case_input) # Apply Sanitization
+    else:
+        # CLI引数で渡された場合もサニタイズ
+        args.case = sanitize_case_name(args.case)
+
     # --- Language Selection (Default: Japanese) ---
     if not hasattr(args, 'lang') or not args.lang:
         print("\n[?] Report Language? (jp=日本語 / en=English) [Default: jp]:")
@@ -209,6 +225,8 @@ def main():
             args.docx = True
             print("    [+] Docx Generation ENABLED")
 
+    # [FIX] Output Directory Construction
+    # args.case is now sanitized, so this path will be relative and valid
     out_dir = Path("Helios_Output") / f"{args.case}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     out_dir.mkdir(parents=True, exist_ok=True)
     
@@ -258,7 +276,7 @@ def main():
     judged_timeline = out_dir / "Hercules_Judged_Timeline.csv"
     aion_out = out_dir / "AION_Persistence.csv"
 
-    # [1] Clio (Browser History) -> Raw Dir を渡す！
+    # [1] Clio (Browser History)
     clio_cmd = [
         "python", "-m", "tools.SH_ClioGet",
         "--dir", str(kape_raw_dir), 
@@ -266,32 +284,27 @@ def main():
     ]
     run_stage(clio_cmd, "CLIO (Browser History)")
 
-    # [2] Chaos (Timeline) -> CSV Dir
+    # [2] Chaos (Timeline)
     run_stage(["python", "-m", "tools.SH_ChaosGrasp", "--dir", str(kape_csv_dir), "--out", str(master_timeline)], "CHAOS")
 
-    # [3] Chronos (Icarus Paradox 統合版)
-    # Master_Timeline.csv をメインの比較対象(MFT相当)として使用
+    # [3] Chronos (Icarus Paradox)
     chronos_cmd = [
         "python", "-m", "tools.SH_ChronosSift", 
         "-f", str(master_timeline), 
         "-o", str(time_anomalies)
     ]
 
-    # Icarus用のアーティファクトをKAPE CSVディレクトリから自動探索
-    # ShimCache (AppCompatCache) - ExclusionListを除外
     shim_files = list(kape_csv_dir.glob("**/*AppCompatCache.csv"))
-    shim_files = [f for f in shim_files if "Exclusion" not in f.name]  # ExclusionListを除外
+    shim_files = [f for f in shim_files if "Exclusion" not in f.name]
     if shim_files:
         chronos_cmd.extend(["--shimcache", str(shim_files[0])])
         print(f"    [+] Icarus: ShimCache detected -> {shim_files[0].name}")
 
-    # Prefetch
     pf_files = list(kape_csv_dir.glob("**/*Prefetch.csv"))
     if pf_files:
         chronos_cmd.extend(["--prefetch", str(pf_files[0])])
         print(f"    [+] Icarus: Prefetch detected -> {pf_files[0].name}")
 
-    # USN Journal (通常 $J として出力されるもの)
     usn_files = list(kape_csv_dir.glob("**/*$J*.csv"))
     if usn_files:
         chronos_cmd.extend(["--usnj", str(usn_files[0])])
@@ -320,10 +333,12 @@ def main():
         "--ghosts", str(ghost_report),
         "--dir", str(kape_csv_dir),
         "--out", str(judged_timeline),
-        "--chronos", str(time_anomalies) # [FIX v11.0] Pass Chronos output for score inheritance
+        "--chronos", str(time_anomalies),
+        "--raw", str(kape_raw_dir)  # [FIX] Pass Raw directory for ConsoleHost_history.txt
     ]
     if use_silencer: hercules_cmd.append("--triage")
     run_stage(hercules_cmd, f"HERCULES")
+
 
     # [6] Pandora Pass 2
     pandora_cmd_2 = pandora_cmd_1 + ["--hercules", str(judged_timeline)]
@@ -334,12 +349,10 @@ def main():
         "python", "-m", "tools.SH_AIONDetector", 
         "--dir", str(kape_csv_dir),
         "--out", str(aion_out),
-        "--raw", str(kape_raw_dir) # [v5.6] ChainScavenger
+        "--raw", str(kape_raw_dir)
     ], "AION")
     
-    # ==========================================
-    # [7.5] PLUTOS GATE (Network & Exfil) -> NEW
-    # ==========================================
+    # [7.5] PLUTOS GATE
     plutos_out = out_dir / "Plutos_Report.csv"
     plutos_net_out = out_dir / "Plutos_Network_Details.csv"
     
@@ -351,13 +364,11 @@ def main():
         "--net-out", str(plutos_net_out)
     ]
     
-    # Deep Diveモードなら期間指定も渡して範囲を絞る
     if args.deep and scan_start and scan_end:
          plutos_cmd.extend(["--start", scan_start, "--end", scan_end])
 
     run_stage(plutos_cmd, "PLUTOS (Network & Lateral)")
     
-    # [7.6] YARA WebShell Scanner (Optional) [v5.5]
     if getattr(args, 'enable_yara_webshell', False):
         yara_out = out_dir / "YARA_WebShell_Results.csv"
         yara_cmd = [
@@ -368,7 +379,8 @@ def main():
         ]
         run_stage(yara_cmd, "YARA (WebShell Hunter)")
     
-    # [8] Hekate -> Raw と CSV の両方を渡す！
+    # [8] Hekate
+    # args.case is already sanitized here
     hekate_cmd = [
         "python", "SH_HekateTriad.py",
         "--case", args.case,
@@ -379,15 +391,14 @@ def main():
         "--hercules", str(judged_timeline),
         "--chronos", str(time_anomalies),
         "--aion", str(aion_out),
-        "--kape", str(kape_raw_dir), # Raw (History用)
-        "--csv", str(kape_csv_dir),   # CSV (Registry/EventLog用)
-        "--lang", args.lang           # Language
+        "--kape", str(kape_raw_dir),
+        "--csv", str(kape_csv_dir),
+        "--lang", args.lang
     ]
     if args.docx: hekate_cmd.append("--docx")
     
     run_stage(hekate_cmd, "HEKATE")
 
-    # Calculate elapsed time
     elapsed = time.time() - pipeline_start
     mins, secs = divmod(int(elapsed), 60)
     print(f"\n[*] SUCCESS: Pipeline finished in {mins}m {secs}s. Case dir: {out_dir}")

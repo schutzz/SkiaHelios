@@ -267,7 +267,6 @@ class LachesisRenderer:
 
             # 6. Grouping and Preparation
             refined_iocs = self._group_all_iocs(cleaned_iocs, analyzer)
-            print(f"[DEBUG-FLOW] Global Cleaning Complete. Refined IOCs: {len(refined_iocs)}")
 
             # [Fix] Global Clean of VOID bug
             for ioc in refined_iocs:
@@ -309,7 +308,9 @@ class LachesisRenderer:
                 "plutos_section": self._render_plutos_section_text(dfs_for_ioc, analyzer),
                 "stats": self._prepare_stats(analyzer, analysis_data, dfs_for_ioc, refined_iocs),
                 "recommendations": self._prepare_recommendations(analyzer),
-                "all_iocs": refined_iocs,
+                # [v6.7.1] Ensure Time is sortable in Jinja2 (None => empty string)
+                "all_iocs": [{**ioc, 'Time': ioc.get('Time') or ''} for ioc in refined_iocs],
+
                 
                 # ═══════════════════════════════════════════════════════════════
                 # [Feature 5] Noise Zero Implementation + Display Beautification
@@ -389,13 +390,9 @@ class LachesisRenderer:
         filtered_iocs = []
         # Logging removed for production cleanliness, but structure kept for logic clarity
         
-        # [DEBUG PROBE]
-        try:
-            with open("renderer_probe.log", "w") as f:
-                 f.write(f"PROBE START. Analyzer type: {type(analyzer)}\n")
-                 f.write(f"Has _is_noise? {hasattr(analyzer, '_is_noise')}\n")
-        except: pass
-
+        filtered_iocs = []
+        # Logging removed for production cleanliness, but structure kept for logic clarity
+        
         for ev in iocs:
             # [Grimoire v6.3/v6.4] Image Hygiene + Evidence Shield
             v = str(ev.get('Value', '')).lower()
@@ -615,10 +612,6 @@ class LachesisRenderer:
             tag = str(ev.get('Tag', ''))
             val = str(ev.get('Value', ''))
             score = int(ev.get('Score', 0))
-            
-            # [DEBUG] Trace 7za
-            if "7za" in val.lower():
-                print(f"[DEBUG-7ZA-GROUP] Val={val} Score={score} Tag={tag} Cat={cat}")
             
             # Smart Filename Extraction for Grouping
             filename = str(ev.get('FileName') or ev.get('Target_FileName') or ev.get('Target_Path') or '')
@@ -1063,7 +1056,8 @@ class LachesisRenderer:
                         collapsed_group.extend(ev_list)
                 temp_groups[k] = collapsed_group
 
-            temp_groups[k].sort(key=lambda x: x.get('Time', '9999'))
+            temp_groups[k].sort(key=lambda x: str(x.get('Time', '9999') or '9999'))
+
 
         ordered_keys = sorted(temp_groups.keys(), key=lambda k: 0 if "SYSTEM" in k else 1)
         final_groups = {cat_titles.get(k, k): temp_groups[k] for k in ordered_keys}
@@ -1125,7 +1119,8 @@ class LachesisRenderer:
             processed.append({
                 "Name": name,
                 "RunCount": run_count,
-                "LastRun": tool.get("Time", "Unknown").replace("T", " ")[:19],
+                "LastRun": (tool.get("Time") or "Unknown").replace("T", " ")[:19],
+
                 "Desc": desc,
                 "AnalystNote": note
             })
@@ -1159,15 +1154,6 @@ class LachesisRenderer:
             ioc['Insight'] = insight
             groups[cat].append(ioc)
         
-        # [User Request] Apply USN Storm Condenser for LATERAL MOVEMENT
-        with open("debug_groups.log", "a", encoding="utf-8") as f:
-             import datetime
-             f.write(f"\n--- Call at {datetime.datetime.now()} ---\n")
-             f.write(f"Input List Size: {len(ioc_list)}\n")
-             f.write(f"Groups Keys: {list(groups.keys())}\n")
-             for k, v in groups.items():
-                 f.write(f"Key: '{k}' Count: {len(v)}\n")
-
         if "LATERAL MOVEMENT" in groups:
              groups["LATERAL MOVEMENT"] = self._condense_usn_events(groups["LATERAL MOVEMENT"])
              
@@ -1340,10 +1326,13 @@ class LachesisRenderer:
         if "PERSIST" in typ or "SAM_SCAVENGE" in tag or "DIRTY_HIVE" in tag: return "PERSISTENCE"
         if "VULN" in typ or "VULN" in tag: return "VULNERABLE APP"
         if "REMOTE_ACCESS" in typ: return "REMOTE_ACCESS"
+        # [Case 10 Fix] HOSTS_FILE_MODIFICATION and DEFENDER_DISABLE -> EXECUTION
+        if "HOSTS_FILE" in tag or "DEFENDER_DISABLE" in tag: return "EXECUTION"
         if "EXEC" in typ or "RUN" in typ: return "EXECUTION"
         if "WEBSHELL" in typ or "WEBSHELL" in tag: return "WEBSHELL"
         if "LATERAL" in typ or "LATERAL" in tag: return "LATERAL MOVEMENT"
         if "TIMESTOMP" in typ: return "TIMESTOMP (FILE)"
+        
         return "OTHER ACTIVITY"
     
     def _is_visual_noise(self, name):

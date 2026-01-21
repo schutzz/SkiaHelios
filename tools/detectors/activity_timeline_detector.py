@@ -15,6 +15,16 @@ class ActivityTimelineDetector(BaseDetector):
         if "Artifact_Type" not in cols: return df
             
         is_activity = pl.col("Artifact_Type").str.contains("(?i)activity")
+        
+        # ---------------------------------------------------------
+        # 🚀 [NEW] Phantom Drive Detection (Case 10 Critical)
+        # ---------------------------------------------------------
+        phantom_pattern = r"(?i)(A|B):[\\/]" 
+        search_cols = [c for c in ["Payload", "Message", "Action", "Target_Path", "Process_Command_Line"] if c in cols]
+        is_phantom = pl.lit(False)
+        for c in search_cols:
+            is_phantom = is_phantom | pl.col(c).str.contains(phantom_pattern)
+
         recon_pattern = "(?i)(" + "|".join(self.RECON_APPS) + ")"
         high_priority_pattern = "(?i)(" + "|".join(self.HIGH_PRIORITY_APPS) + ")"
         
@@ -37,8 +47,17 @@ class ActivityTimelineDetector(BaseDetector):
         should_tag_recon = is_activity & is_recon_app & is_infocus & (~is_high_priority)
         
         df = df.with_columns([
-            pl.when(should_tag_high).then(pl.col("Threat_Score") + 50).when(should_tag_recon).then(pl.col("Threat_Score") + 40).otherwise(pl.col("Threat_Score")).alias("Threat_Score"),
-            pl.when(should_tag_high).then(pl.format("{},RECON_RUN_DIALOG", pl.col("Tag"))).when(should_tag_recon).then(pl.format("{},RECON_MANUAL_OPERATOR", pl.col("Tag"))).otherwise(pl.col("Tag")).alias("Tag")
+            pl.when(is_phantom)
+              .then(pl.col("Threat_Score") + 600)
+              .when(should_tag_high).then(pl.col("Threat_Score") + 50)
+              .when(should_tag_recon).then(pl.col("Threat_Score") + 40)
+              .otherwise(pl.col("Threat_Score")).alias("Threat_Score"),
+            
+            pl.when(is_phantom)
+              .then(pl.format("{},PHANTOM_DRIVE_DETECTED", pl.col("Tag")))
+              .when(should_tag_high).then(pl.format("{},RECON_RUN_DIALOG", pl.col("Tag")))
+              .when(should_tag_recon).then(pl.format("{},RECON_MANUAL_OPERATOR", pl.col("Tag")))
+              .otherwise(pl.col("Tag")).alias("Tag")
         ])
         
         # 🚀 Universal Signatures Call

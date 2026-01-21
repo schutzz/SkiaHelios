@@ -1,4 +1,4 @@
-# SkiaHelios v6.4 - Grimoire Engine (Evidence Shield & Image Hygiene)
+# SkiaHelios v6.7 - Grimoire Engine (Console History & Phantom Drive Detection)
 
 ![SkiaHelios CI](https://github.com/schutzz/SkiaHelios/actions/workflows/test.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
@@ -13,9 +13,9 @@
 
 **SkiaHelios** is a high-resolution, modular DFIR (Digital Forensics & Incident Response) framework built for **speed**, **causality**, **origin tracing**, and **visual narrative**.
 
-Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** orchestrated by **"Hekate"**, supported by **"Chronos" (The Time Lord feat. Icarus Paradox)**, **"Hercules" (The Referee)**, the **"PlutosGate" (Network & Recon Hunter)**, and the **"YARA WebShell Scanner"** to detect advanced threats including **Account Takeover**, **Privilege Escalation**, **Evidence Wiping**, **Web Intrusion Chains**, and **Cross-Artifact Tampering**.
+Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** orchestrated by **"Hekate"**, supported by **"Chronos" (The Time Lord feat. Icarus Paradox)**, **"Hercules" (The Referee)**, the **"PlutosGate" (Network & Recon Hunter)**, and the **"YARA WebShell Scanner"** to detect advanced threats including **Account Takeover**, **Privilege Escalation**, **Evidence Wiping**, **Web Intrusion Chains**, **Cross-Artifact Tampering**, and **Removable Drive Execution (Phantom Drive)**.
 
-**Current Version:** v6.4 (Operation Truth & Masquerade Hunter)
+**Current Version:** v6.7 (Phantom Drive & Console History Detection)
 
 ---
 
@@ -29,73 +29,93 @@ graph TD
     classDef engine fill:#fff3e0,stroke:#ff6f00,stroke-width:2px;
     classDef judge fill:#ffebee,stroke:#b71c1c,stroke-width:3px;
     classDef report fill:#f3e5f5,stroke:#4a148c,stroke-width:2px;
-    classDef submod fill:#ede7f6,stroke:#512da8,stroke-width:1px,stroke-dasharray: 5 5;
+    classDef detector fill:#ede7f6,stroke:#512da8,stroke-width:1px,stroke-dasharray: 5 5;
     classDef recon fill:#e0f2f1,stroke:#00695c,stroke-width:2px,stroke-dasharray: 2 2;
 
     %% Input Stage
-    Input[("KAPE Artifacts\n(CSV)")]:::input --> Hekate{{"🔥 Hekate\n(The Orchestrator)"}}:::core
-    
-    %% Ingestion & Analysis
-    Hekate --> Clotho[("🌀 Clotho\n(Ingestion)")]:::engine
-    Clotho --> Atropos{{"⚖️ Atropos\n(High-Speed Logic)"}}:::engine
-    Rules[("📜 Themis Rules\n(YAML)")] -.-> Atropos
-    
-    %% Specialized Modules
-    Atropos --> Chronos["⏳ Chronos\n(Time Lord)\nfeat. Icarus Paradox"]:::judge
-    Atropos --> Pandora["📦 Pandora\n(File & Masquerade)"]:::engine
-    Atropos --> Hercules["⚖️ Hercules\n(Justice V3 Engine)\nSysInternals Hunter"]:::judge
-    Atropos --> Aion["👁️ AION\n(Persistence)"]:::engine
-    Atropos --> Plutos["⚡ PlutosGate\n(Network & Exfil)\nReconnaissance Hunter"]:::judge
-    
-    %% Recon & Origin Tracing
-    LNKs["Phishing LNKs"] -.-> Tartaros["⛓️ Tartaros v4.1\n(Adaptive Origin Tracing)"]:::engine
-    History["Browser History"] -.-> Tartaros
-    History -.-> Plutos
-    Timeline["Windows Activity"] -.-> Hercules
-    
-    %% Plutos Sub-Flow
-    subgraph Plutos_Engine ["PlutosGate Core"]
-        direction LR
-        P_SRUM["SRUM Analysis\n(Heat Score)"]
-        P_Recon["Recon Hunter\n(Kali/Exploits)"]
-        P_Exfil["Exfil Correlation\n(The Trinity)"]
-        
-        P_SRUM --> P_Exfil
-        P_Recon --> P_Exfil
+    subgraph Input_Sources ["📥 Input Sources"]
+        CSV[(KAPE Artifacts<br>CSV)]:::input
+        RAW[(KAPE Raw<br>Registry/History)]:::input
     end
-    Plutos --- Plutos_Engine
+    
+    CSV --> Console{{🔥 HeliosConsole<br>Orchestrator}}:::core
+    RAW --> Console
 
-    %% Reporting Stage (Modular Lachesis)
-    subgraph Lachesis_Module ["🕸️ Lachesis v6.4 (Grimoire Engine)"]
+    %% Pipeline Stage 1: Ingestion
+    Console --> Chaos[🌀 ChaosGrasp<br>CSV Merger]:::engine
+    Console --> Clio[📖 Clio<br>Browser History]:::engine
+    
+    %% Pipeline Stage 2: Time Analysis
+    Chaos --> Chronos[⏳ Chronos<br>Time Lord<br>feat. Icarus Paradox]:::judge
+    
+    %% Pipeline Stage 3: File Analysis
+    Chronos --> Pandora[📦 Pandora<br>File & Masquerade<br>Ghost Report]:::engine
+    
+    %% Pipeline Stage 4: Hercules Judgment
+    subgraph Hercules_Engine ["⚖️ Hercules v6.7 (Justice Engine)"]
         direction TB
-        L_Core[("Core Controller")]:::report
-        L_Intel["Intel (YAML Rules)"]:::submod
-        L_Enrich["Enricher (Data Fusion)"]:::submod
-        L_Analyzer["Analyzer (Event Scoring)"]:::submod
-        L_Correlator["Correlator (Temporal Boost)"]:::submod
-        L_Render["Renderer (Jinja2 Engine)"]:::submod
-        L_Midas["MidasTouch (Docx/PDF)"]:::submod
+        H_Core[Hercules Core<br>Rule Matching]:::judge
         
-        L_Core --> L_Intel
-        L_Core --> L_Enrich
-        L_Core --> L_Analyzer
-        L_Analyzer --> L_Correlator
-        L_Correlator --> L_Render
-        L_Render --> L_Midas
+        subgraph Detectors ["🔍 Modular Detectors"]
+            direction LR
+            D_WebShell[WebShellDetector]:::detector
+            D_AntiFo[AntiForensicsDetector]:::detector
+            D_Obfusc[ObfuscationDetector]:::detector
+            D_ADS[ADSDetector]:::detector
+            D_LNK[LnkDetector]:::detector
+            D_Network[NetworkDetector]:::detector
+            D_User[UserActivityDetector]:::detector
+            D_Timeline[ActivityTimelineDetector]:::detector
+            D_Console[ConsoleHostDetector<br>🆕 v6.7]:::detector
+            D_Correl[CorrelationDetector<br>🆕 v6.7]:::detector
+            D_LotL[LotLClusterDetector]:::detector
+            D_Noise[NoiseFilter<br>Last Pass]:::detector
+        end
+        
+        H_Core --> D_WebShell
+        H_Core --> D_AntiFo
+        H_Core --> D_Obfusc
+        H_Core --> D_ADS
+        H_Core --> D_LNK
+        H_Core --> D_Network
+        H_Core --> D_User
+        H_Core --> D_Timeline
+        H_Core --> D_Console
+        D_Console --> D_Correl
+        D_Correl --> D_LotL
+        D_LotL --> D_Noise
     end
-
-    Chronos --> L_Core
-    Pandora --> L_Core
-    Hercules --> L_Core
-    Aion --> L_Core
-    Tartaros --> L_Core
-    Plutos --> L_Core
+    
+    Pandora --> H_Core
+    RAW -.->|history.txt| D_Console
+    
+    %% Pipeline Stage 5: Persistence & Network
+    H_Core --> Aion[👁️ AION<br>Persistence Hunter]:::engine
+    H_Core --> Plutos[⚡ PlutosGate<br>Network & Exfil<br>Recon Hunter]:::judge
+    Clio -.-> Plutos
+    
+    %% Pipeline Stage 6: Report Generation
+    subgraph Hekate_Report ["🕸️ Hekate Triad (Report Engine)"]
+        direction TB
+        Clotho[🌀 ClothoReader<br>Data Ingestion]:::report
+        Lachesis[🧵 Lachesis v6.7<br>Grimoire Renderer]:::report
+        
+        Clotho --> Lachesis
+    end
+    
+    D_Noise --> Clotho
+    Aion --> Clotho
+    Plutos --> Clotho
     
     %% Output
-    L_Render --> Report[("📜 Grimoire.md\n(Narrative Report)")]:::report
-    L_Render --> Pivot[("🎯 Pivot_Config.json\n(Deep Dive)")]:::report
-    L_Render --> Mermaid[("📊 Attack Flow\n(Verb Sequence)")]:::report
-    L_Midas --> Docx[("📄 Final Report\n(DOCX)")]:::report
+    Lachesis --> Report[(📜 Grimoire.md<br>Narrative Report)]:::report
+    Lachesis --> Pivot[(🎯 Pivot_Config.json)]:::report
+    Lachesis --> Score[(📊 Score_Breakdown.md)]:::report
+
+    %% Config
+    Rules[(📜 intel_signatures.yaml<br>Themis Rules)]:::input -.-> H_Core
+    Rules -.-> D_Noise
+    Rules -.-> D_Console
 ```
 
 ---
@@ -222,6 +242,23 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
 ---
 
 ## 📜 Complete Changelog
+
+### v6.7 - Phantom Drive & Console History Detection 👻💻
+* **[NEW]** **ConsoleHostDetector (v6.7):** PowerShell履歴ファイル直接解析モジュール。
+    * **Phantom Drive Detection:** `A:\`, `B:\` ドライブからの実行を検出し `REMOVABLE_DRIVE_EXECUTION` (Score +500) としてタグ付け。
+    * **Defender Evasion:** `Add-MpPreference`, `Set-MpPreference` を `DEFENDER_DISABLE_ATTEMPT` (Score +500) として検出。
+    * **Hosts File Tampering:** `Add-Content.*hosts` を `HOSTS_FILE_MODIFICATION` (Score +400) として検出。
+    * **Raw Directory Support:** `--raw` 引数によりKAPE生データディレクトリから `ConsoleHost_history.txt` を直接読み取り。
+* **[NEW]** **CorrelationDetector (v6.7):** クロスアーティファクト相関分析モジュール。
+    * **SRUM Traffic Validation:** LATERAL_MOVEMENT タグを持つイベントをSRUMデータと照合し、実際の通信が確認された場合 `TRAFFIC_CONFIRMED` (Score +500) を付与。
+    * **Execution Confirmation:** Prefetch/ShimCache との照合により `EXECUTION_CONFIRMED` タグを付与。
+* **[FIX]** **NoiseFilter Enhancement:** クリティカルタグパターンを拡張。
+    * **Protected Tags:** `PHANTOM_DRIVE`, `DEFENDER_DISABLE`, `HOSTS_FILE`, `HISTORY_DETECTED`, `CONFIRMED`, `EXECUTION_CONFIRMED`, `REMOVABLE_DRIVE` を保護リストに追加。
+    * **Noise Pattern Cleanup:** `win-updates`, `preprovisioner`, `(?i)^A:\\` をノイズリストから削除。
+* **[FIX]** **Hekate Scope Filter Bypass:** `PowerShell History` 由来のイベントは年ベースのスコープフィルタをバイパス。
+    * **Effect:** 2023年のインシデントが 2026年基準で除外されなくなった。
+* **[Architecture]** **Modular Detector Pipeline:** Hercules の検出器パイプラインを拡張。
+    * **Order:** WebShell → AntiForensics → Obfuscation → ADS → LNK → Network → UserActivity → ActivityTimeline → **ConsoleHost** → **Correlation** → LotL → NoiseFilter
 
 ### v6.4 - Grimoire Engine (Evidence Shield & Image Hygiene) 🛡️
 * **[NEW]** **Evidence Shield (v6.4):** Recon keyword protection for images.
@@ -445,7 +482,9 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
     * **Performance:** Implemented `CompiledRuleEngine` with regex precompilation, speeding up rule matching by 40%.
     * **Reliability:** Added Pydantic schema validation for rules and a dedicated Unit Test framework (`tests/test_rules.py`).
     * **Precision:** Added `negative_context` support to rules (e.g., ignoring `PsExec` in Sysinternals folder).
+* [x] **v6.7:** **Phantom Drive & Console History Detection (ConsoleHostDetector, CorrelationDetector, NoiseFilter Enhancement)**
 * [ ] **v7.0:** **The Oracle (LLM Auto-Summarization & Chat)** - *Planned*
+
 
 
 ---
