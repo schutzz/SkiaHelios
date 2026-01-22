@@ -996,3 +996,238 @@ console_history_rules:
     score: 800
     tag: "SUSPICIOUS_UPDATE_SCRIPT"
 
+# ============================================================
+# [v2.0] WebShell Detector Configuration (YAML統合)
+# ============================================================
+webshell_detector:
+  # Allowlist: WebShell検知から除外するシステムファイルパターン
+  allowlist_patterns:
+    - description: "Windows SxS Component"
+      pattern: "\\.cdf-ms$"
+    - description: "Manifest Files"
+      pattern: "\\.(mum|cat|manifest)$"
+    - description: "GUID System Files (Pure GUID or prefix)"
+      pattern: "^\\{[0-9a-fA-F\\-]{8,}\\}"
+    - description: "GUID Suffix (e.g., file.ext.{GUID})"
+      pattern: "\\.\\{[0-9a-fA-F\\-]+\\}$"
+    - description: "Windows Component Signatures"
+      pattern: "^[0-9a-f]{8,}_.*31bf3856ad364e35"
+    - description: "Boot Manager UI (前方一致)"
+      pattern: "(?i)^bootmgr\\.exe\\.mui"
+    - description: "Prefetch Files"
+      pattern: "\\.pf$"
+    - description: "WinSxS Path"
+      pattern: "(?i)[\\\\/]winsxs[\\\\/]"
+    - description: "Servicing Path"
+      pattern: "(?i)[\\\\/]servicing[\\\\/]"
+  
+  scan_scope:
+    force_web_dirs_only: true  # Webディレクトリ指定がない場合はスキャンしない
+    default_paths:
+      - "inetpub"
+      - "htdocs"
+      - "wwwroot"
+      - "nginx"
+      - "apache"
+      - "xampp"
+      - "public_html"
+
+# ============================================================
+# [v2.0] Suspicious Communication Tools (exe/pf → NOT WebShell)
+# ============================================================
+suspicious_comm_tools:
+  # exe/pf は WEBSHELL タグを付与しない
+  - name: "Suspicious Communication Tool (Potential Exfil)"
+    tag: "SUSPICIOUS_COMM_TOOL"
+    score: 500
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)(skype4life|teamviewer|anydesk|discord).*\\.(exe|pf)$"
+  
+  - name: "Suspicious Named Executable"
+    tag: "SUSPICIOUS_EXE_NAME"
+    score: 400
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)(backdoor|trojan|payload|malware|hacker).*\\.exe$"
+
+# ============================================================
+# [Case 9 Fix] Encryption & Privacy Tool Detection
+# インサイダー脅威対策: 暗号化ツールの監視強化
+# ============================================================
+encryption_tools:
+  # --- [1] AES暗号化ツール ---
+  aes_tools:
+    - pat: "(?i)aescrypt(\\.exe)?$"
+      score: 400
+      tag: "ENCRYPTION_TOOL_DETECTED"
+    - pat: "(?i)aescrypt.*setup"
+      score: 350
+      tag: "ENCRYPTION_TOOL_INSTALL"
+    - pat: "(?i)axcrypt(\\.exe)?$"
+      score: 350
+      tag: "ENCRYPTION_TOOL_DETECTED"
+    - pat: "(?i)veracrypt(\\.exe)?$"
+      score: 400
+      tag: "ENCRYPTION_TOOL_DETECTED"
+    - pat: "(?i)truecrypt(\\.exe)?$"
+      score: 500
+      tag: "ENCRYPTION_TOOL_LEGACY"
+    - pat: "(?i)7z.*-p"
+      score: 300
+      tag: "ARCHIVE_PASSWORD_PROTECTED"
+
+  # --- [2] GPG/PGP暗号化ツール ---
+  gpg_tools:
+    - pat: "(?i)gpg(\\.exe)?$"
+      score: 400
+      tag: "GPG_ENCRYPTION"
+    - pat: "(?i)gpg4win"
+      score: 400
+      tag: "GPG_SUITE_DETECTED"
+    - pat: "(?i)kleopatra(\\.exe)?$"
+      score: 450
+      tag: "GPG_KEY_MANAGER"
+    - pat: "(?i)gpg-agent(\\.exe)?$"
+      score: 350
+      tag: "GPG_AGENT"
+    - pat: "(?i)gnupg"
+      score: 350
+      tag: "GPG_INSTALLATION"
+
+  # --- [3] BitLocker関連 ---
+  bitlocker_tools:
+    - pat: "(?i)bitlockerwizard(elev)?\\.exe$"
+      score: 500
+      tag: "BITLOCKER_WIZARD"
+    - pat: "(?i)manage-bde(\\.exe)?$"
+      score: 450
+      tag: "BITLOCKER_CLI"
+    - pat: "(?i)bdechangepin(\\.exe)?$"
+      score: 400
+      tag: "BITLOCKER_PIN_CHANGE"
+    - pat: "(?i)fvenotify(\\.exe)?$"
+      score: 300
+      tag: "BITLOCKER_NOTIFICATION"
+    - pat: "(?i)bdeunlock(\\.exe)?$"
+      score: 450
+      tag: "BITLOCKER_UNLOCK"
+
+  # --- [4] 仮想ディスク/コンテナ ---
+  virtual_disk_tools:
+    - pat: "(?i)vhdattach(\\.exe)?$"
+      score: 400
+      tag: "VHD_ATTACH_TOOL"
+    - pat: "(?i)diskmgmt\\.msc"
+      score: 200
+      tag: "DISK_MANAGEMENT"
+
+# ============================================================
+# 暗号化ファイル拡張子の監視
+# ============================================================
+encryption_file_extensions:
+  high_priority:
+    - ext: ".aes"
+      score: 500
+      tag: "ENCRYPTED_FILE_AES"
+      description: "AESCrypt暗号化ファイル"
+    - ext: ".asc"
+      score: 450
+      tag: "ENCRYPTED_KEY_GPG"
+      description: "GPG公開鍵/暗号化テキスト"
+    - ext: ".gpg"
+      score: 500
+      tag: "ENCRYPTED_FILE_GPG"
+      description: "GPG暗号化ファイル"
+    - ext: ".pgp"
+      score: 500
+      tag: "ENCRYPTED_FILE_PGP"
+      description: "PGP暗号化ファイル"
+    - ext: ".enc"
+      score: 400
+      tag: "ENCRYPTED_FILE_GENERIC"
+      description: "汎用暗号化ファイル"
+    - ext: ".crypt"
+      score: 400
+      tag: "ENCRYPTED_FILE_GENERIC"
+      description: "暗号化ファイル"
+    - ext: ".locked"
+      score: 600
+      tag: "RANSOMWARE_INDICATOR"
+      description: "ランサムウェア疑惑"
+
+  medium_priority:
+    - ext: ".vhd"
+      score: 350
+      tag: "VIRTUAL_DISK"
+      description: "仮想ハードディスク"
+      context_boost:
+        - path_contains: "ProgramData"
+          boost: 200
+          reason: "異常な配置場所"
+        - path_contains: "Users"
+          boost: 150
+          reason: "ユーザーディレクトリ配下"
+    - ext: ".vhdx"
+      score: 350
+      tag: "VIRTUAL_DISK"
+      description: "仮想ハードディスク(新形式)"
+    - ext: ".vmdk"
+      score: 350
+      tag: "VIRTUAL_DISK"
+      description: "VMware仮想ディスク"
+    - ext: ".tc"
+      score: 500
+      tag: "TRUECRYPT_CONTAINER"
+      description: "TrueCrypt/VeraCryptコンテナ"
+    - ext: ".hc"
+      score: 500
+      tag: "VERACRYPT_CONTAINER"
+      description: "VeraCryptコンテナ"
+
+# ============================================================
+# 回復キー/パスワードファイル検知
+# ============================================================
+recovery_key_detection:
+  filename_patterns:
+    - pat: "(?i)bitlocker.*recovery.*key"
+      score: 800
+      tag: "CRITICAL_RECOVERY_KEY"
+      description: "BitLocker回復キー"
+    - pat: "(?i)recovery.*key.*\\.txt$"
+      score: 700
+      tag: "CRITICAL_RECOVERY_KEY"
+      description: "回復キーファイル"
+    - pat: "(?i)回復キー"
+      score: 700
+      tag: "CRITICAL_RECOVERY_KEY_JP"
+      description: "回復キー(日本語)"
+    - pat: "(?i)keys?\\.txt$"
+      score: 500
+      tag: "SUSPICIOUS_KEY_FILE"
+      description: "鍵ファイル疑惑"
+    - pat: "(?i)password[s]?\\.txt$"
+      score: 600
+      tag: "PASSWORD_FILE"
+      description: "パスワードファイル"
+    - pat: "(?i)credentials?\\.txt$"
+      score: 600
+      tag: "CREDENTIALS_FILE"
+      description: "認証情報ファイル"
+    - pat: "(?i)secret[s]?\\.txt$"
+      score: 550
+      tag: "SECRET_FILE"
+      description: "秘密情報ファイル"
+    - pat: "(?i)private.*key"
+      score: 600
+      tag: "PRIVATE_KEY_FILE"
+      description: "秘密鍵ファイル"
+    - pat: "(?i)_public\\.asc$"
+      score: 500
+      tag: "GPG_PUBLIC_KEY"
+      description: "GPG公開鍵(エクスポート)"
+    - pat: "(?i)_secret\\.asc$"
+      score: 700
+      tag: "GPG_SECRET_KEY"
+      description: "GPG秘密鍵(エクスポート) - 危険"
+

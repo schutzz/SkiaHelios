@@ -288,138 +288,52 @@ class IntelManager:
     
     @staticmethod
     def get_renderer_noise_patterns():
-        """Returns ultra-hard noise patterns for report cleanup."""
-        return [
-            # WinSxS and System Components
-            r"windows\winsxs",
+        """
+        [v6.7] Returns ultra-hard noise patterns for report cleanup.
+        Now synchronizes with filter_rules.yaml through ThemisLoader.
+        """
+        # 1. Load patterns from YAML via ThemisLoader
+        loader = ThemisLoader(["rules/filter_rules.yaml"])
+        yaml_patterns = loader.get_noise_regex_list()
+        
+        # 2. Add ultra-specific renderer patterns (some are complex regex better kept here)
+        renderer_specific = [
+            # WinSxS and System Components (Renderer-side specifics)
             r"_none_",  # WinSxS hash pattern: xxx_10.0.17134.1_none_xxx
             r"_10.0.",  # Windows version pattern in component names
-            r"program files\windowsapps",
-            r"windows\infusedapps",
-            r"windows\assembly",
-            r"windows\servicing",
-            r"windows\softwaredistribution",
-            r"programdata\microsoft\windows\apprepository",
-            # Store Apps and UWP
-            r"microsoft.windows.contentdeliverymanager",
-            r"microsoft.windows.cortana",
-            r"microsoft.windows.",
-            r"microsoft.ui.",
-            r"microsoft.net.",
-            # User Local Noise
-            r"appdata\local\packages", 
-            r"appdata\local\microsoft\windows\inetcache",
-            r"appdata\local\temp",
+            r"microsoft\.windows\.contentdeliverymanager",
+            r"microsoft\.windows\.cortana",
+            r"microsoft\.windows\.",
+            r"microsoft\.ui\.",
+            r"microsoft\.net\.",
             # System Update Components
-            r"\prov\runtime",
+            r"\\prov\\runtime",
             r"microsoft-windows-appmodel-runtime",
             r"microsoft-windows-client",
-            r"usocoreworker.exe",
+            r"usocoreworker\.exe",
             r"backgroundtransferapi",
             r"devicesearchcache",
             r"appcache",
             r"fight_flight",
-            r"\inf\setupapi",
-            # XAMPP Legitimate Components (non-threat)
-            r"xampp\php\pear",
-            r"xampp\apache\manual",
-            r"xampp\tomcat\webapps\docs",
-            r"xampp\tomcat\webapps\examples",
-            r"xampp\src\\",
-            r"xampp\licenses",
-            r"xampp\locale",
-            r"xampp\php\docs",
-            r"xampp\cgi-bin",
-            r"xampp\contrib",
-            r"\pear\docs",
-            r"\pear\tests",
-            # XAMPP Extended Noise (Perl/PHP/Apache/MySQL)
-            r"xampp\perl\lib",
-            r"xampp\perl\vendor",
-            r"filezillaftp\source",
-            r"apache\icons",
-            r"mercurymail\\",
-            r"mysql\data\\",
-            r"phpmyadmin\js\\",
-            r"phpmyadmin\libraries\\",
-            r"phpmyadmin\themes\\",
-            r"webalizer\\",
-            r"sendmail\\",
-            # XAMPP Additional Noise (Tomcat, Static, Sessions)
-            r"xampp\tmp\sess_",
-            r"tomcat\webapps\manager",
-            r"tomcat\webapps\host-manager",
-            r"tomcat\webapps\root",
-            r"phpmyadmin\doc\\",
-            r"htdocs\img\\",
-            r"security\htdocs\\",
-            # XAMPP Dashboard & Docs (Web Resources)
-            r"htdocs\dashboard\\",
-            r"htdocs\docs\\",
-            r"dashboard\images\\",
-            r"dashboard\css\\",
-            r"dashboard\docs\\",
-            # XAMPP Libraries & Extras
-            r"php\extras\\",
-            r"php\tests\\",
-            r"perl\bin\\",
-            r"perl\site\\",
-            # XAMPP Apache/MySQL Config & Locales
-            r"apache\include\\",
-            r"apache\modules\\",
-            r"mysql\share\\",
-            r"phpmyadmin\locale\\",
-            # XAMPP Test & Misc
-            r"webdav\\",
-            r"\flags\\",
-            r"\install\\",
-            r"phpids\tests\\",
-            # Browser Cache & DVWA Static Resources (protect hackable\uploads & .php)
-            r"content.ie5\\",
-            r"dvwa\dvwa\images\\",
-            r"dvwa\dvwa\css\\",
-            r"dvwa\external\\",
-            # XAMPP System Libraries (Loader noise - not attacker activity)
-            r"apache\bin\iconv\\",
-            r"php\ext\\",
-            r"tomcat\lib\\",
-            # MySQL Metadata (Running service artifacts)
+            # XAMPP Metadata (Dynamic service artifacts)
             r"\.frm$",
             r"\.myd$",
             r"\.myi$",
             r"performance_schema\\",
-            # XAMPP Icons & Static Assets
-            r"xampp\img\\",
-            r"hackable\users\\",
-            r"favicon.ico",
-            # AGGRESSIVE NOISE FILTERS (95%+ FP in INTERNAL_RECON)
-            # Server process loader artifacts (not attacker activity)
-            r"xampp\apache\bin\\",
-            r"xampp\mysql\bin\\",
-            r"xampp\php\\",
-            r"xampp\tomcat\bin\\",
-            # Library/Binary extensions in xampp (service loading)
-            r"\.dll$",
-            r"\.jar$",
-            r"\.so$",
-            # Help & Documentation noise
-            r"\.chm$",
-            r"\.hlp$",
-            r"readme\.txt",
-            r"license\.txt",
-            r"install\.txt",
-            r"changes\.txt",
             # Information schema (MySQL system tables)
             r"information_schema\\",
             r"mysql\\mysql\\",
             # Tomcat/Java artifacts
             r"catalina\\",
-            r"\.class$",
             # Language Resources
             r".mui",
             r"en-us\\",
             r"ja-jp\\",
         ]
+        
+        # 3. Combine and deduplicate
+        combined = list(set(yaml_patterns + renderer_specific))
+        return combined
 
     @staticmethod
     def get_safe_users():
@@ -458,22 +372,56 @@ class IntelManager:
         
         # Fallback patterns
         return [
-            r"windows\winsxs", 
-            r"windows\assembly", 
-            r"windows\microsoft.net", 
-            r"windows\servicing",
-            r"windows\systemapps",
-            r"windows\inf",
-            r"windows\driverstore",
+            r"windows\\winsxs", 
+            r"windows\\assembly", 
+            r"windows\\microsoft\.net", 
+            r"windows\\servicing",
+            r"windows\\systemapps",
+            r"windows\\inf",
+            r"windows\\driverstore",
             r"driverstore", 
-            r"windows\diagtrack",
-            r"windows\biometry",
-            r"windows\softwaredistribution",
-            r"program files\windowsapps",
+            r"windows\\diagtrack",
+            r"windows\\biometry",
+            r"windows\\softwaredistribution",
+            r"program files\\windowsapps",
             r"windowsapps", 
             r"deletedalluserpackages",
-            r"\apprepository",
-            r"\contentdeliverymanager",
-            r"\infusedapps",
-            r"system32\driverstore" 
+            r"\\apprepository",
+            r"\\contentdeliverymanager",
+            r"\\infusedapps",
+            r"system32\\driverstore",
+            r"windows\\system32\\wbem",
+            r"windows\\system32\\catroot",
+            r"windows\\system32\\config\\systemprofile",
+            r"windows\\web\\",
+            r"windows\\branding\\",
+            r"programdata\\microsoft\\windows\\systemdata",
+            r"appdata\\local\\microsoft\\windows\\inetcache",
+            r"appdata\\local\\google\\chrome\\user data\\default\\cache",
+            r"temporary internet files",
+            r"content\.ie5",
+            r"telemetry",
+            r"tracking",
+            r"advertising",
+            r"google-analytics",
+            r"doubleclick",
+            r"scorecardresearch",
+            r"windows\\system32\\fntcache",
+            r"windows\\system32\\ime",
+            r"windows\\system32\\logfiles",
+            r"windows\\system32\\winbioplugins",
+            r"appdata\\local\\microsoft\\clr_v4\.0\\usage",
+            r"atatus\.mp4", # Rule 3 for tutorial videos
+            r"tutorial",
+            r"advertisement",
+            r"beacon",
+            r"pixel",
+            r"quantserve",
+            r"adnxs",
+            r"rubiconproject",
+            r"openx",
+            r"pubmatic",
+            r"criteo",
+            r"casalemedia",
+            r"tapad",
         ]

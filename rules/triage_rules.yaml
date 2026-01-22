@@ -166,9 +166,28 @@ dual_use_tools:
       - "lib/site-packages"
       - "perl/lib"
       - "ruby/lib"
-    
+      
       - "ruby/lib"
-    
+
+  # [NEW] Encryption & Privacy Tools (Insider Threat - Case 9 Fix)
+  - name: "Encryption Tools (Privacy)"
+    keywords:
+      - "aescrypt"
+      - "axcrypt"
+      - "veracrypt"
+      - "truecrypt"
+      - "gpg4win"
+      - "kleopatra"
+      - "gpg"
+      - "gnupg"
+      - "bitlocker"
+      - "bestcrypt"
+      - "diskcryptor"
+      - "cryptomator"
+    noise_paths:
+      - "program files\\gpg4win\\share"
+      - "program files\\gnupg\\share"
+      - "program files (x86)\\gpg4win\\share"
 
 
 # ==========================================
@@ -718,7 +737,110 @@ threat_signatures:
 # ==========================================
 # 🚀 Universal Threat Signatures (BaseDetector)
 # ==========================================
+
+# ==========================================
+# 🔐 [Case 9 Fix] Encryption Tool Detection
+# ==========================================
+  - name: "AESCrypt Encryption Tool"
+    tag: "ENCRYPTION_TOOL_AESCRYPT"
+    score: 400
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)aescrypt.*\\.exe$"
+
+  - name: "GPG/Kleopatra Key Management"
+    tag: "ENCRYPTION_TOOL_GPG"
+    score: 450
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)(kleopatra|gpg|gpg-agent|gpgsm)\\.exe$"
+
+  - name: "VeraCrypt/TrueCrypt Container Tool"
+    tag: "ENCRYPTION_TOOL_VERACRYPT"
+    score: 500
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)(veracrypt|truecrypt)\\.exe$"
+
+  - name: "BitLocker Wizard Execution"
+    tag: "CRITICAL_BITLOCKER_WIZARD"
+    score: 500
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)bitlockerwizard(elev)?\\.exe$"
+
+  - name: "VHD in Suspicious Location (ProgramData/Users)"
+    tag: "SUSPICIOUS_VHD_LOCATION"
+    score: 600
+    target: "Target_Path"
+    condition: "regex"
+    pattern: "(?i)(ProgramData|Users\\\\[^\\\\]+\\\\(?!AppData))[\\\\].+\\.vhdx?$"
+
+  - name: "BitLocker Recovery Key File"
+    tag: "CRITICAL_RECOVERY_KEY"
+    score: 800
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)bitlocker.*recovery.*key.*\\.txt$"
+
+  - name: "AES Encrypted File Detected"
+    tag: "ENCRYPTED_FILE_AES"
+    score: 500
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)\\.aes$"
+
+  - name: "GPG Encrypted File/Key Detected"
+    tag: "ENCRYPTED_FILE_GPG"
+    score: 450
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)\\.(asc|gpg|pgp)$"
+
+  - name: "Generic Password/Key File"
+    tag: "SUSPICIOUS_KEY_FILE"
+    score: 550
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)(password[s]?|credential[s]?|secret[s]?|key[s]?)\\.txt$"
+
+  - name: "GPG Public Key Export"
+    tag: "GPG_PUBLIC_KEY_EXPORT"
+    score: 500
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)_public\\.asc$"
+
+  - name: "GPG Secret Key Export (Critical)"
+    tag: "CRITICAL_GPG_SECRET_KEY"
+    score: 700
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)_secret\\.asc$"
+
+  - name: "Recovery Key File (Japanese)"
+    tag: "CRITICAL_RECOVERY_KEY_JP"
+    score: 700
+    target: "FileName"
+    condition: "contains"
+    pattern: "回復キー"
+
+  - name: "Virtual Disk Container (VHD/VHDX)"
+    tag: "VIRTUAL_DISK_DETECTED"
+    score: 400
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)\\.vhdx?$"
+
+  - name: "VeraCrypt/TrueCrypt Container File"
+    tag: "ENCRYPTED_CONTAINER"
+    score: 500
+    target: "FileName"
+    condition: "regex"
+    pattern: "(?i)\\.(tc|hc)$"
+
 threat_signatures:
+
   # [1] Reconnaissance Inference (Web History & Cache)
   - name: "Web Recon: XAMPP Dashboard"
     tag: "INTERNAL_RECON_WEB"
@@ -763,3 +885,29 @@ threat_signatures:
     target: "Target_Path"
     condition: "regex"
     pattern: "(?i)dcode.*\\.exe"
+
+  # ==========================================
+  # [v2.0] P2: Context-Based Masquerade Detection
+  # ==========================================
+  # SysInternals等の管理ツールが Downloads 等にある場合は「偽装」または「持ち込み」
+  - name: "Admin Tool in Suspicious Location (SysInternals)"
+    tag: "CRITICAL_MASQUERADE"
+    score: 600
+    target: "Target_Path"
+    condition: "regex"
+    # Windows(\) と Normalized(/) 両対応
+    pattern: "(?i)[\\\\/](Users[\\\\/]Public|Downloads|Temp)[\\\\/].*sysinternals\\.exe$"
+
+  - name: "Admin Tool in Public Downloads"
+    tag: "SUSPICIOUS_TOOL_DROP"
+    score: 400
+    target: "Target_Path"
+    condition: "regex"
+    pattern: "(?i)[\\\\/](Users[\\\\/]Public[\\\\/]Downloads|Public[\\\\/]Documents)[\\\\/].*(psexec|procdump|mimikatz|lazagne)\\.exe$"
+
+  - name: "Suspicious EXE in User Temp"
+    tag: "SUSPICIOUS_TEMP_EXE"
+    score: 350
+    target: "Target_Path"
+    condition: "regex"
+    pattern: "(?i)[\\\\/](AppData[\\\\/]Local[\\\\/]Temp|Windows[\\\\/]Temp)[\\\\/].*\\.(exe|dll|ps1)$"

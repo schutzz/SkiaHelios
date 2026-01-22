@@ -118,38 +118,28 @@ class CorrelationDetector(BaseDetector):
             
         print(f"    [+] Correlation Verified: Updating {len(updates)} patterns with real timestamps.")
         
+        # [PERF v10.0] Batch Expression: Build all conditions and apply once
+        # Instead of looping with df.with_columns() per update, we build chained expressions
+        ts_expr = pl.col("Timestamp_UTC")
+        score_expr = pl.col("Threat_Score")
+        tag_expr = pl.col("Tag")
+        insight_expr = pl.col("Insight")
+        
         for up in updates:
             cond = (pl.col("Source") == "PowerShell History") & \
                    (pl.col("Action").str.contains(f"(?i){up['history_pattern']}"))
             
-            # Using Polars format to append tags carefully
-            df = df.with_columns([
-                # Timestamp Update
-                pl.when(cond)
-                  .then(pl.lit(up['timestamp']))
-                  .otherwise(pl.col("Timestamp_UTC"))
-                  .alias("Timestamp_UTC"),
-
-                # Score Boost
-                pl.when(cond)
-                  .then(pl.col("Threat_Score") + up['score_boost'])
-                  .otherwise(pl.col("Threat_Score"))
-                  .alias("Threat_Score"),
-
-                # Tag Append (using format with comma)
-                pl.when(cond)
-                  .then(
-                      pl.format("{},{}", pl.col("Tag"), pl.lit(up['add_tags']))
-                  )
-                  .otherwise(pl.col("Tag"))
-                  .str.replace(r"^,", "") # Clean leading commas if original tag was empty
-                  .alias("Tag"),
-                  
-                # Insight Append
-                 pl.when(cond)
-                  .then(pl.format("{}\n[Correlation Verified: matched EID 4104/4688]", pl.col("Insight")))
-                  .otherwise(pl.col("Insight"))
-                  .alias("Insight")
-            ])
+            ts_expr = pl.when(cond).then(pl.lit(up['timestamp'])).otherwise(ts_expr)
+            score_expr = pl.when(cond).then(score_expr + up['score_boost']).otherwise(score_expr)
+            tag_expr = pl.when(cond).then(pl.format("{},{}", tag_expr, pl.lit(up['add_tags']))).otherwise(tag_expr)
+            insight_expr = pl.when(cond).then(pl.format("{}\n[Correlation Verified: matched EID 4104/4688]", insight_expr)).otherwise(insight_expr)
+        
+        # Single with_columns call for all updates
+        df = df.with_columns([
+            ts_expr.alias("Timestamp_UTC"),
+            score_expr.alias("Threat_Score"),
+            tag_expr.str.replace(r"^,", "").alias("Tag"),
+            insight_expr.alias("Insight")
+        ])
             
         return df

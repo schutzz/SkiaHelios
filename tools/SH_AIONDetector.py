@@ -296,10 +296,13 @@ class AIONEngine:
         RISKY_EXTENSIONS = r"(?i)\.(exe|lnk|bat|ps1|vbs|xml|dll|jar|hta)$"
         detected = []
         if "ParentPath" in mft_df.columns:
+            # [OPTIMIZED] Limit hotspot results to prevent timeout
             hotspot_files = mft_df.filter(
                 pl.col("ParentPath").str.contains("|".join(PERSISTENCE_HOTSPOTS)) &
                 pl.col("FileName").str.contains(RISKY_EXTENSIONS)
-            )
+            ).head(500)  # Limit to 500 rows max
+            
+            print(f"    [AION] Processing {hotspot_files.height} MFT hotspot entries...")
             for row in hotspot_files.iter_rows(named=True):
                 path = str(row.get('ParentPath') or "")
                 fname = row.get('FileName')
@@ -319,6 +322,7 @@ class AIONEngine:
                     "Threat_Tag": ""
                 })
         return detected
+
 
     def analyze(self):
         reg_hits = self.hunt_registry_persistence()

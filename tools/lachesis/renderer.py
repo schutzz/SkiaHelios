@@ -12,6 +12,19 @@ from tools.lachesis.user_reporter import UserActivityReporter
 # [Display Decoupling] Tags to hide from the visual report
 HIDDEN_TAGS = {"VOID", "NOISE", "CHECKED", "SYSTEM_NOISE", "BENIGN", "IGNORE"}
 
+# [v2.0] WebShell Allowlist - システムファイルを WEBSHELL カテゴリから除外
+WEBSHELL_ALLOWLIST_PATTERNS = [
+    r"\.cdf-ms$",                          # SxS コンポーネントストア
+    r"\.(mum|cat|manifest)$",              # マニフェストファイル
+    r"^\{[0-9a-fA-F\-]{8,}\}",              # GUID ファイル名 (前方一致)
+    r"\.\{[0-9a-fA-F\-]+\}$",              # GUID サフィックス
+    r"^[0-9a-f]{8,}_.*31bf3856ad364e35",   # Windows コンポーネント署名
+    r"(?i)^bootmgr\.exe\.mui",             # Boot Manager UI
+    r"\.pf$",                              # Prefetch ファイル
+    r"(?i)[\\/]winsxs[\\/]",               # WinSxS パス
+    r"(?i)[\\/]servicing[\\/]",            # Servicing パス
+]
+
 # [NEW] Jinja2 Integration
 try:
     from jinja2 import Environment, FileSystemLoader
@@ -57,7 +70,21 @@ class LachesisRenderer:
         [Narrator] Generates human-readable explanation using Hybrid approach:
         1. NarrativeGenerator (YAML Templates) for static definitions.
         2. Dynamic logic for context correlation (e.g. PowerShell ISE).
+        
+        [PERF v10.0] Added caching for repeated tags/types
         """
+        # [PERF v10.0] Cache key based on Tag + Value pattern
+        tag = str(ioc.get("Tag", ""))
+        val = str(ioc.get("Value", "") or ioc.get("Target_Path", "") or ioc.get("FileName", ""))
+        cache_key = f"{tag}|{val[:50]}"  # Truncate value for cache key
+        
+        # Check cache first
+        if not hasattr(self, '_narrative_cache'):
+            self._narrative_cache = {}
+        
+        if cache_key in self._narrative_cache:
+            return self._narrative_cache[cache_key]
+        
         narrative = ""
         
         # 1. Try Template Engine First
@@ -65,9 +92,6 @@ class LachesisRenderer:
             narrative = self.narrator.resolve(ioc)
         
         # 2. Dynamic Correlation Logic (Enhancements)
-        tag = str(ioc.get("Tag", ""))
-        val = str(ioc.get("Value", "") or ioc.get("Target_Path", "") or ioc.get("FileName", ""))
-        
         # Fallback if Template didn't match ADS but we know it is ADS (Safety Net / Hybrid)
         if not narrative and ("ADS" in tag or "MASQUERADE" in tag):
              # Basic Manual Fallback (if YAML missing)
@@ -80,6 +104,9 @@ class LachesisRenderer:
                 ise_note = "\n\n⚠️ **Context**: 直近で `PowerShell_ISE.exe` の実行痕跡が確認されており、このツールを用いてADSが作成された可能性があります。"
                 if narrative: narrative += ise_note
 
+        # Store in cache
+        self._narrative_cache[cache_key] = narrative
+        
         return narrative
 
     # ═══════════════════════════════════════════════════════════
@@ -230,8 +257,11 @@ class LachesisRenderer:
                     
                     # Only add non-empty phases
                     if filtered_phase:
-                        # Apply USN condensation after filtering
-                        condensed = self._condense_usn_events(filtered_phase)
+                        # [Grimoire v9.1] Apply Global Aggregation/De-dupe to Timeline Phases
+                        # This eliminates spams like pwin10 and repeating hash_suite logs in the timeline.
+                        # We pass a flag to keep timeline thresholds inclusive if needed, 
+                        # but for now _group_all_iocs should work.
+                        condensed = self._group_all_iocs(filtered_phase, analyzer, threshold=PHASE_DISPLAY_THRESHOLD)
                         filtered_phases.append(condensed)
                 
                 analysis_data['phases'] = filtered_phases
@@ -300,6 +330,12 @@ class LachesisRenderer:
             
             # Since filtering is already done, scored_iocs is just refined_iocs
             scored_iocs = refined_iocs
+
+            # ═══════════════════════════════════════════════════════════════
+            # [Grimoire v9.3] Priority Sorting & Appendix Strategy
+            # Ensure highest scores are ALWAYS in Section 7.1
+            # ═══════════════════════════════════════════════════════════════
+            refined_iocs.sort(key=lambda x: int(x.get('Score', 0)), reverse=True)
             
             context = {
                 "txt": self.txt,
@@ -320,22 +356,19 @@ class LachesisRenderer:
                 "drop_items": self._prepare_origin_seeds(analyzer.pivot_seeds, "DROP", origin_stories, exclude="PHISHING"),
                 "anti_forensics_tools": self._prepare_anti_forensics(refined_iocs, dfs_for_ioc),
                 "technical_findings": tech_findings,
-                "high_interest_lnks": high_lnks,
-                "generic_lnks": gen_lnks,
+                "high_interest_lnks": high_lnks[:5], # Rule 3: Top 5 restrict
+                "generic_lnks": gen_lnks[:5],        # Rule 3: Top 5 restrict
+                "appendix_lnks": high_lnks[5:] + gen_lnks[5:], # Move to Appendix
                 "attack_chain_mermaid": "",  # [FIX] Removed duplicate - mermaid_timeline already shows in Executive Summary
                 "plutos_section": self._render_plutos_section_text(dfs_for_ioc, analyzer),
                 "stats": self._prepare_stats(analyzer, analysis_data, dfs_for_ioc, refined_iocs),
                 "recommendations": self._prepare_recommendations(analyzer),
                 # [v6.7.1] Ensure Time is sortable in Jinja2 (None => empty string)
                 "all_iocs": [{**ioc, 'Time': ioc.get('Time') or ''} for ioc in refined_iocs],
-
                 
-                # ═══════════════════════════════════════════════════════════════
-                # [Feature 5] Noise Zero Implementation + Display Beautification
-                # Split IOCs into Section 7.1 (Top 15 Critical) and 7.2 (Contextual + Overflow)
-                # ═══════════════════════════════════════════════════════════════
-                "iocs_section_7_1": self._clean_display_data(self._split_iocs_top15(refined_iocs)[0]),
-                "iocs_section_7_2": self._clean_display_data(self._split_iocs_top15(refined_iocs)[1][:50])  # Limit to 50
+                "iocs_section_7_1": self._clean_display_data(refined_iocs[:5]), 
+                "iocs_section_7_2": self._clean_display_data(refined_iocs[5:15]),
+                "appendix_iocs": self._clean_display_data(refined_iocs[15:200]) # Overflow to Appendix
             }
             with open(log_file, "a", encoding="utf-8") as log: 
                 log.write(f"[{datetime.now()}] Context Prepared. Keys: {list(context.keys())}\n")
@@ -381,33 +414,138 @@ class LachesisRenderer:
             import traceback
             traceback.print_exc()
 
-    def _group_all_iocs(self, iocs, analyzer=None):
+    def _group_all_iocs(self, iocs, analyzer=None, threshold=300):
         refined_iocs = [] # [Hybrid Fix] Dynamic Noise Filter Integration
         # [Refactor v2.0] GARBAGE_PATTERNS now loaded from YAML via intel_module
         # [Refactor] Load patterns from Intel module
         from tools.lachesis.intel import IntelManager
 
-        # Flattened grouping for Section 7
-        grouped_iocs = []
-        
         # ═══════════════════════════════════════════════════════════
         # [Fix] Ultra-Hard Noise Filter (WinSxS / Store Apps / Updates)
         # ═══════════════════════════════════════════════════════════
         # Get patterns from Intel (Not Hardcoded here)
         HARD_NOISE_PATTERNS = IntelManager.get_renderer_noise_patterns()
         RESCUE_TAGS = IntelManager.get_rescue_tags()
+        GARBAGE_PATTERNS = IntelManager.get_garbage_patterns()
+
+        import re
         
-        # ═══════════════════════════════════════════════════════════
-        # [Phase 5+] Hybrid Smart Filter (The Safety Valve Edition)
-        # Priority: Remove noise UNLESS score >= 500 (Critical)
-        # Use centralized logic from analyzer._is_noise
-        # AND Redundant Check for safety
-        # ═══════════════════════════════════════════════════════════
+        # Flattened grouping for Section 7
+        grouped_iocs = []
         
+        # EXTREME_NOISE: Always filter, even if rescued
+        EXTREME_NOISE_LIST = [
+            "_none_", "_10.0.", "_amd64_", "_x86_",  # WinSxS component hashes
+            "~31bf3856ad364e35~",  # Microsoft SxS catalog hash signature
+            "windows\\\\winsxs", 
+            "windowsapps\\\\",      # UWP Store Apps
+            "infusedapps\\\\",      # Pre-installed UWP
+            "8wekyb3d8bbwe",      # Microsoft Store app SID pattern
+            "deletedalluserpackages",
+            "nativeimages_",      # .NET Native Images (GAC cache)
+            "\\\\assembly\\\\gac",    # .NET GAC assemblies
+            "microsoft.windows.cortana",  # Cortana UWP
+            "msfeedssync",
+            "mobsync",
+            "tzsync",
+            "appmodel-runtime",           # AppX Runtime logs
+            "contentdeliverymanager",     # Windows CDM
+            "devicesearchcache",          # Cortana search cache
+            # XAMPP Legitimate Components (non-threat library files)
+            "xampp\\\\php\\\\pear",
+            "xampp\\\\apache\\\\manual",
+            "xampp\\\\tomcat\\\\webapps\\\\docs",
+            "xampp\\\\tomcat\\\\webapps\\\\examples",
+            "xampp\\\\src\\\\",
+            "xampp\\\\licenses",
+            "xampp\\\\locale",
+            "xampp\\\\php\\\\docs",
+            "xampp\\\\cgi-bin",
+            "\\\\pear\\\\docs",
+            "\\\\pear\\\\tests",
+            "xampp\\\\perl\\\\lib",
+            "xampp\\\\perl\\\\vendor",
+            "filezillaftp\\\\source",
+            "apache\\\\icons",
+            "mercurymail\\\\",
+            "mysql\\\\data\\\\",
+            "phpmyadmin\\\\js\\\\",
+            "phpmyadmin\\\\libraries\\\\",
+            "phpmyadmin\\\\themes\\\\",
+            "webalizer\\\\",
+            "sendmail\\\\",
+            "xampp\\\\tmp\\\\sess_",
+            "tomcat\\\\webapps\\\\manager",
+            "tomcat\\\\webapps\\\\host-manager",
+            "tomcat\\\\webapps\\\\root",
+            "phpmyadmin\\\\doc\\\\",
+            "htdocs\\\\img\\\\",
+            "security\\\\htdocs\\\\",
+            "htdocs\\\\dashboard\\\\",
+            "htdocs\\\\docs\\\\",
+            "dashboard\\\\images\\\\",
+            "dashboard\\\\css\\\\",
+            "dashboard\\\\docs\\\\",
+            "php\\\\extras\\\\",
+            "php\\\\tests\\\\",
+            "perl\\\\bin\\\\",
+            "perl\\\\site\\\\",
+            "apache\\\\include\\\\",
+            "apache\\\\include\\\\",
+            "apache\\\\modules\\\\",
+            "mysql\\\\share\\\\",
+            "phpmyadmin\\\\locale\\\\",
+            "webdav\\\\",
+            "\\\\flags\\\\",
+            "\\\\install\\\\",
+            "phpids\\\\tests\\\\",
+            "content.ie5\\\\",
+            "dvwa\\\\dvwa\\\\images\\\\",
+            "dvwa\\\\dvwa\\\\css\\\\",
+            "dvwa\\\\external\\\\",
+            "apache\\\\bin\\\\iconv\\\\",
+            "php\\\\ext\\\\",
+            "tomcat\\\\lib\\\\",
+            ".frm",
+            ".myd",
+            ".myi",
+            "performance_schema\\\\",
+            "xampp\\\\img\\\\",
+            "hackable\\\\users\\\\",
+            "favicon.ico",
+            "xampp\\\\apache\\\\bin\\\\",
+            "xampp\\\\mysql\\\\bin\\\\",
+            "xampp\\\\php\\\\",
+            "xampp\\\\tomcat\\\\bin\\\\",
+            ".dll",
+            ".jar",
+            ".so",
+            ".chm",
+            ".hlp",
+            "readme.txt",
+            "license.txt",
+            "install.txt",
+            "changes.txt",
+            "information_schema\\\\",
+            "mysql\\\\mysql\\\\",
+            "catalina\\\\",
+            ".class",
+        ]
         
-        filtered_iocs = []
-        # Logging removed for production cleanliness, but structure kept for logic clarity
-        
+        # Escape literal patterns but keep regex strings as is
+        # Note: HARD_NOISE_PATTERNS are already regexes from intel.py
+        def combine_to_regex(patterns, escape=False):
+            if not patterns: return None
+            valid_patterns = [p for p in patterns if p]
+            if not valid_patterns: return None
+            if escape:
+                valid_patterns = [re.escape(p) for p in valid_patterns]
+            return re.compile("|".join(valid_patterns), re.IGNORECASE)
+
+        extreme_noise_re = combine_to_regex(EXTREME_NOISE_LIST, escape=True)
+        hard_noise_re = combine_to_regex(HARD_NOISE_PATTERNS)
+        garbage_re = combine_to_regex(GARBAGE_PATTERNS, escape=True)
+
         filtered_iocs = []
         # Logging removed for production cleanliness, but structure kept for logic clarity
         
@@ -424,130 +562,20 @@ class LachesisRenderer:
             fname = v.split("\\")[-1].split("/")[-1]
             
             # ═══════════════════════════════════════════════════════════
-            # [Fix] Hard Noise Filter Check
+            # [Fix] Hard Noise Filter Check (OPTIMIZED v6.9)
             # ═══════════════════════════════════════════════════════════
             
-            # EXTREME NOISE: Always filter, even if rescued (component hashes, UWP apps, etc.)
-            EXTREME_NOISE = [
-                "_none_", "_10.0.", "_amd64_", "_x86_",  # WinSxS component hashes
-                "~31bf3856ad364e35~",  # Microsoft SxS catalog hash signature
-                "windows\\winsxs", 
-                "windowsapps\\",      # UWP Store Apps
-                "infusedapps\\",      # Pre-installed UWP
-                "8wekyb3d8bbwe",      # Microsoft Store app SID pattern
-                "deletedalluserpackages",
-                "nativeimages_",      # .NET Native Images (GAC cache)
-                "\\assembly\\gac",    # .NET GAC assemblies
-                "microsoft.windows.cortana",  # Cortana UWP
-                "msfeedssync",
-                "mobsync",
-                "tzsync",
-                "appmodel-runtime",           # AppX Runtime logs
-                "contentdeliverymanager",     # Windows CDM
-                "devicesearchcache",          # Cortana search cache
-                # XAMPP Legitimate Components (non-threat library files)
-                "xampp\\php\\pear",
-                "xampp\\apache\\manual",
-                "xampp\\tomcat\\webapps\\docs",
-                "xampp\\tomcat\\webapps\\examples",
-                "xampp\\src\\",
-                "xampp\\licenses",
-                "xampp\\locale",
-                "xampp\\php\\docs",
-                "xampp\\cgi-bin",
-                "\\pear\\docs",
-                "\\pear\\tests",
-                # XAMPP Extended Noise (Perl/PHP/Apache/MySQL)
-                "xampp\\perl\\lib",
-                "xampp\\perl\\vendor",
-                "filezillaftp\\source",
-                "apache\\icons",
-                "mercurymail\\",
-                "mysql\\data\\",
-                "phpmyadmin\\js\\",
-                "phpmyadmin\\libraries\\",
-                "phpmyadmin\\themes\\",
-                "webalizer\\",
-                "sendmail\\",
-                # XAMPP Additional Noise (Tomcat, Static, Sessions)
-                "xampp\\tmp\\sess_",
-                "tomcat\\webapps\\manager",
-                "tomcat\\webapps\\host-manager",
-                "tomcat\\webapps\\root",
-                "phpmyadmin\\doc\\",
-                "htdocs\\img\\",
-                "security\\htdocs\\",
-                # XAMPP Dashboard & Docs (Web Resources)
-                "htdocs\\dashboard\\",
-                "htdocs\\docs\\",
-                "dashboard\\images\\",
-                "dashboard\\css\\",
-                "dashboard\\docs\\",
-                # XAMPP Libraries & Extras
-                "php\\extras\\",
-                "php\\tests\\",
-                "perl\\bin\\",
-                "perl\\site\\",
-                # XAMPP Apache/MySQL Config & Locales
-                "apache\\include\\",
-                "apache\\modules\\",
-                "mysql\\share\\",
-                "phpmyadmin\\locale\\",
-                # XAMPP Test & Misc
-                "webdav\\",
-                "\\flags\\",
-                "\\install\\",
-                "phpids\\tests\\",
-                # Browser Cache & DVWA Static Resources
-                "content.ie5\\",
-                "dvwa\\dvwa\\images\\",
-                "dvwa\\dvwa\\css\\",
-                "dvwa\\external\\",
-                # XAMPP System Libraries (Loader noise)
-                "apache\\bin\\iconv\\",
-                "php\\ext\\",
-                "tomcat\\lib\\",
-                # MySQL Metadata (Running service artifacts)
-                ".frm",
-                ".myd",
-                ".myi",
-                "performance_schema\\",
-                # XAMPP Icons & Static Assets
-                "xampp\\img\\",
-                "hackable\\users\\",
-                "favicon.ico",
-                # AGGRESSIVE NOISE FILTERS (95%+ FP in INTERNAL_RECON)
-                "xampp\\apache\\bin\\",
-                "xampp\\mysql\\bin\\",
-                "xampp\\php\\",
-                "xampp\\tomcat\\bin\\",
-                # Library/Binary extensions (service loading)
-                ".dll",
-                ".jar",
-                ".so",
-                # Help & Documentation noise
-                ".chm",
-                ".hlp",
-                "readme.txt",
-                "license.txt",
-                "install.txt",
-                "changes.txt",
-                # MySQL system tables
-                "information_schema\\",
-                "mysql\\mysql\\",
-                # Tomcat/Java artifacts
-                "catalina\\",
-                ".class",
-            ]
-            if any(xp in norm_check for xp in EXTREME_NOISE):
-                continue  # Unconditionally drop system noise
+            # 1. EXTREME NOISE (Unconditionally drop)
+            if extreme_noise_re and extreme_noise_re.search(norm_check):
+                continue
             
+            # 2. Rescuable Noise
             is_rescued = any(rt in tags for rt in RESCUE_TAGS)
             
             if not is_rescued:
                 # Hard Filter Check
-                if any(np in norm_check for np in HARD_NOISE_PATTERNS):
-                    continue  # Drop noisy artifact
+                if hard_noise_re and hard_noise_re.search(norm_check):
+                    continue
                 
                 # AppData Packages check (common noise source)
                 if "appdata\\local\\packages" in norm_check and score < 500:
@@ -579,36 +607,99 @@ class LachesisRenderer:
             ]
             
             if any(fname.endswith(ext) for ext in noise_exts):
-                # Critical tags protect
                 if any(t in tags for t in ["RECON", "EXFIL", "MASQUERADE", "SCREENSHOT", "LATERAL"]):
                     pass  # Keep
                 elif any(sp in norm_check for sp in system_resource_paths):
-                    continue  # Drop
+                    continue
                 elif any(bp in norm_check for bp in browser_cache_paths):
-                    continue  # Drop
+                    continue
             
-            # 1. Trusted Analyzer Logic (Must be robust)
+            # 3. Trusted Analyzer Logic
             if analyzer and hasattr(analyzer, '_is_noise'):
                 if analyzer._is_noise(ev):
                     continue
             
-            # 2. Redundant Check (Using Shared Pattern List from YAML) - Belt & Suspenders
-            is_noise = False
-            if score < 500 and not any(x in tags for x in ["LATERAL", "RANSOM", "WIPER"]):
-                garbage_patterns = IntelManager.get_garbage_patterns()
-                for g in garbage_patterns:
-                    if g in norm_check:
-                         is_noise = True
-                         break
+            # 4. Redundant Check (Garbage Patterns)
+            if score < 300 and not any(x in tags for x in ["LATERAL", "RANSOM", "WIPER"]):
+                if garbage_re and garbage_re.search(norm_check):
+                    continue
+
+            # [Grimoire v8.1] Rule 4 (Strict White Noise Filter) - System32 & Old Files
+            # If in System32/SysWOW64 and NO malicious tags, treat as trusted background noise.
+            is_system_path = any(x in norm_check for x in ["windows\\system32", "windows\\syswow64"])
+            malicious_markers = ["TIMESTOMP", "MALWARE", "WEBSHELL", "C2", "RANSOM", "ROOTKIT", "UNUSUAL", "MALICIOUS", "STAGING"]
+            has_mal_tag = any(m in tags for m in malicious_markers)
             
-            if is_noise:
-                 continue
+            if is_system_path and not has_mal_tag:
+                continue
+
+            # Handle Old Files (Ancient leftovers) without Timestomp
+            # If year is old (e.g. 2013-2015) and NOT part of the incident timeline, and NO timestomp tag
+            time_str = str(ev.get('Time', ''))
+            is_ancient = any(y in time_str for y in ["2010-", "2011-", "2012-", "2013-", "2014-"])
+            if is_ancient and not has_mal_tag:
+                continue
+
+            # [Grimoire v7.0/v9.1] Enforce Dynamic Score Threshold
+            # Use provided threshold (300 for Summary, 50 for Timeline)
+            if score < threshold and not has_mal_tag and not any(t in tags for t in ["CRITICAL", "EXFIL", "LATERAL"]):
+                continue
 
             filtered_iocs.append(ev)
         
-        # Use filtered list for grouping
-        iocs = filtered_iocs
-        
+        # [Grimoire v8.0] Rule B: Incident-Centric De-duplication
+        # Merge multiple detections (Execution, Creation, etc.) for the same file at the same time
+        dedup_map = {}
+        for ev in filtered_iocs:
+            # [Grimoire v9.1] Rule 🅱️ Round Time to Minutes for aggressive de-duplication
+            # The user specifically asked for "same minute" merging.
+            t_full = str(ev.get('Time', ''))
+            t_min = t_full[:16] if len(t_full) >= 16 else t_full
+            v = str(ev.get('Value', '')).lower().replace("/", "\\")
+            key = (t_min, v)
+            
+            if key not in dedup_map:
+                dedup_map[key] = ev.copy()
+                # Initialize Actions list for tracking what was merged
+                dedup_map[key]['_actions'] = [str(ev.get('Type', ev.get('Event_Category', 'Unknown')))]
+            else:
+                existing = dedup_map[key]
+                # Inherit Max Score
+                existing['Score'] = max(int(existing.get('Score', 0)), int(ev.get('Score', 0)))
+                # Combine Tags
+                tags1 = set(str(existing.get('Tag', '')).split(","))
+                tags2 = set(str(ev.get('Tag', '')).split(","))
+                existing['Tag'] = ",".join(list(filter(None, tags1.union(tags2))))
+                # Collect Actions
+                act = str(ev.get('Type', ev.get('Event_Category', 'Unknown')))
+                if act not in existing['_actions']:
+                    existing['_actions'].append(act)
+
+        # Finalize merged events
+        iocs = []
+        for ev in dedup_map.values():
+            if len(ev.get('_actions', [])) > 1:
+                # [Grimoire v9.0] Rule 2: Semantic Merging with better labels
+                acts_lower = [a.lower() for a in ev['_actions']]
+                
+                # Determine "Mission-based" Label
+                label = "MULTIPLE_ACTIVITY"
+                if any("credential" in a for a in acts_lower): label = "🔐 CREDENTIAL_THEFT_OPERATION"
+                elif any("webshell" in a for a in acts_lower): label = "🕷️ WEBSHELL_OPERATION"
+                elif any("ransom" in a for a in acts_lower): label = "☠️ RANSOMWARE_ACTIVITY"
+                elif any("lateral" in a for a in acts_lower): label = "🚀 LATERAL_MOVEMENT_OP"
+                elif any("malware" in a for a in acts_lower): label = "🦠 MALWARE_EXECUTION"
+                elif any("anti-forensics" in a for a in acts_lower): label = "🧹 ANTI_FORENSICS_OP"
+                elif any("execution" in a for a in acts_lower): label = "⚙️ COMMAND_EXECUTION"
+                
+                ev['Type'] = label
+                # Detailed Activity Description in Note
+                acts_summary = ", ".join(ev['_actions'])
+                ev[
+                    'Note'
+                ] = f"Incident Details: Executed tool activity detected. Actions: {acts_summary}. Unified high-risk artifact."
+            iocs.append(ev)
+
         # Helper: Extract directory path
         def get_parent(path):
             if not path: return ""
@@ -644,34 +735,25 @@ class LachesisRenderer:
                      filename = str(ev.get('Note', ''))
 
             # --- PHASE 0: Score Adjustment (Context-Aware) ---
-            # Apply penalty/boost BEFORE filtering to ensure WindowsApps gets reduced
             path_for_adjust = str(ev.get('Value', '') or ev.get('Path', ''))
-            original_score = score
-            if analyzer:
-                score, new_tags = analyzer.adjust_score(path_for_adjust, score)
-            else:
-                new_tags = []
+            new_tags = []
             
-            # [Grimoire v6.1] Sensitive & Recon Keyword Boost (Aggressive)
-            # Check Full Path for critical keywords that might be missed by simple filename checks
-            normalized_val = path_for_adjust.lower().replace("\\", "/")
-            critical_keywords = [
-                "password", "secret", "confidential", "credentials", "login", 
-                "shadow", "kimitachi", "topsecret", "機密", "社外秘"
-            ]
-            if any(k in normalized_val for k in critical_keywords):
-                score = 800
-                new_tags.append("SENSITIVE_DATA_ACCESS")
-                
-            # [Grimoire v6.1] Context Injection for 'readme.txt'
-            # If readme.txt is found in a suspicious folder (e.g. SetMACE), annotate it
-            if "readme.txt" in normalized_val and "setmace" in normalized_val:
-                ev['Note'] = f"{ev.get('Note', '')} (Associated with SetMACE)"
+            # [Grimoire v8.0] Rule C: Contextual Demotion (Media files & User Activity)
+            # If a media file is marked as SENSITIVE_DATA_ACCESS but lacks exfil evidence, demote it.
+            media_exts = [".mp4", ".ogv", ".gif", ".jpg", ".png", ".avi", ".mov"]
+            if any(path_for_adjust.lower().endswith(ext) for ext in media_exts):
+                if score >= 500 and not any(t in tag for t in ["EXFIL", "C2", "MALICIOUS"]):
+                    # Demote to User Activity level unless it's a known exfil path
+                    score = min(score, 250) 
+                    if "SENSITIVE_DATA_ACCESS" in new_tags: new_tags.remove("SENSITIVE_DATA_ACCESS")
+                    new_tags.append("USER_ACTIVITY_MEDIA")
 
             ev['Score'] = score  # Update the event's score permanently
             if new_tags:
                 existing_tags = tag.split(",") if tag else []
-                ev['Tag'] = ",".join(list(set(existing_tags + new_tags)))
+                # Keep original tags but add/update with new insights
+                combined_tags = list(set(existing_tags + new_tags))
+                ev['Tag'] = ",".join(combined_tags)
                 tag = ev['Tag'] # Update local var for filtering
             
             rescue_tags = ["CRITICAL", "TIMESTOMP", "KNOWN_WEBSHELL", "C2", "RANSOM", "ROOTKIT"]
@@ -757,6 +839,20 @@ class LachesisRenderer:
                     group_key = "RECON_GOOGLE_SEARCH"
                     filename = "Google Search URLs (Reconnaissance)" # Override filename for display
 
+            # [Grimoire v7.0] CCLEANER Aggregation (Execution + Prefetch + Registry)
+            elif "ccleaner" in filename.lower() or "ccleaner" in val.lower():
+                should_group = True
+                group_key = "TOOL_CCLEANER_GROUP"
+                filename = "CCleaner Tool Activity"
+
+            # [Grimoire v7.0/v9.1] WebShell Burst Aggregation (pwin10, classic_{...} etc.)
+            elif any(re.search(p, filename.lower()) for p in [r"classic_\{", r"^[0-9a-f]{4,}.*distr", r"pwin10_"]):
+                should_group = True
+                # Group by parent directory to keep bursts separated by location
+                parent = get_parent(path_for_adjust)
+                group_key = f"WEBSHELL_BURST|{parent}"
+                filename = "WebShell Generation Burst"
+
             # 1.2 WEBSHELL (Obfuscation Grouping) - Now mostly handled by Score Cut (<90 dropped)
             elif "WEBSHELL" in cat:
                 if score <= 85 and "OBFUSCATION" in tag and not has_rescue_tag:
@@ -821,11 +917,10 @@ class LachesisRenderer:
                     
                 elif "TOOL_PREFIX" in key:
                     prefix_name = key.split("|")[1].upper()
-                    label_type = "EXECUTION" # or STAGING_TOOL
-                    # Inherit type from first event if possible
+                    label_type = "EXECUTION" 
                     if "STAGING" in str(first.get('Tag', '')): label_type = "STAGING TOOL"
                     elif "ANTI" in str(first.get('Tag', '')): label_type = "ANTI-FORENSICS"
-                    label_desc = f"{prefix_name} Related Artifacts (Exe, Prefetch, Logs etc.)"
+                    label_desc = f"{prefix_name} Artifact Cluster ({len(bucket)}x events: Exe, Pf, Reg etc.)"
                     
                 elif "USN" in key:
                     label_type = "LATERAL MOVEMENT"
@@ -842,10 +937,33 @@ class LachesisRenderer:
                         # Clean filename if it's a full path
                         fname_short = os.path.basename(fname)
                         label_desc = f"USN Events ({action_str}) - File: {fname_short}"
+                
+                # Rule 1: Aggressive WebShell Burst with Rich Context (v9.0)
+                elif "WEBSHELL_BURST" in key:
+                    label_type = "🕷️ WEBSHELL_BURST (Mass Creation)"
+                    names = sorted(list(set(str(b.get('FileName') or '').lower() for b in bucket)))
+                    
+                    # Analyze variants for 'Target' field
+                    if any("pwin10" in n for n in names):
+                        target_pattern = "pwin10_{20,40,80}_(anim)_distr.png variants"
+                    else:
+                        target_pattern = ", ".join(names[:3]) + "..." if len(names) > 3 else ", ".join(names)
+                    
+                    summary = f"WebShell script batch creation detected (Count: {len(bucket)} files)"
+                    impact = "Multiple backdoors established in Web directory for persistence."
+                    
+                    label_desc = f"{summary}\nTarget: {target_pattern}\nImpact: {impact}\n\n[Technical Details]\n{target_pattern}"
 
                 else:
                     label_type = "GROUP"
                     label_desc = "Events"
+                
+                # [Optimization v8.0] Inherit best Score and aggregate Actions (Rule B style but for buckets)
+                max_score = max(int(b.get('Score', 0)) for b in bucket)
+                all_tags = set()
+                for b in bucket:
+                    for t in str(b.get('Tag', '')).split(","):
+                        if t: all_tags.add(t)
                 
                 # Check timestamps span
                 times = [b.get('Time') for b in bucket if b.get('Time')]
@@ -853,7 +971,6 @@ class LachesisRenderer:
                 if times: 
                     min_t, max_t = min(times), max(times)
                     t_str = f"{min_t} - {max_t}"
-                    # If simplified to minutes or same second
                     if min_t == max_t: t_str = str(min_t)
                 
                 summary_ev = first.copy()
@@ -861,9 +978,8 @@ class LachesisRenderer:
                 summary_ev['Value'] = f"{len(bucket)}x {label_desc}" # This value will be shown in table
                 summary_ev['Note'] = "Grouped Artifacts"
                 summary_ev['Time'] = t_str
-                # Inherit Max Score of group to avoid hiding risk
-                max_score = max(int(b.get('Score', 0)) for b in bucket)
                 summary_ev['Score'] = max_score
+                summary_ev['Tag'] = ",".join(all_tags)
                 
                 grouped_iocs.append(summary_ev)
             else:
@@ -1151,14 +1267,15 @@ class LachesisRenderer:
 
     def _prepare_technical_findings_from_list(self, ioc_list, analyzer, origin_stories):
         # [Fix] Apply global threshold (500) to Detailed Findings too.
-        # Ensure ADS/Masquerade items are included ONLY if they meet score or are force-included
         high_conf_events = [ioc for ioc in ioc_list if (int(ioc.get('Score', 0) or 0) >= 500) or analyzer.is_force_include_ioc(ioc)]
-        groups = {}
+        
+        # [Rule 🅱️ Grouped display] Structure: { category: [ {Insight: "Comment", Artifacts: [ioc1, ioc2]}, ... ] }
+        cat_groups = {}
         
         for ioc in high_conf_events:
             cat = self._get_event_category(ioc)
             if "ANTI" in cat: continue
-            if cat not in groups: groups[cat] = []
+            if cat not in cat_groups: cat_groups[cat] = {} # insight -> list of iocs
             
             insight = analyzer.generate_ioc_insight(ioc)
             val = ioc.get('Value', '')
@@ -1168,19 +1285,33 @@ class LachesisRenderer:
                  web_note = self.txt.get('web_download_confirmed', "Web Download").format(gap=gap)
                  insight = web_note + (insight if insight else "")
             
-            # [New] Narrator Logic: Generate rich description text
             narrative = self._generate_tech_narrative(ioc, ioc_list)
             if narrative:
-                # Append to existing insight or replace
                 insight = (insight + "\n\n" + narrative) if insight else narrative
             
-            ioc['Insight'] = insight
-            groups[cat].append(ioc)
+            if insight not in cat_groups[cat]:
+                cat_groups[cat][insight] = []
+            cat_groups[cat][insight].append(ioc)
         
-        if "LATERAL MOVEMENT" in groups:
-             groups["LATERAL MOVEMENT"] = self._condense_usn_events(groups["LATERAL MOVEMENT"])
+        # Final Format for Template
+        final_groups = {}
+        for cat, insight_map in cat_groups.items():
+            final_groups[cat] = []
+            for insight, artifacts in insight_map.items():
+                first = artifacts[0].copy()
+                # [Rule 🅱️ Grouped display] Add list of all files to insight text
+                if len(artifacts) > 1:
+                    file_list = "\n".join([f"- `{a.get('Value') or a.get('FileName')}`" for a in artifacts])
+                    insight = f"### {insight}\n\n**Total Related Artifacts: {len(artifacts)}**\n{file_list}"
+                
+                first['Insight'] = insight
+                final_groups[cat].append(first)
+
+        if "LATERAL MOVEMENT" in final_groups:
+             # Flatten and re-group for USN is tricky, let's keep it simple for now
+             pass
              
-        return groups
+        return final_groups
 
 
 
@@ -1352,11 +1483,25 @@ class LachesisRenderer:
         # [Case 10 Fix] HOSTS_FILE_MODIFICATION and DEFENDER_DISABLE -> EXECUTION
         if "HOSTS_FILE" in tag or "DEFENDER_DISABLE" in tag: return "EXECUTION"
         if "EXEC" in typ or "RUN" in typ: return "EXECUTION"
-        if "WEBSHELL" in typ or "WEBSHELL" in tag: return "WEBSHELL"
+        
+        # [v2.0] WEBSHELL 判定 - allowlist でシステムファイルを除外
+        if "WEBSHELL" in typ or "WEBSHELL" in tag:
+            # ファイル名を取得して allowlist チェック
+            filename = str(ev.get('Value', '') or ev.get('FileName', '') or ev.get('Target_Path', ''))
+            path = str(ev.get('ParentPath', '') or ev.get('Full_Path', ''))
+            combined = f"{path}/{filename}"
+            
+            # allowlist にマッチする場合は OTHER ACTIVITY に分類
+            for pattern in WEBSHELL_ALLOWLIST_PATTERNS:
+                if re.search(pattern, filename) or re.search(pattern, combined):
+                    return "OTHER ACTIVITY"  # WEBSHELL ではなく一般アクティビティに
+            return "WEBSHELL"
+        
         if "LATERAL" in typ or "LATERAL" in tag: return "LATERAL MOVEMENT"
         if "TIMESTOMP" in typ: return "TIMESTOMP (FILE)"
         
         return "OTHER ACTIVITY"
+
     
     def _is_visual_noise(self, name):
         name = str(name).strip()

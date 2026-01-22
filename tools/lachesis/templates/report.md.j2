@@ -163,9 +163,16 @@
 {% endfor %}
 {% endif %}
 {% else %}
+{# v9.2: Show Insight ONLY for the first item; list others as filenames only #}
+{% set first_insight_shown = namespace(val=false) %}
 {% for ioc in items %}
-- **{{ ioc.Time | replace('T', ' ') | truncate(19, True, '') }}** | `{{ ioc.Value }}`
-{% if ioc.Insight %}  - 🕵️ **Analyst Note:** {{ ioc.Insight }}{% endif %}
+{% if ioc.Insight and not first_insight_shown.val %}
+🕵️ **Analyst Note:** {{ ioc.Insight }}
+{% set first_insight_shown.val = true %}
+
+**Affected Artifacts ({{ items|length }} files):**
+{% endif %}
+- {{ ioc.Time | replace('T', ' ') | truncate(19, True, '') }} | `{{ ioc.Value }}`
 {% endfor %}
 {% endif %}
 

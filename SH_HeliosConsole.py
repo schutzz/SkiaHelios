@@ -192,18 +192,43 @@ def main():
     
     if not kape_raw_dir:
         print("[*] Raw Artifacts path not specified. Attempting auto-detection...")
-        sibling_kape = kape_csv_dir.parent / "kape"
-        sibling_source = kape_csv_dir.parent / "source"
         
+        # [v2.6] Enhanced Auto-Detection Logic
+        # Pattern 1: CSV dir is "out", Raw is "kape" (sibling folders)
+        # e.g., dfir-case1/out (CSV) -> dfir-case1/kape (Raw)
+        parent_dir = kape_csv_dir.parent
+        sibling_kape = parent_dir / "kape"
+        sibling_source = parent_dir / "source"
+        sibling_raw = parent_dir / "raw"
+        
+        # Pattern 2: CSV dir contains "out" in name, check for "kape" in parent
+        # e.g., C:\Temp\dfir-case1\out -> C:\Temp\dfir-case1\kape
+        
+        detected = None
         if sibling_kape.exists():
-            kape_raw_dir = sibling_kape
-            print(f"    [+] Auto-detected Raw Dir: {kape_raw_dir}")
+            detected = sibling_kape
         elif sibling_source.exists():
-            kape_raw_dir = sibling_source
+            detected = sibling_source
+        elif sibling_raw.exists():
+            detected = sibling_raw
+        
+        if detected:
+            kape_raw_dir = detected
             print(f"    [+] Auto-detected Raw Dir: {kape_raw_dir}")
         else:
-            print("    [!] Could not auto-detect Raw dir. Falling back to CSV dir (History/Registry detection may fail).")
-            kape_raw_dir = kape_csv_dir
+            # Auto-detection failed, prompt user
+            print("    [!] Could not auto-detect Raw directory.")
+            print("\n[?] Please input the path to Raw Artifacts (KAPE Target Output):")
+            print("    (This is typically the 'kape' folder containing D\\, E\\, or VSS* subfolders)")
+            print("    (Press Enter to skip and use CSV dir as fallback)")
+            raw_input = input("    > ").strip().strip('"')
+            
+            if raw_input and Path(raw_input).exists():
+                kape_raw_dir = Path(raw_input)
+                print(f"    [+] Raw Dir set to: {kape_raw_dir}")
+            else:
+                print("    [!] Falling back to CSV dir (History/Registry detection may fail).")
+                kape_raw_dir = kape_csv_dir
 
     # Mode Selection
     if not args.triage and not args.deep:

@@ -4,17 +4,16 @@ import json
 import polars as pl
 from datetime import datetime, timedelta
 from tools.lachesis.intel import TEXT_RES
-# [NEW] Correlatorをインポート
 from tools.lachesis.correlator import CrossCorrelationEngine
+from tools.lachesis.scoring_engine import ScoringEngine
+from tools.lachesis.insight_generator import InsightGenerator
 
 # ============================================================
 # [MIGRATED v2.0] All patterns moved to rules/scoring_rules.yaml
-# Use intel_module.get('threat_scores'), intel_module.get('unc_lateral_tools'),
-# and intel_module.get('garbage_patterns') to access unified rules.
+# [REFACTORED v3.0] adjust_score -> scoring_engine.py
+# [REFACTORED v3.0] generate_ioc_insight -> insight_generator.py
 # ============================================================
-# THREAT_BOOST_PATTERNS, UNC_LATERAL_TOOLS, GARBAGE_PATTERNS - REMOVED
-# See: rules/scoring_rules.yaml for the Single Source of Truth
-# ============================================================
+
 
 class LachesisAnalyzer:
     def __init__(self, intel_module, enricher_module, lang="jp"):
@@ -23,7 +22,7 @@ class LachesisAnalyzer:
         self.lang = lang
         self.txt = TEXT_RES[self.lang if self.lang in TEXT_RES else "jp"]
         self.visual_iocs = []
-        self.visual_iocs_hashes = set() # [OPTIMIZATION] O(1) Lookup
+        self.visual_iocs_hashes = set()
         self.pivot_seeds = []
         self.infra_ips_found = set()
         self.noise_stats = {}
@@ -33,7 +32,7 @@ class LachesisAnalyzer:
         context_scoring = self.intel.get('context_scoring', {})
         self.path_penalties = context_scoring.get('path_penalties', [])
         
-        # [v2.1] Initialize CompiledRuleEngine for precompiled regex patterns
+        # [v2.1] Initialize CompiledRuleEngine
         self._rule_engine = None
         try:
             from tools.compiled_rule_engine import CompiledRuleEngine
@@ -41,289 +40,37 @@ class LachesisAnalyzer:
             if threat_scores:
                 self._rule_engine = CompiledRuleEngine(threat_scores)
         except ImportError:
-            pass  # Fallback to dynamic matching in adjust_score
+            pass
         
-        # [v2.2] Initialize LedgerManager for score tracking
+        # [v2.2] Initialize LedgerManager
         self._ledger_manager = None
         try:
             from tools.score_ledger import LedgerManager
             self._ledger_manager = LedgerManager()
         except ImportError:
             pass
+        
+        # [v3.0 REFACTORED] Initialize ScoringEngine
+        self._scoring_engine = ScoringEngine(
+            intel_module=self.intel,
+            rule_engine=self._rule_engine,
+            ledger_manager=self._ledger_manager
+        )
+        
+        # [v3.0 REFACTORED] Initialize InsightGenerator
+        self._insight_generator = InsightGenerator(
+            intel_module=self.intel,
+            txt_resources=self.txt
+        )
 
     def adjust_score(self, path: str, base_score: int, penalties=None, command_line: str = "", ledger=None) -> tuple:
         """
-        [v2.2] Dynamic score adjustment using YAML-defined rules.
-        Migrated from hardcoded THREAT_BOOST_PATTERNS to intel_module.get('threat_scores').
-        
-        Args:
-            path: File path to evaluate
-            base_score: Initial score
-            penalties: Optional list of penalty rules
-            command_line: Optional command line for context matching
-            ledger: Optional ScoreLedger instance for audit trail
+        [v3.0 REFACTORED] Delegate to ScoringEngine.
+        Maintains backward compatibility with existing callers.
         """
-        adjusted = base_score
-        tags = []
-        path_lower = path.lower() if path else ""
-        
-        # [v2.2] Auto-create ledger for high-score paths (≥200 base) to capture breakdown
-        if ledger is None and self._ledger_manager and base_score >= 200 and path:
-            ledger = self._ledger_manager.get_or_create(path[:100])  # Truncate long paths
-        
-        # Initialize ledger if provided/created
-        if ledger:
-            ledger.set_base(base_score, "Initial Score")
-        
-        SENSITIVE_KEYWORDS = [
-            "password", "secret", "confidential", "credentials", "login", 
-            "shadow", "kimitachi", "topsecret", "機密", "社外秘", "pass.txt"
-        ]
-        
-        filename = path_lower.split("\\")[-1]
-        
-        if any(k in filename for k in SENSITIVE_KEYWORDS):
-            delta = max(0, 800 - adjusted)
-            adjusted = max(adjusted, 800)
-            tags.append("SENSITIVE_DATA_ACCESS")
-            if ledger and delta > 0:
-                ledger.record_context_boost(f"Sensitive keyword: {filename}", delta)
-        
-        if penalties is None:
-            penalties = [] 
+        return self._scoring_engine.adjust_score(path, base_score, penalties, command_line, ledger)
 
-        for rule in penalties:
-            p_pat = rule.get('path', '')
-            p_val = int(rule.get('penalty', 0))
-            if p_pat and p_pat in path_lower:
-                adjusted = max(0, adjusted + p_val)
-                tags.append("SYSTEM_NOISE")
-                if ledger:
-                    ledger.record_penalty(f"Path penalty: {p_pat}", p_val)
-                break 
-        
-        # [v2.1] Use CompiledRuleEngine for precompiled patterns (fast path)
-        if self._rule_engine:
-            engine_score, engine_tags = self._rule_engine.match(path_lower, 0)
-            adjusted += engine_score
-            tags.extend(engine_tags)
-            # Record to ledger (aggregated as single entry for performance)
-            if ledger and engine_score > 0:
-                ledger.record("YAML_RULES", engine_score, f"Matched {len(engine_tags)} rules", engine_tags)
-        else:
-            # Fallback: Load threat_scores from YAML via intel_module (slow path)
-            threat_rules = self.intel.get('threat_scores', [])
-            for rule in threat_rules:
-                pattern = rule.get('pattern', '')
-                score = int(rule.get('score', 0))
-                rule_tags = rule.get('tags', [])
-                match_mode = rule.get('match_mode', 'contains')
-                
-                if not pattern:
-                    continue
-                
-                is_match = False
-                if match_mode == 'contains':
-                    is_match = pattern.lower() in path_lower
-                elif match_mode == 'exact':
-                    is_match = filename == pattern.lower()
-                elif match_mode == 'startswith':
-                    is_match = path_lower.startswith(pattern.lower())
-                elif match_mode == 'endswith':
-                    is_match = path_lower.endswith(pattern.lower())
-                elif match_mode == 'regex':
-                    try:
-                        is_match = bool(re.search(pattern, path_lower, re.IGNORECASE))
-                    except re.error:
-                        pass
-                
-                if is_match:
-                    adjusted += score
-                    tags.extend(rule_tags)
-        
-        # [Case 6] OpenSSH Documentation Noise Filter
-        if "openssh" in path_lower and ("manual" in path_lower or ".htm" in path_lower):
-            adjusted = 50  # Force low score for documentation
-            if "DATA_EXFIL" in tags:
-                tags.remove("DATA_EXFIL")
-            tags.append("DOCUMENTATION_NOISE")
 
-        # [Case 6] SSH-Add Safety Valve & Contextual Scoring
-        if "ssh-add" in filename:
-            # 1. Known Legitimate Path (Program Files/OpenSSH) - High Trust
-            if "program files" in path_lower and "openssh" in path_lower:
-                adjusted = 100 
-                new_tag = "LEGITIMATE_TOOL_PATH"
-                if "DATA_EXFIL" in tags: tags.remove("DATA_EXFIL")
-                tags.append(new_tag)
-                
-            # 2. Suspicious Context (User Profile/Temp) - High Threat
-            elif any(s in path_lower for s in ["users\\", "temp\\", "downloads", "desktop"]):
-                adjusted = max(adjusted, 900)
-                tags.append("DATA_EXFIL")
-                adjusted = max(adjusted, 900)
-                tags.append("DATA_EXFIL")
-                tags.append("SUSPICIOUS_PATH")
-                
-            # 3. Ambiguous/Unknown Path - Neutral/Low Score (Prevent FP)
-            # [Case 6 Fix] If path is just filename or unknown, cap score to prevent 2000+ FP
-            else:
-                 if adjusted > 500:
-                     print(f"[DEBUG-SSH] Capping ssh-add score: {adjusted} -> 450 (Path: {path})")
-                     adjusted = 450
-                     tags.append("AMBIGUOUS_PATH_CAP")
-        
-        # [Case 7] Masquerade Detection Logic
-        filename = path_lower.split("\\")[-1]
-        
-        # 1. Fake SysInternals (sysinternals.exe does not exist)
-        if filename == "sysinternals.exe":
-            adjusted = max(adjusted, 600)
-            tags.append("CRITICAL_MASQUERADE")
-            tags.append("FAKE_TOOL_NAME")
-            
-        # 2. Suspicious System Binary Location (vmtoolsio.exe in Windows root)
-        if filename == "vmtoolsio.exe":
-            if "program files" not in path_lower and "system32" not in path_lower:
-                adjusted = max(adjusted, 600)
-                tags.append("SUSPICIOUS_LOCATION")
-                tags.append("PERSISTENCE_CANDIDATE")
-
-        # 3. Security Tools in Temp/Downloads (Wireshark, Fiddler, ProcExp)
-        masq_tools = ["procexp", "procmon", "wireshark", "fiddler", "tcpview", "autoruns"]
-        suspicious_dirs = ["downloads", "temp", "users\\public"]
-        
-        for tool in masq_tools:
-            if tool in filename:
-                if any(sdir in path_lower for sdir in suspicious_dirs):
-                    adjusted = max(adjusted, 500)
-                    tags.append("SECURITY_TOOL_IN_USER_PATH")
-
-        # [User Request] Bonus for Suspicious Extensions in User Paths
-        # .lnk, .crx, .jar in Downloads/Desktop -> +200 Score
-        # This highlights potential Initial Access vectors or dropped tools.
-        target_exts = [".lnk", ".crx", ".jar"]
-        target_dirs = ["downloads", "desktop"]
-
-        if any(filename.endswith(ext) for ext in target_exts):
-             # Ensure we don't boost legitimate shortcuts in Start Menu (which might have 'desktop' in path rarely, but usually not)
-             # But here we look for "downloads" or "desktop" string in path.
-             if any(tdir in path_lower for tdir in target_dirs):
-                 adjusted += 200
-                 tags.append("SUSPICIOUS_USER_DOWNLOAD")
-
-        # [Case 6] Context-Aware Tool Scoring
-        # Prevent legitimate admin tools from flooding the timeline unless suspicious
-        cmd_lower = command_line.lower() if command_line else ""
-        
-        # Robocopy / Xcopy
-        if "robocopy" in filename or "xcopy" in filename:
-            # Boost only if sensitive/network paths involved
-            if "admin$" in cmd_lower or "c$" in cmd_lower or "\\\\" in cmd_lower:
-                adjusted = max(adjusted, 450)
-                tags.append("LATERAL_MOVEMENT_COPY")
-            if "backup" in cmd_lower or "archive" in cmd_lower:
-                adjusted = max(adjusted, 100) # Slightly higher but not critical
-                tags.append("BACKUP_ACTIVITY")
-
-        # WMIC
-        if "wmic" in filename:
-            if "process call create" in cmd_lower or "shadowcopy" in cmd_lower or "/node:" in cmd_lower:
-                adjusted = max(adjusted, 500)
-                tags.append("SUSPICIOUS_WMI")
-                if "shadowcopy" in cmd_lower: tags.append("SHADOW_COPY_TAMPERING")
-
-        
-        # [Final Noise Tuning] WinRM System Path Context Logic
-        if "winrm" in filename:
-            # If in System32/SysWOW64 and NO suspicious args -> Low Score
-            is_system_path = "system32" in path_lower or "syswow64" in path_lower
-            is_suspicious_arg = "http" in cmd_lower or "invoke" in cmd_lower or "-r" in cmd_lower
-            
-            if is_system_path and not is_suspicious_arg:
-                 # Likely Windows Update or Service Activity
-                 adjusted = min(adjusted, 40) 
-                 tags.append("WINRM_SYSTEM_SERVICE")
-
-        # ═══════════════════════════════════════════════════════════
-        # [Noise Reduction v2] Explicit Noise Filter (Tagging Strategy)
-        # ═══════════════════════════════════════════════════════════
-        
-        # A. Path-based Noise Tagging
-        noise_paths = [
-            "programdata\\chocolatey", "programdata\\microsoft\\windows defender",
-            "appdata\\local\\google\\chrome", "appdata\\local\\microsoft\\onedrive",
-            "windows\\diagnostics", "windows\\servicing",
-            "program files\\windowsapps", "windows\\systemapps",
-            "program files\\microsoft", "program files (x86)\\microsoft"
-        ]
-        if any(np in path_lower for np in noise_paths):
-            tags.append("SYSTEM_NOISE")
-            # Special Handling for Windows Temp (only if filename is also noisy)
-            # but user said 'Windows\Temp' is NOT bulk noise. So we rely on Filename whitelist below.
-
-        # B. Filename-based Whitelist (Regex)
-        noise_filename_patterns = [
-            r"^\.tmp$", r"^googlecrashhandler.*", r"^shapecollector.*", r"^tabtip.*",
-            r"^mpcmdrun\.exe", r"^msmpeng\.exe", r"^conhost\.exe", r"^searchindexer\.exe", r"^dllhost\.exe"
-        ]
-        if any(re.match(fp, filename, re.IGNORECASE) for fp in noise_filename_patterns):
-             tags.append("SYSTEM_NOISE")
-
-        # C. TIMESTOMP Tuning (Logic from User)
-        # Chocolatey related -> specific downscore
-        if "chocolatey" in path_lower:
-            adjusted = 100
-            if "SYSTEM_NOISE" not in tags: tags.append("SYSTEM_NOISE")
-        
-        # Diagnostic .ps1 -> specific downscore
-        if filename.endswith(".ps1") and "diagnostics" in path_lower:
-            adjusted = 100
-            if "SYSTEM_NOISE" not in tags: tags.append("SYSTEM_NOISE")
-
-        # ═══════════════════════════════════════════════════════════
-
-        # [Final Noise Tuning] Sync Tool Dampening (msfeedssync, mobsync, cipher)
-        # Prevents these from being flagged as TIMESTOMP unless score is very high
-        sync_tools = ["msfeedssync.exe", "mobsync.exe", "tzsync.exe", "cipher.exe", "microsoft.uev.synccontroller.exe"]
-        if filename in sync_tools:
-             is_system_path = "system32" in path_lower or "syswow64" in path_lower
-             # If no suspicious args/paths, force score low to fail TIMESTOMP filter
-             if is_system_path:
-                 adjusted = min(adjusted, 250) 
-                 tags.append("SYSTEM_SYNC_PROCESS")
-
-        # [User Request] LOLBins Context Bonus (Post-Dampening Boost)
-        # robocopy, xcopy, cipher, vssadmin, bitsadmin
-        # If suspicious args or location -> +300 Score (Overrides dampening)
-        target_lolbins = ["robocopy", "xcopy", "cipher", "vssadmin", "bitsadmin"]
-        suspicious_args = ["/wipe", "shadow", "transfer", "download", "upload", "-r", "job"]
-
-        if any(bin_name in filename for bin_name in target_lolbins):
-            is_suspicious_context = False
-            
-            # 1. Args Check
-            if any(arg in cmd_lower for arg in suspicious_args):
-                is_suspicious_context = True
-                tags.append("SUSPICIOUS_ARGS")
-                
-            # 2. Users Dir Check (excluding system32 to avoid FP on admins running tools)
-            if "users" in path_lower and "system32" not in path_lower: 
-                 is_suspicious_context = True
-                 tags.append("LOLBIN_IN_USER_PATH")
-                 
-            # Apply Bonus
-            if is_suspicious_context:
-                adjusted += 300
-                tags.append("CONTEXT_BOOST_HIGH")
-        
-        # [Final Noise Tuning] Puppet/Ruby Test File Filter
-        if "test" in path_lower or "vendor" in path_lower:
-            if "callback" in filename or "indent" in filename:
-                adjusted = min(adjusted, 50) # Reduce from 300 -> 50
-                tags.append("DEV_TEST_FILE")
-        
-        return adjusted, tags
 
     # ═══════════════════════════════════════════════════════════════════════
     # [FIX] Smart Timestamp Extraction Helper
@@ -755,27 +502,47 @@ class LachesisAnalyzer:
 
 
     def _extract_visual_iocs_from_plutos_srum(self, dfs):
-        # [Feature] SRUM High Heat Extraction
+        """[OPTIMIZED] SRUM High Heat Extraction - Vectorized version"""
         srum_df = dfs.get('Plutos_Srum')
-        if srum_df is None: return
+        if srum_df is None or srum_df.height == 0: 
+            return
 
-        for row in srum_df.iter_rows(named=True):
-             proc = row.get('App_Name', '') or row.get('Process', '')
-             if not proc: continue
+        # [OPTIMIZATION] Pre-filter with vectorized operations
+        # Only process rows with Bytes_Sent > 1MB (1000000)
+        proc_col = "App_Name" if "App_Name" in srum_df.columns else "Process"
+        bytes_col = "Bytes_Sent"
+        
+        if proc_col not in srum_df.columns or bytes_col not in srum_df.columns:
+            return
+        
+        # Vectorized filter: Bytes_Sent > 1MB
+        high_traffic = srum_df.filter(
+            pl.col(bytes_col).cast(pl.Int64, strict=False).fill_null(0) > 1000000
+        )
+        
+        if high_traffic.height == 0:
+            return
+        
+        print(f"    [SRUM] Found {high_traffic.height} high-traffic entries (>1MB)")
+        
+        # Convert to list only for filtered rows (much smaller dataset)
+        for row in high_traffic.iter_rows(named=True):
+            proc = row.get(proc_col, '') or ''
+            if not proc: 
+                continue
              
-             bytes_sent = int(row.get('Bytes_Sent', 0) or 0)
-             # Threshold: 1MB sent
-             if bytes_sent > 1000000:
-                  mb_sent = bytes_sent // 1024 // 1024
-                  self._add_unique_visual_ioc({
-                      "Type": "SRUM_HIGH_HEAT",
-                      "Value": f"Proc: {proc}<br>Sent: {mb_sent} MB",
-                      "Path": "SRUM Database",
-                      "Time": self._get_best_timestamp(row),
-                      "Score": 500, # High Score
-                      "Tag": "DATA_EXFIL,SRUM",
-                      "Note": f"High Volume Traffic: {mb_sent} MB Sent"
-                  })
+            bytes_sent = int(row.get(bytes_col, 0) or 0)
+            mb_sent = bytes_sent // 1024 // 1024
+            self._add_unique_visual_ioc({
+                "Type": "SRUM_HIGH_HEAT",
+                "Value": f"Proc: {proc}<br>Sent: {mb_sent} MB",
+                "Path": "SRUM Database",
+                "Time": self._get_best_timestamp(row),
+                "Score": 500,
+                "Tag": "DATA_EXFIL,SRUM",
+                "Note": f"High Volume Traffic: {mb_sent} MB Sent"
+            })
+
 
     def _extract_visual_iocs_from_timeline(self, dfs):
         timeline_df = dfs.get('Timeline')
@@ -971,277 +738,331 @@ class LachesisAnalyzer:
                 
                 print(f"    [!] Correlation Hit ({rule['id']}): {ioc_val} -> Score {ioc['Score']}")
 
-    def is_force_include_ioc(self, ioc):
-        """
-        [Fix] Force inclusion of specific tags even if score < 500.
-        Used by Renderer for Technical Findings generation.
-        """
-        tag = str(ioc.get("Tag", "")).upper()
-        typ = str(ioc.get("Type", "")).upper()
-        
-        FORCE_TAGS = [
-            "CRITICAL", "WEBSHELL", "RANSOM", "ROOTKIT", "C2",
-            "STAGING_TOOL", "METASPLOIT", "EXPLOIT", 
-            "LATERAL_MOVEMENT", "UNC_EXECUTION", "REMOTE_ACCESS"
-        ]
-        
-        if any(t in tag for t in FORCE_TAGS): return True
-        if any(t in typ for t in FORCE_TAGS): return True
-        return False
 
     def _extract_visual_iocs_from_chronos(self, dfs):
-        if dfs.get('Chronos') is not None:
-            df = dfs['Chronos']
-            cols = df.columns
-            score_col = "Chronos_Score" if "Chronos_Score" in cols else "Threat_Score"
-            if score_col in cols:
-                try:
-                    df_sorted = df.sort(score_col, descending=True)
-                    for row in df_sorted.iter_rows(named=True):
-                        fname = row.get("FileName") or ""
-                        path = row.get("ParentPath") or ""
-                        score = int(float(row.get(score_col, 0)))
+        """[OPTIMIZED] Pre-filter Chronos by score/tag before iter_rows"""
+        if dfs.get('Chronos') is None:
+            return
+        df = dfs['Chronos']
+        cols = df.columns
+        score_col = "Chronos_Score" if "Chronos_Score" in cols else "Threat_Score"
+        if score_col not in cols:
+            return
+        
+        try:
+            # [OPTIMIZATION v2] Strict filter: score >= 500 OR has ROLLBACK OR critical dual-use tools
+            # Limit to 5000 rows max to prevent freeze
+            anomaly_col = "Anomaly_Time" if "Anomaly_Time" in cols else None
+            tag_col = "Threat_Tag" if "Threat_Tag" in cols else None
+            fname_col = "FileName" if "FileName" in cols else None
+            path_col = "ParentPath" if "ParentPath" in cols else None
+            
+            # Build filter expression - STRICTER threshold (500 instead of 200)
+            filter_expr = pl.col(score_col).cast(pl.Float64, strict=False).fill_null(0) >= 500
+            
+            # Include ROLLBACK detection (critical, always include)
+            if anomaly_col:
+                filter_expr = filter_expr | pl.col(anomaly_col).fill_null("").str.contains("ROLLBACK")
+            
+            # Include critical dual-use tools only (putty, setmace - not psexec/winscp)
+            if fname_col:
+                filter_expr = filter_expr | pl.col(fname_col).fill_null("").str.to_lowercase().str.contains(r"(?i)(putty|setmace)")
+            if path_col:
+                filter_expr = filter_expr | pl.col(path_col).fill_null("").str.to_lowercase().str.contains(r"(?i)(putty|setmace)")
+            
+            # Sort by score descending and limit to 5000 rows max
+            df_filtered = df.filter(filter_expr).sort(score_col, descending=True).head(5000)
+            
+            if df_filtered.height == 0:
+                return
+            
+            print(f"    [Chronos] Processing {df_filtered.height} high-value entries (from {df.height}, max 5000)")
+            
+            for row in df_filtered.iter_rows(named=True):
+                fname = row.get("FileName") or ""
+                path = row.get("ParentPath") or ""
+                score = int(float(row.get(score_col, 0)))
+                
+                bypass_reason = None
+                is_trusted_loc = self.intel.is_trusted_system_path(path)
+                is_dual = self.intel.is_dual_use(fname)
+
+                if "ROLLBACK" in str(row.get("Anomaly_Time", "")):
+                    bypass_reason = "🚨 SYSTEM TIME ROLLBACK DETECTED 🚨"
+                    if not fname and path: fname = f"System Artifact ({path})"
+                    self.intel.log_noise("TIME PARADOX", f"{fname} triggered Rollback Alert")
+                    self._add_unique_visual_ioc({
+                        "Type": "TIME_PARADOX", 
+                        "Value": fname if fname else "Unknown", 
+                        "Path": path, 
+                        "Note": str(row.get("Anomaly_Time", "")), 
+                        "Time": self._get_best_timestamp(row),
+                        "Reason": bypass_reason,
+                        "Score": score,
+                        "FileName": fname,
+                        "Action": "Rollback Detected" 
+                    })
+                    continue
+
+                path_lower = str(path).lower()
+                fname_lower = str(fname).lower()
+                tag = str(row.get("Threat_Tag", "")).upper()
+                
+                if "putty" in path_lower or "putty" in fname_lower:
+                    score = max(score, 300)
+                    if "REMOTE_ACCESS" not in tag:
+                        tag += ",REMOTE_ACCESS_CLIENT"
                         
-                        bypass_reason = None
-                        is_trusted_loc = self.intel.is_trusted_system_path(path)
-                        is_dual = self.intel.is_dual_use(fname)
+                if "setmace" in path_lower:
+                    score = max(score, 400)
+                    tag += ",CRITICAL_TIMESTOMP"
 
-                        if "ROLLBACK" in str(row.get("Anomaly_Time", "")):
-                            bypass_reason = "🚨 SYSTEM TIME ROLLBACK DETECTED 🚨"
-                            if not fname and path: fname = f"System Artifact ({path})"
-                            self.intel.log_noise("TIME PARADOX", f"{fname} triggered Rollback Alert")
-                            self._add_unique_visual_ioc({
-                                "Type": "TIME_PARADOX", 
-                                "Value": fname if fname else "Unknown", 
-                                "Path": path, 
-                                "Note": str(row.get("Anomaly_Time", "")), 
-                                # [FIX] Use best timestamp
-                                "Time": self._get_best_timestamp(row),
-                                "Reason": bypass_reason,
-                                "Score": score,
-                                "FileName": fname,
-                                "Action": "Rollback Detected" 
-                            })
-                            continue
+                extra_info = {}
+                timeline_df = dfs.get('Timeline')
+                if is_dual or "TIMESTOMP" in str(row.get("Threat_Tag", "")):
+                    _, _, _, is_executed = self.enricher.enrich_from_timeline(fname, timeline_df)
+                    extra_info["Execution"] = is_executed
 
-                        path_lower = str(path).lower()
-                        fname_lower = str(fname).lower()
-                        tag = str(row.get("Threat_Tag", "")).upper()
-                        
-                        if "putty" in path_lower or "putty" in fname_lower:
-                            score = max(score, 300)
-                            if "REMOTE_ACCESS" not in tag:
-                                tag += ",REMOTE_ACCESS_CLIENT"
-                                
-                        if "setmace" in path_lower:
-                             score = max(score, 400)
-                             tag += ",CRITICAL_TIMESTOMP"
+                if is_dual: bypass_reason = "Dual-Use Tool [DROP]" 
+                elif score >= 220:
+                    if is_trusted_loc:
+                        self.intel.log_noise("Trusted Path (Update)", fname)
+                        continue
+                    else:
+                        bypass_reason = "High Score (Timestomp) [DROP]"
+                
+                if self.intel.is_noise(fname, path):
+                    self.intel.log_noise("Explicit Noise Filter", fname)
+                    continue
 
-                        extra_info = {}
-                        timeline_df = dfs.get('Timeline')
-                        if is_dual or "TIMESTOMP" in str(row.get("Threat_Tag", "")):
-                             _, _, _, is_executed = self.enricher.enrich_from_timeline(fname, timeline_df)
-                             extra_info["Execution"] = is_executed
+                if bypass_reason:
+                    if "False Positive" in bypass_reason or "NOISE" in bypass_reason: 
+                        continue
+                elif score < 200: 
+                    continue 
+                
+                if not bypass_reason: bypass_reason = "High Score (>200)"
+                self._add_unique_visual_ioc({
+                    "Type": "TIMESTOMP", "Value": fname, "Path": path, "Note": "Time Anomaly", 
+                    "Time": self._get_best_timestamp(row),
+                    "Reason": bypass_reason, 
+                    "Score": score,
+                    "Extra": extra_info,
+                    "FileName": fname, 
+                    "Action": "Timestomp Detected" 
+                })
+        except Exception as e:
+            print(f"    [!] Chronos Extract Error: {e}")
 
-                        if is_dual: bypass_reason = "Dual-Use Tool [DROP]" 
-                        elif score >= 220:
-                            if is_trusted_loc:
-                                self.intel.log_noise("Trusted Path (Update)", fname)
-                                continue
-                            else:
-                                bypass_reason = "High Score (Timestomp) [DROP]"
-                        
-                        if self.intel.is_noise(fname, path):
-                             self.intel.log_noise("Explicit Noise Filter", fname)
-                             continue
-
-                        if bypass_reason:
-                             if "False Positive" in bypass_reason or "NOISE" in bypass_reason: continue
-                        elif score < 200: continue 
-                        
-                        if not bypass_reason: bypass_reason = "High Score (>200)"
-                        self._add_unique_visual_ioc({
-                            "Type": "TIMESTOMP", "Value": fname, "Path": path, "Note": "Time Anomaly", 
-                            # [FIX] Use best timestamp
-                            "Time": self._get_best_timestamp(row),
-                            "Reason": bypass_reason, 
-                            "Score": score,
-                            "Extra": extra_info,
-                            "FileName": fname, 
-                            "Action": "Timestomp Detected" 
-                        })
-                except: pass
 
     def _extract_visual_iocs_from_pandora(self, dfs):
-        if dfs.get('Pandora') is not None:
-            df = dfs['Pandora']
-            timeline_df = dfs.get('Timeline') 
+        """[OPTIMIZED] Pre-filter Pandora by score/tag before iter_rows"""
+        if dfs.get('Pandora') is None:
+            return
+        df = dfs['Pandora']
+        timeline_df = dfs.get('Timeline') 
+        
+        if "Threat_Score" not in df.columns:
+            return
+        
+        try:
+            SYSTEM_NOISE_PATHS = [
+                "winsxs", "assembly", "servicing", "manifests", 
+                "catalogs", "driverstore", "installer"
+            ]
             
-            if "Threat_Score" in df.columns:
-                try:
-                    SYSTEM_NOISE_PATHS = [
-                        "winsxs", "assembly", "servicing", "manifests", 
-                        "catalogs", "driverstore", "installer"
-                    ]
-                    
-                    for i, row in enumerate(df.iter_rows(named=True)):
-                        fname = row.get("Ghost_FileName", "")
-                        path = row.get("ParentPath", "")
-                        tag = str(row.get("Threat_Tag", "")).upper()
-                        score = int(float(row.get("Threat_Score", 0)))
-                        
-                        path_lower = str(path).lower()
-                        fname_lower = str(fname).lower()
+            # [OPTIMIZATION] Pre-filter: score >= 50 OR critical tags OR dual-use patterns
+            cols = df.columns
+            filter_expr = pl.col("Threat_Score").cast(pl.Float64, strict=False).fill_null(0) >= 50
+            
+            if "Threat_Tag" in cols:
+                filter_expr = filter_expr | pl.col("Threat_Tag").fill_null("").str.to_uppercase().str.contains(
+                    r"(MASQUERADE|PHISH|BACKDOOR|CREDENTIALS|TIMESTOMP|REMOTE_ACCESS|LATERAL|CRITICAL)"
+                )
+            
+            if "Ghost_FileName" in cols:
+                filter_expr = filter_expr | pl.col("Ghost_FileName").fill_null("").str.to_lowercase().str.contains(r"(?i)(putty|setmace)")
+            if "ParentPath" in cols:
+                filter_expr = filter_expr | pl.col("ParentPath").fill_null("").str.to_lowercase().str.contains(r"(?i)(putty|setmace)")
+                # Include UNC paths
+                filter_expr = filter_expr | pl.col("ParentPath").fill_null("").str.starts_with(r"\\")
+            
+            df_filtered = df.filter(filter_expr)
+            
+            if df_filtered.height == 0:
+                return
+            
+            print(f"    [Pandora] Processing {df_filtered.height} high-value entries (from {df.height})")
+            
+            for row in df_filtered.iter_rows(named=True):
+                fname = row.get("Ghost_FileName", "")
+                path = row.get("ParentPath", "")
+                tag = str(row.get("Threat_Tag", "")).upper()
+                score = int(float(row.get("Threat_Score", 0)))
+                
+                path_lower = str(path).lower()
+                fname_lower = str(fname).lower()
+                
+                if "setmace" in path_lower or "TIMESTOMP_TOOL" in tag: 
+                    fname = "SetMACE.exe (Recovered)"
+                    score = max(score, 400)
+                    tag += ",CRITICAL_TIMESTOMP"
+                
+                elif "putty" in path_lower or "putty" in fname_lower:
+                    if score < 300: score = 300 
+                    if "REMOTE_ACCESS" not in tag: tag += ",REMOTE_ACCESS_CLIENT"
+                
+                elif path.startswith("\\\\") and not path.startswith("\\\\?\\"):
+                    if score < 200: score = max(score, 200)
+                    if "LATERAL" not in tag: tag += ",LATERAL_MOVEMENT_EXEC"
+                
+                if any(noise in path_lower for noise in SYSTEM_NOISE_PATHS): 
+                    continue
 
-                        if "TIMESTOMP" in tag or "REMOTE_ACCESS" in tag or "setmace" in path_lower or "putty" in fname_lower:
-                             with open("pipeline_trace.log", "a") as f:
-                                 f.write(f"[ANALYZER] Found: {fname} Path={path} Score={score} Tag={tag}\n")
-                        
-                        path_lower = str(path).lower()
-                        fname_lower = str(fname).lower()
-                        
-                        if "setmace" in path_lower or "TIMESTOMP_TOOL" in tag: 
-                            fname = "SetMACE.exe (Recovered)"
-                            score = max(score, 400)
-                            tag += ",CRITICAL_TIMESTOMP"
-                        
-                        elif "putty" in path_lower or "putty" in fname_lower:
-                            if score < 300: score = 300 
-                            if "REMOTE_ACCESS" not in tag: tag += ",REMOTE_ACCESS_CLIENT"
-                        
-                        elif path.startswith("\\\\") and not path.startswith("\\\\?\\"):
-                            if score < 200: score = max(score, 200)
-                            if "LATERAL" not in tag: tag += ",LATERAL_MOVEMENT_EXEC"
-                        
-                        if any(noise in path_lower for noise in SYSTEM_NOISE_PATHS): continue
+                bypass_reason = None
+                is_trusted_loc = self.intel.is_trusted_system_path(path)
 
-                        bypass_reason = None
-                        is_trusted_loc = self.intel.is_trusted_system_path(path)
+                if "MASQUERADE" in tag: bypass_reason = "Critical Criteria (CRITICAL_MASQUERADE) [DROP]"
+                elif "PHISH" in tag: bypass_reason = "Critical Criteria (PHISHING) [DROP]"
+                elif "BACKDOOR" in tag: bypass_reason = "Backdoor Detected [DROP]"
+                elif "CREDENTIALS" in tag and score >= 200: bypass_reason = "Credential Dump [DROP]"
+                elif is_trusted_loc:
+                    self.intel.log_noise("Trusted Path (Update)", fname)
+                    continue
+                
+                is_crit_bypass = "TIMESTOMP" in tag or "REMOTE_ACCESS" in tag or "CRITICAL" in tag
+                if not is_crit_bypass and self.intel.is_noise(fname, path):
+                    self.intel.log_noise("Explicit Noise Filter", fname)
+                    continue
 
-                        if "MASQUERADE" in tag: bypass_reason = "Critical Criteria (CRITICAL_MASQUERADE) [DROP]"
-                        elif "PHISH" in tag: bypass_reason = "Critical Criteria (PHISHING) [DROP]"
-                        elif "BACKDOOR" in tag: bypass_reason = "Backdoor Detected [DROP]"
-                        elif "CREDENTIALS" in tag and score >= 200: bypass_reason = "Credential Dump [DROP]"
-                        elif is_trusted_loc:
-                            self.intel.log_noise("Trusted Path (Update)", fname)
-                            continue
-                        
-                        is_crit_bypass = "TIMESTOMP" in tag or "REMOTE_ACCESS" in tag or "CRITICAL" in tag
-                        if not is_crit_bypass and self.intel.is_noise(fname, path):
-                             self.intel.log_noise("Explicit Noise Filter", fname)
-                             continue
+                if self.intel.is_dual_use(fname): bypass_reason = "Dual-Use Tool [DROP]"
+                elif "TIMESTOMP" in tag: bypass_reason = "Timestomp [DROP]"
+                elif score >= 250: bypass_reason = "Critical Score [DROP]"
 
-                        elif self.intel.is_dual_use(fname): bypass_reason = "Dual-Use Tool [DROP]"
-                        elif "TIMESTOMP" in tag: bypass_reason = "Timestomp [DROP]"
-                        elif score >= 250: bypass_reason = "Critical Score [DROP]"
+                if bypass_reason: pass
+                elif score < 50: continue 
 
-                        if bypass_reason: pass
-                        elif score < 50: continue 
+                if not bypass_reason: bypass_reason = "High Confidence"
+                clean_name = os.path.basename(fname.split("] ")[-1])
+                
+                extra_info = {}
+                final_tag = tag
 
-                        if not bypass_reason: bypass_reason = "High Confidence"
-                        clean_name = os.path.basename(fname.split("] ")[-1])
-                        
-                        extra_info = {}
-                        final_tag = tag
+                if ".lnk" in fname.lower():
+                    target_path, timeline_tag, args, _ = self.enricher.enrich_from_timeline(fname, timeline_df)
+                    if target_path: extra_info["Target_Path"] = target_path
+                    if args: extra_info["Arguments"] = args
+                    if "DEFCON" in clean_name.upper() or "BYPASS" in clean_name.upper():
+                        extra_info["Risk"] = "SECURITY_TOOL_MASQUERADE"
+                    if timeline_tag:
+                        merged_tags = set(tag.split(",") + timeline_tag.split(","))
+                        merged_tags.discard("")
+                        final_tag = ",".join(list(merged_tags))
+                
+                ioc_type = final_tag
+                if "REMOTE_ACCESS" in tag.upper(): ioc_type = "REMOTE_ACCESS"
+                elif "LATERAL" in tag.upper(): ioc_type = "LATERAL_MOVEMENT"
+                
+                self._add_unique_visual_ioc({
+                    "Type": ioc_type,
+                    "Value": clean_name, 
+                    "Path": path, 
+                    "Note": "File Artifact", 
+                    "Time": self._get_best_timestamp(row),
+                    "Reason": bypass_reason,
+                    "Extra": extra_info,
+                    "Score": score,
+                    "FileName": fname,
+                    "Target_Path": path,
+                    "Tag": final_tag
+                })
+        except Exception as e:
+            print(f"[ERROR] Pandora IOC Extract Failed: {e}")
+            import traceback
+            traceback.print_exc()
 
-                        if ".lnk" in fname.lower():
-                            target_path, timeline_tag, args, _ = self.enricher.enrich_from_timeline(fname, timeline_df)
-                            if target_path: extra_info["Target_Path"] = target_path
-                            if args: extra_info["Arguments"] = args
-                            if "DEFCON" in clean_name.upper() or "BYPASS" in clean_name.upper():
-                                extra_info["Risk"] = "SECURITY_TOOL_MASQUERADE"
-                            if timeline_tag:
-                                merged_tags = set(tag.split(",") + timeline_tag.split(","))
-                                merged_tags.discard("")
-                                final_tag = ",".join(list(merged_tags))
-                        
-                        ioc_type = final_tag
-                        if "REMOTE_ACCESS" in tag.upper(): ioc_type = "REMOTE_ACCESS"
-                        elif "LATERAL" in tag.upper(): ioc_type = "LATERAL_MOVEMENT"
-                        
-                        self._add_unique_visual_ioc({
-                            "Type": ioc_type,
-                            "Value": clean_name, 
-                            "Path": path, 
-                            "Note": "File Artifact", 
-                            # [FIX] Use best timestamp
-                            "Time": self._get_best_timestamp(row),
-                            "Reason": bypass_reason,
-                            "Extra": extra_info,
-                            "Score": score,
-                            "FileName": fname,
-                            "Target_Path": path,
-                            "Tag": final_tag
-                        })
-                except Exception as e:
-                     print(f"[ERROR] Pandora IOC Extract Failed: {e} | Row: {row.get('Ghost_FileName')}")
-                     import traceback
-                     traceback.print_exc()
 
     def _extract_visual_iocs_from_aion(self, dfs):
-         if dfs.get('AION') is not None:
-            df = dfs['AION']
-            if "AION_Score" in df.columns:
-                try:
-                    for row in df.iter_rows(named=True):
-                        try: score = int(float(row.get("AION_Score", 0)))
-                        except: score = 0
-                        if score >= 50:
-                            name = row.get("Target_FileName")
-                            tags = str(row.get("AION_Tags", ""))
-                            is_scavenge = "SAM_SCAVENGE" in tags
-                            
-                            if is_scavenge:
-                                if score < 150: continue
-                                rid = row.get("RID", "")
-                                sid = row.get("SID", "")
-                                hash_st = row.get("Hash_State", "")
-                                hash_can = row.get("Hash_Detail", "")
-                                
-                                entry_loc = ""
-                                for k, v in row.items():
-                                    if "entry" in k.lower() and "location" in k.lower():
-                                        entry_loc = v
-                                        break
-                                
-                                path_parts = []
-                                if sid: path_parts.append(f"SID: {sid}")
-                                if rid: path_parts.append(f"RID: {rid}")
-                                if hash_can and hash_st == "Hash Candidate":
-                                     path_parts.append(f"Hash: {hash_can} (NTLM Candidate)")
-                                elif hash_st: 
-                                     path_parts.append(f"Hash: {hash_st}")
-                                     
-                                if entry_loc and "HEX" in entry_loc:
-                                    import re
-                                    hex_match = re.search(r'\[HEX: ([a-fA-F0-9\.]+)\]', entry_loc)
-                                    if hex_match:
-                                        path_parts.append(f"[HEX: {hex_match.group(1)}]")
-                                
-                                if entry_loc and "Linked to Group" in entry_loc:
-                                     start = entry_loc.find("[Linked to Group")
-                                     end = entry_loc.find("]", start)
-                                     if start != -1 and end != -1:
-                                         link_note = entry_loc[start:end+1]
-                                         path_parts.append(link_note)
-                                
-                                path_str = " | ".join(path_parts) if path_parts else (entry_loc or row.get("Full_Path", ""))
+        """[OPTIMIZED] Pre-filter AION by score >= 50 before iter_rows"""
+        if dfs.get('AION') is None:
+            return
+        df = dfs['AION']
+        if "AION_Score" not in df.columns:
+            return
+        
+        try:
+            # [OPTIMIZATION] Pre-filter: Only rows with AION_Score >= 50
+            df_filtered = df.filter(
+                pl.col("AION_Score").cast(pl.Float64, strict=False).fill_null(0) >= 50
+            )
+            
+            if df_filtered.height == 0:
+                return
+            
+            print(f"    [AION] Processing {df_filtered.height} high-score entries (score >= 50)")
+            
+            for row in df_filtered.iter_rows(named=True):
+                try: 
+                    score = int(float(row.get("AION_Score", 0)))
+                except: 
+                    score = 0
+                
+                name = row.get("Target_FileName")
+                tags = str(row.get("AION_Tags", ""))
+                is_scavenge = "SAM_SCAVENGE" in tags
+                
+                if is_scavenge:
+                    if score < 150: 
+                        continue
+                    rid = row.get("RID", "")
+                    sid = row.get("SID", "")
+                    hash_st = row.get("Hash_State", "")
+                    hash_can = row.get("Hash_Detail", "")
+                    
+                    entry_loc = ""
+                    for k, v in row.items():
+                        if "entry" in k.lower() and "location" in k.lower():
+                            entry_loc = v
+                            break
+                    
+                    path_parts = []
+                    if sid: path_parts.append(f"SID: {sid}")
+                    if rid: path_parts.append(f"RID: {rid}")
+                    if hash_can and hash_st == "Hash Candidate":
+                        path_parts.append(f"Hash: {hash_can} (NTLM Candidate)")
+                    elif hash_st: 
+                        path_parts.append(f"Hash: {hash_st}")
+                         
+                    if entry_loc and "HEX" in entry_loc:
+                        import re
+                        hex_match = re.search(r'\[HEX: ([a-fA-F0-9\.]+)\]', entry_loc)
+                        if hex_match:
+                            path_parts.append(f"[HEX: {hex_match.group(1)}]")
+                    
+                    if entry_loc and "Linked to Group" in entry_loc:
+                        start = entry_loc.find("[Linked to Group")
+                        end = entry_loc.find("]", start)
+                        if start != -1 and end != -1:
+                            link_note = entry_loc[start:end+1]
+                            path_parts.append(link_note)
+                    
+                    path_str = " | ".join(path_parts) if path_parts else (entry_loc or row.get("Full_Path", ""))
+                else:
+                    path_str = row.get("Entry_Location") or row.get("Full_Path", "")
 
-                            else:
-                                path_str = row.get("Entry_Location") or row.get("Full_Path", "")
+                if not self.intel.is_noise(name, path_str):
+                    self._add_unique_visual_ioc({
+                        "Type": "PERSISTENCE", "Value": name, "Path": path_str, "Note": "Persist", 
+                        "Time": self._get_best_timestamp(row),
+                        "Reason": "Persistence",
+                        "Tag": tags,
+                        "Score": score,
+                        "Target_FileName": name,
+                        "Target_Path": path_str
+                    })
+        except Exception as e:
+            print(f"    [!] AION Extract Error: {e}")
 
-                            if not self.intel.is_noise(name, path_str):
-                                self._add_unique_visual_ioc({
-                                    "Type": "PERSISTENCE", "Value": name, "Path": path_str, "Note": "Persist", 
-                                    # [FIX] Use best timestamp
-                                    "Time": self._get_best_timestamp(row),
-                                    "Reason": "Persistence",
-                                    "Tag": tags,
-                                    "Score": score,
-                                    "Target_FileName": name,
-                                    "Target_Path": path_str
-                                })
-                except: pass
                 
     def _extract_visual_iocs_from_plutos_recon(self, dfs):
         if dfs.get('Recon') is not None:
@@ -1663,249 +1484,8 @@ class LachesisAnalyzer:
         return False
     
     def generate_ioc_insight(self, ioc):
-        ioc_type = str(ioc.get('Type', '')).upper()
-        tag = str(ioc.get('Tag', '')).upper()
-        val = str(ioc.get('Value', ''))
-        val_lower = val.lower()
-        reason = str(ioc.get('Reason', '')).upper()
-        path = str(ioc.get('Path', ''))
-        payload = str(ioc.get('Payload', ''))  # Raw command data if available
-        
-        # [v6.9.1] Phantom Drive Detection - Generalized keyword-based labeling
-        is_phantom_drive = val.startswith("A:\\") or val.startswith("A:/") or "A:\\\\" in val
-        is_phantom_drive = is_phantom_drive or any(kw in val_lower for kw in ["phantom drive", "fake update", "attack tooling", "remote access setup"])
-        
-        if is_phantom_drive:
-            insights = ["💾 **Phantom Drive Execution Detected** (外部メディアからの実行)"]
-            insights.append(f"- **Artifact**: `{val}`")
-            
-            # Keyword-based insight (no hardcoded filenames)
-            if any(kw in val_lower for kw in ["update", "patch", "upgrade"]):
-                insights.append("- 🚨 **Fake Update Suspicion**: 更新プログラムを装った偽装スクリプトの可能性があります。")
-            elif any(kw in val_lower for kw in ["setup", "install", "provision", "deploy"]):
-                insights.append("- 🔧 **Attack Tooling**: セットアップ・展開用スクリプトと推定されます。")
-            elif any(kw in val_lower for kw in ["winrm", "remote", "ssh", "psexec", "wmi"]):
-                insights.append("- 🌐 **Remote Access**: リモートアクセスを有効化するスクリプトです。")
-            elif any(kw in val_lower for kw in ["persist", "autologon", "startup", "schedule"]):
-                insights.append("- 🔁 **Persistence**: 永続化メカニズムに関連するスクリプトです。")
-            
-            insights.append("- ⚠️ **Impact**: 外部メディア（USB等）からの実行により、Cドライブのフォレンジック痕跡を回避しています。")
-            insights.append("- 🔍 **Next Step**: USBデバイスの接続履歴（setupapi.dev.log, USBSTOR）を調査してください。")
-            return "<br/>".join(insights)
-        
-        # [v6.9.1] Defense Evasion Detection (ConsoleHost_history.txt) - NO HARDCODED COMMANDS
-        if "consolehost_history" in val_lower:
-            insights = ["📜 **PowerShell Command History Detected** (ConsoleHost_history.txt)"]
-            insights.append("- **File**: PowerShell の履歴ファイルを検知しました。")
-            
-            # Display actual payload if available
-            if payload and payload != val and "[complex" not in payload.lower():
-                insights.append("")
-                insights.append("📝 **Raw Evidence**:")
-                insights.append("```")
-                insights.append(f"{payload[:500]}" if len(payload) > 500 else payload)
-                insights.append("```")
-            else:
-                insights.append("- ⚠️ 元データにコマンド内容が含まれていません。ファイルを直接確認してください。")
-            
-            insights.append("")
-            insights.append("- 🔍 **Next Step**: このファイルの内容を直接確認し、実行されたコマンドを特定してください。")
-            return "<br/>".join(insights)
-
-        # [v6.9.1] Defender Tampering - NO HARDCODED COMMANDS
-        if "DEFENDER_DISABLE" in tag or "defender tampering" in val_lower:
-            insights = ["🛡️ **Defender Tampering Detected** (リアルタイム保護の無効化)"]
-            insights.append("- **Detection**: DEFENDER_DISABLE タグに基づく検知です。")
-            insights.append("- ⚠️ **Severity**: CRITICAL")
-            
-            # Display actual payload if available - NO HARDCODED FALLBACK
-            if payload and payload != val and "[complex" not in payload.lower():
-                insights.append("")
-                insights.append("📝 **Raw Evidence**:")
-                insights.append("```")
-                insights.append(f"{payload[:500]}" if len(payload) > 500 else payload)
-                insights.append("```")
-            else:
-                insights.append("- ⚠️ 元データにコマンド内容が含まれていません。イベントログを直接確認してください。")
-            
-            insights.append("")
-            insights.append("- 🔍 **Next Step**: イベントログ (Microsoft-Windows-Windows Defender/Operational) を確認してください。")
-            return "<br/>".join(insights)
-
-        # [v6.9.1] Hosts File Modification - Generalized (no hardcoded domains/IPs)
-        if "HOSTS_FILE_MODIFICATION" in tag:
-            insights = ["📝 **Hosts File Modification Detected**"]
-            insights.append("- **Target**: `%SystemRoot%\\System32\\drivers\\etc\\hosts`")
-            insights.append("- ⚠️ **Impact**: DNS解決を改ざんし、C2通信やフィッシングに利用された可能性があります。")
-            insights.append("- 🔍 **Next Step**: hostsファイルの内容を確認し、不審なドメイン/IPマッピングを特定してください。")
-            
-            if payload and payload != val and "[complex" not in payload.lower():
-                insights.append("")
-                insights.append("📝 **Raw Evidence**:")
-                insights.append("```")
-                insights.append(f"{payload[:300]}" if len(payload) > 300 else payload)
-                insights.append("```")
-            
-            return "<br/>".join(insights)
-
-        if "ANTI_FORENSICS" in ioc_type:
-            return "🚨 **Evidence Destruction**: 証拠隠滅ツールです。実行回数やタイムスタンプを確認してください。"
-        
-        if "SAM_SCAVENGE" in tag or "SAM_SCAVENGE" in ioc_type:
-            insights = ["☠️ **Chain Scavenger Detection** (Dirty Hive Hunter)"]
-            insights.append("- **Detection**: 破損または隠蔽されたSAMハイブから、バイナリレベルのカービングでユーザーアカウントを物理抽出しました。")
-            
-            if "[HEX:" in path:
-                try:
-                    hex_part = path.split("[HEX:")[1].split("]")[0].strip()
-                    insights.append(f"- **Binary Context**: `{hex_part}`")
-                except: pass
-
-            if "hacker" in val_lower or "user" in val_lower:
-                insights.append(f"- **Suspicion**: ユーザー名 `{val}` は典型的な攻撃用アカウントの命名パターンです。")
-            insights.append("- **Action**: 即時にこのアカウントの作成日時周辺（イベントログ削除の痕跡がある場合はその直前）のタイムラインを確認してください。[LOG_WIPE_INDUCED_MISSING_EVENT]")
-            return "\n".join(insights)
-
-        if "WEBSHELL" in tag or "WEBSHELL" in ioc_type:
-            insights = ["🕷️ **CRITICAL WebShell Detection**"]
-            
-            if "tmp" in val_lower and ".php" in val_lower:
-                insights.append("- **Pattern**: `tmp*.php` - SQLインジェクション攻撃によって動的生成されたWebShellの典型的なファイル名です。")
-                insights.append("- **Attack Vector**: 高確率で IIS/Apache への SQL Injection 経由のRCE (Remote Code Execution) です。")
-            elif any(x in val_lower for x in ["c99", "r57", "b374k", "wso", "chopper"]):
-                insights.append("- **Signature**: 既知のWebShellシグネチャ（China Chopper, c99, r57など）を検知しました。")
-            else:
-                insights.append("- **Detection**: Webサーバーディレクトリ内のスクリプトファイルを検知しました。")
-            
-            if "htdocs" in path.lower() or "wwwroot" in path.lower() or "inetpub" in path.lower():
-                insights.append("- **Location**: Webルートディレクトリ内に配置 → 外部からのHTTPアクセス可能な状態です。")
-            insights.append("- **Next Step**: IISログの同時刻リクエスト、w3wp.exe のプロセス履歴を即座に調査してください。")
-            return "<br/>".join(insights)
-        
-        if "USER_CREATION" in tag or "PRIVILEGE_ESCALATION" in tag or "SAM_REGISTRY" in tag:
-            insights = ["👤 **CRITICAL: User Creation/Privilege Escalation Detected**"]
-            
-            if "4720" in val or "user" in val_lower:
-                insights.append("- **Event**: 新規ユーザーアカウントが作成されました (EID 4720)。")
-            if "4732" in val or "4728" in val:
-                insights.append("- **Event**: ユーザーがセキュリティグループに追加されました。")
-            if "administrators" in val_lower:
-                insights.append("- **Impact**: **Administrator権限の付与** - 最高権限の取得です。")
-            if "remote" in val_lower and "desktop" in val_lower:
-                insights.append("- **Impact**: **Remote Desktop Usersへの追加** - RDP経由の永続アクセスが可能になりました。")
-            if "sam" in val_lower or "SAM" in tag:
-                insights.append("- **Registry**: SAMレジストリへのアクセス - ローカルアカウント情報の操作が行われています。")
-            
-            insights.append("- **Next Step**: net user /domain で作成されたアカウントを確認、即座に無効化してください。")
-            return "<br/>".join(insights)
-        
-        if "LOG_DELETION" in tag or "EVIDENCE_WIPING" in tag:
-            insights = ["🗑️ **CRITICAL: Log Deletion/Evidence Wiping Detected**"]
-            
-            if "1102" in val:
-                insights.append("- **Event**: Securityログがクリアされました (EID 1102)。")
-            if "104" in val:
-                insights.append("- **Event**: Systemログがクリアされました (EID 104)。")
-            if "wevtutil" in val_lower or "clear-eventlog" in val_lower:
-                insights.append("- **Tool**: イベントログ消去コマンドが実行されました。")
-            if "clearev" in val_lower:
-                insights.append("- **Tool**: Meterpreter clearevコマンド - 攻撃者がログを完全消去しようとしています。")
-            if "usnjrnl" in val_lower or "mft" in val_lower:
-                insights.append("- **Target**: ファイルシステムジャーナル ($USNJRNL/$MFT) の削除 - フォレンジック証拠の抹消です。")
-            
-            insights.append("- **Impact**: **アンチフォレンジック活動** - 攻撃者が活動痕跡を隠蔽しようとしています。")
-            insights.append("- **Next Step**: バックアップログ、VSS (Volume Shadow Copy) からの復元を試みてください。")
-            return "<br/>".join(insights)
-
-        if "EXECUTION_CONFIRMED" in ioc_type:
-            return "🚨 **Confirmed**: このツールは実際に実行された痕跡があります。調査優先度：高"
-        
-        elif "TIME_PARADOX" in ioc_type or "ROLLBACK" in reason:
-            rb_sec = "Unknown"
-            if "Rollback:" in val:
-                match = re.search(r"Rollback:\s*(-?\d+)", val)
-                if match: rb_sec = match.group(1)
-            return f"USNジャーナルの整合性分析により、システム時刻の巻き戻し(約{rb_sec}秒)を検知しました。これは高度なアンチフォレンジック活動を示唆します。"
-        
-        elif "MASQUERADE" in ioc_type:
-            is_sysinternals = "sysinternals" in val_lower or "procexp" in val_lower or "autoruns" in val_lower or "psexec" in val_lower or "procmon" in val_lower
-            is_user_path = any(p in path.lower() for p in ["downloads", "public", "temp", "appdata"])
-            
-            if is_sysinternals or is_user_path:
-                insights = ["🔧 **攻撃ツールセットの展開を検知**"]
-                if is_sysinternals:
-                    insights.append(f"- **Tool**: `{val}` は Sysinternalsツール群（または類似ツール）と推定されます。")
-                if is_user_path:
-                    insights.append(f"- **Location**: ユーザーパス (`{path}`) から実行 - 典型的な攻撃者の手法です。")
-                insights.append("- **Intent**: 🎯 **Possible Hands-on-Keyboard Intrusion** (Short Burst Activity)")
-                insights.append("- **Note**: 管理者のメンテナンス作業ではなく、攻撃者による手動探索の可能性が高いです。")
-                return "<br/>".join(insights)
-            
-            elif ".crx" in val_lower:
-                masq_app = "正規アプリケーション"
-                if "adobe" in path.lower(): masq_app = "Adobe Reader"
-                elif "microsoft" in path.lower(): masq_app = "Microsoft Office"
-                elif "google" in path.lower(): masq_app = "Google Chrome"
-                return f"{masq_app}のフォルダに、無関係なChrome拡張機能(.crx)が配置されています。これは典型的なPersistence（永続化）手法です。"
-            else:
-                return f"正規ファイル名を偽装した不審なファイル (`{val}`) を検知しました。マルウェアの可能性があります。"
-        
-        elif ".lnk" in val_lower and ("SUSPICIOUS" in ioc_type or "PHISHING" in ioc_type or "PS_" in ioc_type or "CMD_" in ioc_type or "MSHTA" in ioc_type):
-            insights = []
-            extra = ioc.get('Extra', {})
-            target = extra.get('Target_Path', '')
-            args = extra.get('Arguments', '')
-            risk = extra.get('Risk', '')
-
-            intel_desc = self.intel.match_intel(val)
-            if intel_desc:
-                insights.append(intel_desc)
-
-            if not target:
-                if "Target:" in val: target = val.split("Target:")[-1].strip()
-                elif "🎯" in val: target = val.split("🎯")[-1].strip()
-            
-            if target:
-                insights.append(f"🎯 **Target**: `{target}`")
-                
-                if "cmd.exe" in target.lower() or "powershell" in target.lower():
-                     insights.append("⚠️ **Critical**: OS標準シェルを悪用した攻撃の起点です。")
-                elif ".exe" in target.lower() or ".bat" in target.lower() or ".vbs" in target.lower():
-                     insights.append("⚠️ **High**: 実行可能ファイルを呼び出すショートカットです。")
-
-            if args:
-                args_disp = (args[:100] + "...") if len(args) > 100 else args
-                insights.append(f"📝 **Args**: `{args_disp}`")
-                
-                if "-enc" in args.lower() or "-encoded" in args.lower():
-                    insights.append("🚫 **Encoded**: Base64エンコードされたPowerShellコマンドを検知。即座に解析が必要です。")
-                if "-windowstyle hidden" in args.lower() or "-w hidden" in args.lower():
-                    insights.append("🕶️ **Stealth**: ユーザーからウィンドウを隠蔽するフラグを確認。")
-            else:
-                 if "-enc" in target.lower():
-                      insights.append("🚫 **Encoded**: ターゲットパス内にエンコードされたコマンドを確認。")
-
-            if risk == "SECURITY_TOOL_MASQUERADE":
-                insights.append("🎭 **Masquerade**: セキュリティツールやカンファレンス資料(DEFCON等)への偽装が疑われます。")
-
-            if insights:
-                return "<br/>".join(insights)
-            elif "PHISHING" in ioc_type:
-                return "不審なショートカットファイルが作成されました。フィッシング攻撃の可能性があります。"
-            else:
-                return "不審なショートカットファイルを検知しました。"
-        
-        elif "PHISHING" in ioc_type:
-            return "フィッシング活動に関連するアーティファクトを検知しました。"
-        
-        elif "TIMESTOMP" in ioc_type:
-            name = ioc.get("Value", "Unknown")
-            return self.txt["note_timestomp"].format(name=name)
-        
-        elif "CREDENTIALS" in ioc_type:
-            return "認証情報の窃取または不正ツールの配置を検知しました。"
-        
-        elif "COMMUNICATION_CONFIRMED" in reason or "COMMUNICATION_CONFIRMED" in ioc_type:
-            return "🚨 ブラウザ履歴との照合により、**実際にネットワーク通信が成功した痕跡**を確認しました。C2サーバへのビーコン送信、またはペイロードダウンロードの可能性が極めて高いです。"
-        
-        return None
+        """
+        [v3.0 REFACTORED] Delegate to InsightGenerator.
+        Maintains backward compatibility with existing callers.
+        """
+        return self._insight_generator.generate(ioc)

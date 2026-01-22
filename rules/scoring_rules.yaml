@@ -357,6 +357,87 @@ threat_scores:
     target: "Target_Path"
     match_mode: "startswith"
 
+  # ═══════════════════════════════════════════════════════════════
+  # [Case 9 Fix] Encryption / Privacy Tools (Insider Threat)
+  # ═══════════════════════════════════════════════════════════════
+  - pattern: "aescrypt"
+    score: 400
+    tags: ["ENCRYPTION_TOOL", "INSIDER_THREAT"]
+    target: "FileName"
+    match_mode: "contains"
+
+  - pattern: "kleopatra"
+    score: 450
+    tags: ["ENCRYPTION_TOOL", "GPG_TOOL", "INSIDER_THREAT"]
+    target: "FileName"
+    match_mode: "contains"
+
+  - pattern: "gpg.exe"
+    score: 400
+    tags: ["ENCRYPTION_TOOL", "GPG_TOOL"]
+    target: "FileName"
+    match_mode: "endswith"
+
+  - pattern: "gpg4win"
+    score: 400
+    tags: ["ENCRYPTION_TOOL", "GPG_SUITE"]
+    target: "Action"
+    match_mode: "contains"
+
+  - pattern: "veracrypt"
+    score: 500
+    tags: ["ENCRYPTION_TOOL", "CONTAINER_ENCRYPTION"]
+    target: "FileName"
+    match_mode: "contains"
+
+  - pattern: "truecrypt"
+    score: 500
+    tags: ["ENCRYPTION_TOOL", "CONTAINER_ENCRYPTION", "LEGACY"]
+    target: "FileName"
+    match_mode: "contains"
+
+  - pattern: "bitlockerwizard"
+    score: 500
+    tags: ["ENCRYPTION_TOOL", "BITLOCKER"]
+    target: "FileName"
+    match_mode: "contains"
+
+  - pattern: ".aes"
+    score: 500
+    tags: ["ENCRYPTED_FILE", "AES"]
+    target: "FileName"
+    match_mode: "endswith"
+
+  - pattern: ".gpg"
+    score: 450
+    tags: ["ENCRYPTED_FILE", "GPG"]
+    target: "FileName"
+    match_mode: "endswith"
+
+  - pattern: ".asc"
+    score: 450
+    tags: ["ENCRYPTED_KEY", "GPG"]
+    target: "FileName"
+    match_mode: "endswith"
+
+  - pattern: ".vhd"
+    score: 350
+    tags: ["VIRTUAL_DISK", "HIDDEN_VOLUME"]
+    target: "FileName"
+    match_mode: "endswith"
+
+  - pattern: "recovery key"
+    score: 700
+    tags: ["RECOVERY_KEY", "CRITICAL"]
+    target: "FileName"
+    match_mode: "contains"
+
+  - pattern: "回復キー"
+    score: 700
+    tags: ["RECOVERY_KEY", "CRITICAL", "JP"]
+    target: "FileName"
+    match_mode: "contains"
+
 # ═══════════════════════════════════════════════════════════════
 # UNC Lateral Movement Tool List (for context boost)
 # ═══════════════════════════════════════════════════════════════

@@ -102,37 +102,50 @@ class ChronosEngine:
     # ===========================================
     # Plan B Logic A: Microburst Detection (Update Storm Filter)
     # ===========================================
-    def _detect_microburst(self, df, time_col="SI_CreationTime_Raw"):
+    def _detect_microburst(self, df, time_col="SI_CreationTime"):
         """
-        秒単位で50件以上の同一タイムスタンプ → Update Storm として白判定。
-        攻撃者が50件以上を ミリ秒単位で完全一致させることは現実的に不可能。
+        [Optimized] 秒単位で50件以上の同一タイムスタンプ → Update Storm として判定。
+        文字列変換(cast)を避け、Datetime型(si_dt)が利用可能な場合は高速truncateを使用する。
         """
-        if time_col not in df.columns:
-            # [FIX] Fallback to Timestamp_UTC if SI_CreationTime is missing
-            if "Timestamp_UTC" in df.columns:
-                print("       [i] Falling back to Timestamp_UTC for Microburst detection")
-                time_col = "Timestamp_UTC"
-            else:
-                return df
-        
+        if df.height == 0:
+            return df
+
         print("    -> [Plan B:A] Detecting Update Storm (Microburst)...")
         
-        # 秒単位に丸める（ミリ秒を削除）
-        # [FIX] Ensure type is string before slicing
-        df = df.with_columns(
-            pl.col(time_col).cast(pl.Utf8).str.slice(0, 19).alias("_time_sec")
-        )
+        # [OPTIMIZATION] Use pre-parsed datetime column if available
+        if "si_dt" in df.columns:
+            # Datetime Truncate is much faster/lighter than String Slice
+            df = df.with_columns(
+                pl.col("si_dt").dt.truncate("1s").cast(pl.Utf8).fill_null("").alias("_time_sec")
+            )
+        else:
+            # Fallback to String Slicing (Slow)
+            if time_col not in df.columns:
+                if "Timestamp_UTC" in df.columns:
+                    time_col = "Timestamp_UTC"
+                else:
+                    return df
+            
+            df = df.with_columns(
+                pl.col(time_col).cast(pl.Utf8, strict=False).str.slice(0, 19).fill_null("").alias("_time_sec")
+            )
         
+        # Filter out empty times
+        df_valid = df.filter(pl.col("_time_sec") != "")
+        if df_valid.height == 0:
+             return df.drop(["_time_sec"]) if "_time_sec" in df.columns else df
+
         # 各秒のファイル数をカウント
-        time_counts = df.group_by("_time_sec").agg(pl.len().alias("_count"))
+        time_counts = df_valid.group_by("_time_sec").agg(pl.len().alias("_count"))
         
         # 50件以上の秒をバルク更新と判定
         bulk_times = time_counts.filter(pl.col("_count") >= 50)["_time_sec"].to_list()
         
         if bulk_times:
-            print(f"       >> [BULK UPDATE] Detected {len(bulk_times)} Update Storm intervals ({sum(df.filter(pl.col('_time_sec').is_in(bulk_times)).height for _ in [1])} files)")
-            
+            # 高速化: print用の再計算を削除し、一度のフィルタリングで適用
             is_bulk = pl.col("_time_sec").is_in(bulk_times)
+            affected_count = df.filter(is_bulk).height
+            print(f"       >> [BULK UPDATE] Detected {len(bulk_times)} intervals affecting {affected_count} artifacts.")
             
             df = df.with_columns([
                 pl.when(is_bulk & (pl.col("Threat_Tag").str.contains("TIMESTOMP")))
@@ -147,6 +160,7 @@ class ChronosEngine:
             ])
         
         return df.drop(["_time_sec"])
+
     
     # ===========================================
     # Plan B Logic B: Execution Evidence Cross-Check
@@ -266,77 +280,137 @@ class ChronosEngine:
         return lf
 
     def check_null_timestamps(self, lf):
-        # Collect to apply per-row logic, then convert back
-        df = lf.collect()
+        """
+        [OPTIMIZED] Vectorized null timestamp check using Polars expressions.
+        Replaces slow iter_rows loop with columnar operations.
+        """
+        # Ensure required columns exist
+        cols = lf.collect_schema().names()
         
-        results = []
-        for row in df.iter_rows(named=True):
-            filename = row.get("FileName", "") or ""
-            si_creation = row.get("SI_CreationTime")
-            parent_path = row.get("ParentPath", "") or ""
-            
-            # Check if null timestamp
-            is_null = si_creation is None or (hasattr(si_creation, 'year') and si_creation.year < 1980)
-
-            # [FIX] Ignore Non-Filesystem Artifacts (UserAssist, EventLog, etc.) from Null Stomp Check
-            # Even if they have "exe" extension, they don't have MFT Creation Time.
-            artifact_type = row.get("Artifact_Type", "")
-            if artifact_type and artifact_type not in ["MFT", "LogFile", "UsnJournal"]:
-                is_null = False # Skip this check for non-FS artifacts
-            
-            if not is_null:
-                results.append({"score": row.get("Threat_Score", 0), "tag": row.get("Threat_Tag", ""), "anomaly": row.get("Anomaly_Time", "")})
-                continue
-            
-            filename_lower = filename.lower()
-            
-            # Check noise paths
-            noise_keywords = ["cache", "temporary internet files", "history", "cookies"]
-            if any(kw in parent_path.lower() for kw in noise_keywords):
-                results.append({"score": 0, "tag": "NOISE_CACHE", "anomaly": ""})
-                continue
-            
-            # Check if whitelisted (installers, VM tools)
-            if self._is_whitelisted(filename):
-                results.append({"score": 0, "tag": "INFO_WHITELISTED", "anomaly": ""})
-                continue
-            
-            # Check if SysInternals tool -> context-based scoring
-            sysinternals_score = self._get_sysinternals_score(filename)
-            if sysinternals_score is not None:
-                tag = "SYSINTERNALS_TIMESTOMP" if not self.is_forensic_host else "INFO_FORENSIC_TOOL"
-                results.append({"score": sysinternals_score, "tag": tag, "anomaly": "-"})
-                continue
-            
-            # Check target extensions
-            target_exts = [".exe", ".dll", ".sys", ".ps1", ".bat", ".cmd", ".vbs", ".js"]
-            is_target_ext = any(filename_lower.endswith(ext) for ext in target_exts)
-            
-            # LNK handling
-            is_lnk = filename_lower.endswith(".lnk")
-            has_double_ext = bool(re.search(r"\.(jpg|png|pdf|docx|xlsx|txt|zip|rar)\.lnk$", filename_lower))
-            
-            if is_target_ext:
-                results.append({"score": 300, "tag": "CRITICAL_NULL_TIMESTOMP", "anomaly": "-"})
-            elif is_lnk and has_double_ext:
-                results.append({"score": 250, "tag": "CRITICAL_PHISHING_LNK", "anomaly": "-"})
-            elif is_lnk:
-                results.append({"score": 0, "tag": "INFO_NULL_TIMESTAMP", "anomaly": ""})
+        # Define column references with fallbacks
+        filename_col = pl.col("FileName").fill_null("")
+        filename_lower = filename_col.str.to_lowercase()
+        parent_path_col = pl.col("ParentPath").fill_null("") if "ParentPath" in cols else pl.lit("")
+        parent_path_lower = parent_path_col.str.to_lowercase()
+        
+        # SI_CreationTime null check (vectorized)
+        # Handle both None and pre-1980 dates
+        # [FIX] Proper operator precedence with explicit construction
+        si_col = "SI_CreationTime" if "SI_CreationTime" in cols else "si_dt"
+        if si_col in cols:
+            if "si_dt" in cols:
+                # si_dt is datetime - can check year
+                is_null_ts = pl.col(si_col).is_null() | (pl.col("si_dt").dt.year() < 1980)
             else:
-                results.append({"score": 0, "tag": "INFO_NULL_TIMESTAMP", "anomaly": ""})
+                is_null_ts = pl.col(si_col).is_null()
+        else:
+            is_null_ts = pl.lit(False)
+
         
-        # Apply results back to DataFrame
-        scores = [r["score"] for r in results]
-        tags = [r["tag"] for r in results]
-        anomalies = [r["anomaly"] for r in results]
+        # Non-filesystem artifact check (skip null check for UserAssist, EventLog, etc.)
+        if "Artifact_Type" in cols:
+            is_fs_artifact = pl.col("Artifact_Type").fill_null("").is_in(["MFT", "LogFile", "UsnJournal", ""])
+        else:
+            is_fs_artifact = pl.lit(True)
         
-        df = df.with_columns([
-            pl.Series("Threat_Score", scores),
-            pl.Series("Threat_Tag", tags),
-            pl.Series("Anomaly_Time", anomalies)
+        # Combined null condition: only flag if null AND is filesystem artifact
+        is_null = is_null_ts & is_fs_artifact
+        
+        # Noise path patterns (vectorized)
+        noise_pattern = r"(?i)(cache|temporary internet files|history|cookies)"
+        is_noise_path = parent_path_lower.str.contains(noise_pattern)
+        
+        # Whitelist patterns (from config)
+        whitelist_patterns = self.config.get("timestomp_whitelist", {})
+        all_patterns = []
+        for category, pattern_list in whitelist_patterns.items():
+            if isinstance(pattern_list, list):
+                all_patterns.extend(pattern_list)
+        
+        if all_patterns:
+            whitelist_regex = "(?i)(" + "|".join(all_patterns) + ")"
+            is_whitelisted = filename_col.str.contains(whitelist_regex)
+        else:
+            is_whitelisted = pl.lit(False)
+        
+        # SysInternals patterns (from config)
+        sysinternals_patterns = self.config.get("context_scoring", {}).get("sysinternals_patterns", [])
+        if sysinternals_patterns:
+            sysinternals_regex = "(?i)(" + "|".join(sysinternals_patterns) + ")"
+            is_sysinternals = filename_col.str.contains(sysinternals_regex)
+        else:
+            is_sysinternals = pl.lit(False)
+        
+        # Target extension check (vectorized)
+        target_ext_pattern = r"(?i)\.(exe|dll|sys|ps1|bat|cmd|vbs|js)$"
+        is_target_ext = filename_lower.str.contains(target_ext_pattern)
+        
+        # LNK file checks
+        is_lnk = filename_lower.str.ends_with(".lnk")
+        double_ext_pattern = r"(?i)\.(jpg|png|pdf|docx|xlsx|txt|zip|rar)\.lnk$"
+        has_double_ext = filename_lower.str.contains(double_ext_pattern)
+        
+        # SysInternals scoring based on context
+        sysinternals_scores = self.config.get("context_scoring", {}).get("sysinternals_scores", {})
+        forensic_score = sysinternals_scores.get("forensic_host", {}).get("timestomp", 30)
+        default_score = sysinternals_scores.get("default", {}).get("timestomp", 100)
+        sysinternals_score_val = forensic_score if self.is_forensic_host else default_score
+        sysinternals_tag = "INFO_FORENSIC_TOOL" if self.is_forensic_host else "SYSINTERNALS_TIMESTOMP"
+        
+        # Build score expression (cascading conditions)
+        score_expr = (
+            pl.when(~is_null)
+              .then(pl.col("Threat_Score").fill_null(0))
+            .when(is_noise_path)
+              .then(pl.lit(0))
+            .when(is_whitelisted)
+              .then(pl.lit(0))
+            .when(is_sysinternals)
+              .then(pl.lit(sysinternals_score_val))
+            .when(is_target_ext)
+              .then(pl.lit(300))
+            .when(is_lnk & has_double_ext)
+              .then(pl.lit(250))
+            .otherwise(pl.lit(0))
+        )
+        
+        # Build tag expression (cascading conditions)
+        tag_expr = (
+            pl.when(~is_null)
+              .then(pl.col("Threat_Tag").fill_null(""))
+            .when(is_noise_path)
+              .then(pl.lit("NOISE_CACHE"))
+            .when(is_whitelisted)
+              .then(pl.lit("INFO_WHITELISTED"))
+            .when(is_sysinternals)
+              .then(pl.lit(sysinternals_tag))
+            .when(is_target_ext)
+              .then(pl.lit("CRITICAL_NULL_TIMESTOMP"))
+            .when(is_lnk & has_double_ext)
+              .then(pl.lit("CRITICAL_PHISHING_LNK"))
+            .when(is_lnk)
+              .then(pl.lit("INFO_NULL_TIMESTAMP"))
+            .otherwise(pl.lit("INFO_NULL_TIMESTAMP"))
+        )
+        
+        # Build anomaly expression
+        anomaly_expr = (
+            pl.when(~is_null)
+              .then(pl.col("Anomaly_Time").fill_null(""))
+            .when(is_sysinternals | is_target_ext | (is_lnk & has_double_ext))
+              .then(pl.lit("-"))
+            .otherwise(pl.lit(""))
+        )
+        
+        # Apply all expressions in one pass
+        lf = lf.with_columns([
+            score_expr.alias("Threat_Score"),
+            tag_expr.alias("Threat_Tag"),
+            anomaly_expr.alias("Anomaly_Time")
         ])
         
-        return df.lazy()
+        return lf
+
 
     def _detect_usn_rollback(self, lf):
         """USNジャーナルの「時間の逆行」を検知する"""
@@ -536,53 +610,22 @@ class ChronosEngine:
 
         return lf
 
-    def _apply_safety_filters(self, df):
-        print("    -> [Chronos] Applying Safety Filters (Brutal Mode)...")
+    def _apply_safety_filters(self, df, loader):
+        print("    -> [Chronos] Applying Safety Filters (YAML-Driven)...")
         
-        df = df.with_columns([
-            pl.col("ParentPath").fill_null("").str.to_lowercase().alias("_pp"),
-            pl.col("FileName").fill_null("").str.to_lowercase().alias("_fn")
-        ])
+        available_cols = df.collect_schema().names()
         
-        # [CRITICAL FIX] アンチフォレンジックツールは削除リストから除外！
-        # "ccleaner", "jetico", "bcwipe" を削除しました。
-        kill_keywords = [
-            "dropbox", 
-            "skype", "onedrive", "google", "adobe", 
-            "mozilla", "firefox", 
-            "notepad++", "intel", "mcafee", "true key",
-            "microsoft analysis services", "as oledb",
-            "windows defender", "windows media player",
-            "windows journal", "winsat", "toastdata",
-            "package repository", "installshield",
-            "assembly", "servicing", "winsxs", "microsoft.net",
-            "windows/installer", "windows\\installer",
-            "programdata/microsoft/windows", "programdata\\microsoft\\windows",
-            "appdata/local/temp", "appdata\\local\\temp",
-            "appdata/local/microsoft/windows", "appdata\\local\\microsoft\\windows",
-            "windows/system32/config", "windows\\system32\\config"
-        ]
+        # [v6.7] Unified Noise Filter using ThemisLoader (YAML-Driven)
+        is_general_noise = loader.get_noise_filter_expr(available_cols)
         
-        file_kill_list = ["desktop.ini", "thumbs.db", "ntuser.dat", "usrclass.dat", "iconcache.db"]
-        dual_use_folders = ["nmap", "wireshark", "python", "perl", "ruby", "tor browser"]
-        protected_binaries = ["nmap.exe", "zenmap.exe", "ncat.exe", "python.exe", "pythonw.exe", "tor.exe"]
-
-        is_noise = pl.lit(False)
-        for kw in kill_keywords:
-            is_noise = is_noise | pl.col("_pp").str.contains(kw, literal=True)
-        for kw in file_kill_list:
-            is_noise = is_noise | pl.col("_fn").str.contains(kw, literal=True)
-
-        is_tool_folder = pl.lit(False)
-        for tool in dual_use_folders:
-            is_tool_folder = is_tool_folder | pl.col("_pp").str.contains(tool, literal=True)
-            
-        is_protected = pl.col("_fn").is_in(protected_binaries)
-        is_noise = is_noise | (is_tool_folder & (~is_protected))
-
+        # [v6.7] Dual-Use Tool Trap Filter (YAML-Driven)
+        is_dual_use_noise = loader.get_dual_use_filter_expr(available_cols)
+        
+        is_noise = is_general_noise | is_dual_use_noise
+        
         # CRITICALタグがついているものはノイズ判定を強制キャンセル
         # [FIX v8.0] 高脅威度タグ (METASPLOIT, COBALT, MIMIKATZ等) もバイパス対象に追加
-        is_critical_context = pl.col("Threat_Tag").str.contains("CRITICAL|METASPLOIT|COBALT|MIMIKATZ|EXPLOIT_FRAMEWORK|C2|SLIVER|HAVOC")
+        is_critical_context = pl.col("Threat_Tag").fill_null("").str.contains("CRITICAL|METASPLOIT|COBALT|MIMIKATZ|EXPLOIT_FRAMEWORK|C2|SLIVER|HAVOC|BCWIPE|CCLEANER")
 
         df = df.with_columns([
             pl.when(is_noise & (~is_critical_context)) 
@@ -596,7 +639,7 @@ class ChronosEngine:
               .alias("Threat_Score")
         ])
 
-        return df.drop(["_pp", "_fn"])
+        return df
 
     def analyze(self, args):
         mode_str = "LEGACY" if args.legacy else "STANDARD"
@@ -611,6 +654,23 @@ class ChronosEngine:
                 "rules/filter_rules.yaml"       # [FIX] Noise filters
             ])
             lf = pl.read_csv(args.file, ignore_errors=True, infer_schema_length=0).lazy()
+            
+            # [PERF v10.0] MFT Pre-Filtering: Remove System Noise Early
+            # This reduces rows before expensive scoring operations
+            SYSTEM_NOISE_PATTERN = r"(?i)(\\\\windows\\\\winsxs\\\\|\\\\windows\\\\assembly\\\\|\\\\windows\\\\servicing\\\\|\\\\windows\\\\inf\\\\|\\\\windows\\\\microsoft\.net\\\\|\\\\program files\\\\windowsapps\\\\|\\\\apprepository\\\\|\\\\contentdeliverymanager\\\\|\\\\infusedapps\\\\|deletedalluserpackages)"
+            
+            # Check which path column exists
+            path_col = None
+            schema_names = lf.collect_schema().names()
+            for candidate in ["ParentPath", "FullPath", "EntryPath"]:
+                if candidate in schema_names:
+                    path_col = candidate
+                    break
+            
+            if path_col:
+                # Keep rows that do NOT match system noise patterns
+                lf = lf.filter(~pl.col(path_col).str.contains(SYSTEM_NOISE_PATTERN))
+                print(f"    [PERF] Applied MFT pre-filter on '{path_col}' column.")
             
             # Normalize Columns
             cols = lf.collect_schema().names()
@@ -675,7 +735,7 @@ class ChronosEngine:
             # [OPTIMIZED Action 2] Pre-Filtering (Noise Reduction)
             # [FIX v8.1] Now runs AFTER scoring, so high-value tags can bypass
             print("    -> [Optimized] Pre-Filtering Noise (Silverlight, Fontset, etc)...")
-            lf = self._apply_safety_filters(lf)
+            lf = self._apply_safety_filters(lf, loader)
             
             if "Threat_Score" in lf.collect_schema().names():
                 lf = lf.with_columns(pl.col("Threat_Score").cast(pl.Int64, strict=False).fill_null(0))
@@ -707,17 +767,15 @@ class ChronosEngine:
                         print(f"    [!] ShimCache Analysis Failed: {e}")
 
             # Results Consolidation
-            # [OPTIMIZED v4.1] Use Streaming to prevent 1.5GB Memory Spike
-            # Also invoke GC to clear fragmentation from Themis builder
-            df = lf.filter(pl.col("Chronos_Score") > 0).collect(streaming=True)
+            # [OPTIMIZED v4.1] Use Streaming Engine to prevent Memory Spike
+            # [FIX] Updated for Polars 1.25+: streaming -> engine='streaming'
+            df = lf.filter(pl.col("Chronos_Score") > 0).collect(engine='streaming')
             import gc
             gc.collect()
             
             # Logic A: Microburst Detection (Update Storm Filter)
-            # Use 'SI_CreationTime' as it is guaranteed to exist in the output DF (string format)
-            # [Fix] Ensure SI_CreationTime is String before passing to _detect_microburst
-            if "SI_CreationTime" in df.columns and df.schema["SI_CreationTime"] != pl.Utf8:
-                 df = df.with_columns(pl.col("SI_CreationTime").cast(pl.Utf8))
+            # [FIX] Do NOT force cast SI_CreationTime to Utf8 here. Let _detect_microburst handle it optimally.
+            # (以前の強制キャストコードを削除)
             
             df = self._detect_microburst(df, time_col="SI_CreationTime")
             
@@ -728,31 +786,37 @@ class ChronosEngine:
             if args.prefetch:
                 prefetch_files = [args.prefetch]
             
-            # Auto-detect Amcache in args if available (or from KAPE directory structure)
+            # Auto-detect Amcache (Lazy Scan to save init time)
             kape_base = getattr(args, 'kape_dir', None)
             if kape_base:
                 from pathlib import Path
-                # Chronos might verify kape_base string/path
                 amcache_files = list(Path(kape_base).rglob("*Amcache*.csv"))
             
             df = self._check_execution_evidence(df, prefetch_files=prefetch_files, amcache_files=amcache_files)
             
             # Filter again after Plan B (remove newly zeroed items)
-            # Also ensure we filter out INFO tags if they have 0 score
             df = df.filter(pl.col("Chronos_Score") > 0)
 
-            if icarus_results:
-                print("    -> Merging Icarus Anomalies into Timeline...")
-                if "Key_Full" not in df.columns:
-                    df = df.with_columns(
-                        (pl.col("ParentPath").fill_null("").str.to_lowercase().str.replace_all("/", "\\").str.strip_chars("\\") + "\\" + 
-                         pl.col("FileName").fill_null("").str.to_lowercase()).alias("Key_Full")
-                    )
-
-                for res_lazy in icarus_results:
+            # [OPTIMIZED] Key_Full Generation only when needed
+            has_icarus_hits = False
+            for res_lazy in icarus_results:
+                # Check height without full collect if possible, or perform minimal collect
+                # LazyFrame doesn't support height check directly without collect/fetch
+                # We collect only relevant columns to check hits
+                try:
                     res_df = res_lazy.collect()
                     if res_df.height > 0:
+                        has_icarus_hits = True
                         print(f"       [!] Icarus detected {res_df.height} paradoxes!")
+                        
+                        # Generate Key_Full ONLY if we have hits to merge
+                        if "Key_Full" not in df.columns:
+                            print("       -> Generating merge keys...")
+                            df = df.with_columns(
+                                (pl.col("ParentPath").fill_null("").str.to_lowercase().str.replace_all("/", "\\").str.strip_chars("\\") + "\\" + 
+                                 pl.col("FileName").fill_null("").str.to_lowercase()).alias("Key_Full")
+                            )
+
                         df = df.join(
                             res_df.select(["Key_Full", "Anomaly_Type", "Icarus_Score"]),
                             on="Key_Full",
@@ -768,12 +832,21 @@ class ChronosEngine:
                         ])
                         df = df.drop(["Chronos_Score", "Threat_Tag", "Icarus_Score", "Anomaly_Type"])
                         df = df.rename({"New_Score": "Chronos_Score", "New_Tag": "Threat_Tag"})
+                except Exception as e:
+                    print(f"       [!] Icarus Merge Error: {e}")
 
             # USNJ Targeted Scan
-            if args.usnj:
-                suspects = []
-                if df.height > 0:
-                     suspects = df.filter(pl.col("Chronos_Score") > 50)["Key_Full"].to_list()
+            if args.usnj and df.height > 0: # Ensure we have suspects
+                # Generate Key_Full if not exists (might be skipped if no Icarus hits above)
+                if "Key_Full" not in df.columns:
+                    # Only generate for suspects if possible, but we need it for join on main df
+                    # So generate on main df
+                    df = df.with_columns(
+                         (pl.col("ParentPath").fill_null("").str.to_lowercase().str.replace_all("/", "\\").str.strip_chars("\\") + "\\" + 
+                          pl.col("FileName").fill_null("").str.to_lowercase()).alias("Key_Full")
+                    )
+                
+                suspects = df.filter(pl.col("Chronos_Score") > 50)["Key_Full"].to_list()
                 
                 if suspects:
                     try:
@@ -805,6 +878,8 @@ class ChronosEngine:
                             ]).drop(["Icarus_Score", "Anomaly_Type"])
                     except Exception as e:
                         print(f"    [!] USN Analysis Failed: {e}")
+
+
 
             # Output Finalization
             if "ParentPath" in df.columns:

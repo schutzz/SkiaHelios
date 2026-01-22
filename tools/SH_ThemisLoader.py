@@ -248,6 +248,40 @@ class ThemisLoader:
             return pl.lit(False)
         return pl.any_horizontal(exprs)
 
+    def get_noise_regex_list(self):
+        """
+        [v6.7] Returns a list of regex strings for renderer-side noise filtering.
+        Converts YAML conditions (contains, ends_with, etc.) into equivalent regex.
+        """
+        regex_list = []
+        for rule in self.noise_rules:
+            pattern = rule.get("pattern")
+            condition = rule.get("condition", "contains")
+            
+            if not pattern: continue
+            
+            # Escape pattern for safest matching if it's supposed to be literal
+            import re
+            
+            if condition == "contains":
+                # Basic contains -> raw pattern (mostly paths)
+                regex_list.append(re.escape(pattern))
+            elif condition == "regex" or condition == "matches":
+                # Already regex
+                regex_list.append(pattern)
+            elif condition == "ends_with":
+                regex_list.append(re.escape(pattern) + "$")
+            elif condition == "starts_with":
+                regex_list.append("^" + re.escape(pattern))
+            elif condition == "is_in":
+                if isinstance(pattern, list):
+                    patterns = [re.escape(p) for p in pattern]
+                    regex_list.append("^(" + "|".join(patterns) + ")$")
+                else:
+                    regex_list.append("^" + re.escape(pattern) + "$")
+        
+        return list(set(regex_list))
+
     # --- [NEW] Helper Methods for Dual-Use ---
     
     def get_dual_use_keywords(self):

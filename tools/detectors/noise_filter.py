@@ -14,38 +14,34 @@ class NoiseFilter(BaseDetector):
         if noise_paths:
             combined_noise = "|".join(noise_paths)
             
-            # [v5.7.1] Enhanced Context Filter: Check ALL relevant text columns
-            # This ensures "choco install" in CommandLine is caught even if ParentPath is generic (e.g. powershell.exe)
+            # [PERF v10.1] Optimized: Use any_horizontal instead of concat_str
+            # This avoids creating intermediate columns and processes in place
             check_candidates = ["ParentPath", "Source_File", "CommandLine", "Target_Path", "Target_FileName", "Payload", "Message", "Action", "FileName"]
+            existing_candidates = [c for c in check_candidates if c in cols]
             
-            # Build a boolean mask that is True if ANY candidate column matches the noise pattern
-            is_noise = pl.lit(False)
-            
-            for col_name in check_candidates:
-                if col_name in cols:
-                    is_noise = is_noise | pl.col(col_name).str.to_lowercase().str.contains(combined_noise)
-
-
+            if existing_candidates:
+                # Build parallel match expressions for each column
+                noise_matches = [pl.col(c).fill_null("").str.to_lowercase().str.contains(combined_noise) for c in existing_candidates]
+                is_noise = pl.any_horizontal(noise_matches)
+            else:
+                is_noise = pl.lit(False)
             
             # Additional column check for Judge_Verdict
             if "Judge_Verdict" not in cols:
                 df = df.with_columns(pl.lit("").alias("Judge_Verdict"))
             
-            # [v6.2 Case10 Fix] 拡張クリティカルタグパターン
-            # Phantom Drive, Defender無効化, Hosts改ざん等の新規タグを保護
-            has_critical_tag = pl.col("Tag").fill_null("").str.contains(
-                r"(?i)(CRITICAL|METASPLOIT|COBALT|MIMIKATZ|WEBSHELL|BACKDOOR|RANSOM|WIPING|"
-                r"ANTI_FORENSICS|PHANTOM_DRIVE|DEFENDER_DISABLE|HOSTS_FILE|HISTORY_DETECTED|"
-                r"CONFIRMED|EXECUTION_CONFIRMED|REMOVABLE_DRIVE|NEW_USER_CREATION|LATERAL_MOVEMENT|STAGING_TOOL)"
-            )
+            # [v6.2 Case10 Fix] Extended critical tag pattern (precompiled)
+            CRITICAL_TAG_PATTERN = r"(?i)(CRITICAL|METASPLOIT|COBALT|MIMIKATZ|WEBSHELL|BACKDOOR|RANSOM|WIPING|ANTI_FORENSICS|PHANTOM_DRIVE|DEFENDER_DISABLE|HOSTS_FILE|HISTORY_DETECTED|CONFIRMED|EXECUTION_CONFIRMED|REMOVABLE_DRIVE|NEW_USER_CREATION|LATERAL_MOVEMENT|STAGING_TOOL)"
+            has_critical_tag = pl.col("Tag").fill_null("").str.contains(CRITICAL_TAG_PATTERN)
             
-            # [Case 6 Fix] Protect critical staging tool filenames from noise filtering
-            # Even if they are in chocolatey/temp paths, 7za.exe and similar tools are forensically important
-            critical_tools_pattern = "(?i)(7za\\.exe|sdelete|bcwipe|mimikatz|psexec|lazagne)"
-            is_critical_tool = pl.lit(False)
-            for fname_col in ["FileName", "Target_FileName", "Target_Path", "Message", "Action"]:
-                if fname_col in cols:
-                    is_critical_tool = is_critical_tool | pl.col(fname_col).fill_null("").str.contains(critical_tools_pattern)
+            # [PERF v10.1] Critical tool check with any_horizontal too
+            CRITICAL_TOOLS_PATTERN = "(?i)(7za\\.exe|sdelete|bcwipe|mimikatz|psexec|lazagne)"
+            tool_check_cols = [c for c in ["FileName", "Target_FileName", "Target_Path", "Message", "Action"] if c in cols]
+            if tool_check_cols:
+                tool_matches = [pl.col(c).fill_null("").str.contains(CRITICAL_TOOLS_PATTERN) for c in tool_check_cols]
+                is_critical_tool = pl.any_horizontal(tool_matches)
+            else:
+                is_critical_tool = pl.lit(False)
             
             is_noise_final = is_noise & ~has_critical_tag & ~is_critical_tool
 

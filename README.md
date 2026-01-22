@@ -1,4 +1,4 @@
-# SkiaHelios v6.9.5 - Grimoire Engine (Advanced Console History & Generalized IOC)
+# SkiaHelios v6.9.6 - Grimoire Engine (Insider Threat & Encryption Detection)
 
 ![SkiaHelios CI](https://github.com/schutzz/SkiaHelios/actions/workflows/test.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
@@ -13,9 +13,9 @@
 
 **SkiaHelios** is a high-resolution, modular DFIR (Digital Forensics & Incident Response) framework built for **speed**, **causality**, **origin tracing**, and **visual narrative**.
 
-Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** orchestrated by **"Hekate"**, supported by **"Chronos" (The Time Lord)**, **"Hercules" (The Referee)**, the **"PlutosGate" (Network & Recon Hunter)**, and the **"YARA WebShell Scanner"** to detect advanced threats including **Account Takeover**, **Privilege Escalation**, **Evidence Wiping**, **Web Intrusion Chains**, **Cross-Artifact Tampering**, and **Removable Drive Execution (Phantom Drive)**.
+Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** orchestrated by **"Hekate"**, supported by **"Chronos" (The Time Lord)**, **"Hercules" (The Referee)**, the **"PlutosGate" (Network & Recon Hunter)**, and the **"YARA WebShell Scanner"** to detect advanced threats including **Account Takeover**, **Privilege Escalation**, **Evidence Wiping**, **Web Intrusion Chains**, **Cross-Artifact Tampering**, **Removable Drive Execution (Phantom Drive)**, and **Encryption Tool Abuse (Insider Threat)**.
 
-**Current Version:** v6.9.5 (Advanced Console History & IoC Generalization)
+**Current Version:** v6.9.6 (Insider Threat & Encryption Detection)
 
 ---
 
@@ -246,6 +246,26 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
 
 ## 📜 Complete Changelog
 
+### v6.9.6 - Insider Threat & Encryption Tool Detection 🔐🛡️
+* **[NEW]** **Encryption Tool Detection (Case 9 Fix):**
+    * **AES Encryption:** AESCrypt, AxCrypt, encrypted `.aes` files detection (Score 400-500, `ENCRYPTION_TOOL_AESCRYPT`, `ENCRYPTED_FILE_AES`).
+    * **GPG/PGP Encryption:** Kleopatra, gpg.exe, gpg4win, `.asc`/`.gpg`/`.pgp` files detection (Score 400-500, `ENCRYPTION_TOOL_GPG`, `ENCRYPTED_FILE_GPG`).
+    * **BitLocker Detection:** BitLockerWizardElev.exe, manage-bde execution (Score 450-500, `CRITICAL_BITLOCKER_WIZARD`).
+    * **Virtual Disk Containers:** `.vhd`/`.vhdx`/`.vmdk` detection with context boost for suspicious locations like ProgramData (Score 350-600, `VIRTUAL_DISK_DETECTED`, `SUSPICIOUS_VHD_LOCATION`).
+    * **Container Encryption:** VeraCrypt/TrueCrypt usage and `.tc`/`.hc` container files (Score 500, `ENCRYPTED_CONTAINER`).
+* **[NEW]** **Recovery Key Detection:**
+    * **BitLocker Recovery Key:** Files matching `BitLocker Recovery Key...TXT` pattern (Score 800, `CRITICAL_RECOVERY_KEY`).
+    * **Japanese Support:** `回復キー` filename pattern detection (Score 700, `CRITICAL_RECOVERY_KEY_JP`).
+    * **Sensitive Files:** `Passwords.txt`, `Keys.txt`, `Credentials.txt` pattern matching (Score 500-600, `SUSPICIOUS_KEY_FILE`, `PASSWORD_FILE`).
+    * **GPG Key Export:** `_public.asc` (Score 500) and `_secret.asc` (Score 700, Critical) detection.
+* **[NEW]** **Privacy Tool Monitoring (dual_use_tools):**
+    * Added `Encryption Tools (Privacy)` category with noise path exclusions for legitimate installations.
+    * Monitored tools: `aescrypt`, `axcrypt`, `veracrypt`, `truecrypt`, `gpg4win`, `kleopatra`, `gpg`, `gnupg`, `bitlocker`, `bestcrypt`, `diskcryptor`, `cryptomator`.
+* **[Architecture]** **Rule Files Updated:**
+    * `intel_signatures.yaml`: Added `encryption_tools`, `encryption_file_extensions`, `recovery_key_detection` sections.
+    * `triage_rules.yaml`: Added 14 new threat signatures for encryption tool detection.
+    * `scoring_rules.yaml`: Added 14 new scoring patterns for encryption/privacy tools.
+
 ### v6.9.5 - Advanced Console History & IoC Generalization 🦁🛡️
 * **[NEW]** **Generalized IoC Extraction:**
     * **Automated Domain Discovery:** Regex-based extraction of `.local`, `.com`, `.net` etc., from any event summary/detail.
@@ -261,20 +281,20 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
     * **UnboundLocalError Fix:** Resolved a variable shadowing issue with `re` / `json` imports in `sh_analyzer.py`.
 
 ### v6.7 - Phantom Drive & Console History Detection 👻💻
-* **[NEW]** **ConsoleHostDetector (v6.7):** PowerShell履歴ファイル直接解析モジュール。
-    * **Phantom Drive Detection:** `A:\`, `B:\` ドライブからの実行を検出し `REMOVABLE_DRIVE_EXECUTION` (Score +500) としてタグ付け。
-    * **Defender Evasion:** `Add-MpPreference`, `Set-MpPreference` を `DEFENDER_DISABLE_ATTEMPT` (Score +500) として検出。
-    * **Hosts File Tampering:** `Add-Content.*hosts` を `HOSTS_FILE_MODIFICATION` (Score +400) として検出。
-    * **Raw Directory Support:** `--raw` 引数によりKAPE生データディレクトリから `ConsoleHost_history.txt` を直接読み取り。
-* **[NEW]** **CorrelationDetector (v6.7):** クロスアーティファクト相関分析モジュール。
-    * **SRUM Traffic Validation:** LATERAL_MOVEMENT タグを持つイベントをSRUMデータと照合し、実際の通信が確認された場合 `TRAFFIC_CONFIRMED` (Score +500) を付与。
-    * **Execution Confirmation:** Prefetch/ShimCache ととの照合により `EXECUTION_CONFIRMED` タグを付与。
-* **[FIX]** **NoiseFilter Enhancement:** クリティカルタグパターンを拡張。
-    * **Protected Tags:** `PHANTOM_DRIVE`, `DEFENDER_DISABLE`, `HOSTS_FILE`, `HISTORY_DETECTED`, `CONFIRMED`, `EXECUTION_CONFIRMED`, `REMOVABLE_DRIVE` を保護リストに追加。
-    * **Noise Pattern Cleanup:** `win-updates`, `preprovisioner`, `(?i)^A:\\` をノイズリストから削除。
-* **[FIX]** **Hekate Scope Filter Bypass:** `PowerShell History` 由来のイベントは年ベースのスコープフィルタをバイパス。
-    * **Effect:** 2023年のインシデントが 2026年基準で除外されなくなった。
-* **[Architecture]** **Modular Detector Pipeline:** Hercules の検出器パイプラインを拡張。
+* **[NEW]** **ConsoleHostDetector (v6.7):** Direct PowerShell history file analysis module.
+    * **Phantom Drive Detection:** Detects execution from `A:\`, `B:\` drives and tags as `REMOVABLE_DRIVE_EXECUTION` (Score +500).
+    * **Defender Evasion:** Detects `Add-MpPreference`, `Set-MpPreference` as `DEFENDER_DISABLE_ATTEMPT` (Score +500).
+    * **Hosts File Tampering:** Detects `Add-Content.*hosts` as `HOSTS_FILE_MODIFICATION` (Score +400).
+    * **Raw Directory Support:** Reads `ConsoleHost_history.txt` directly from KAPE raw data directory via `--raw` argument.
+* **[NEW]** **CorrelationDetector (v6.7):** Cross-artifact correlation analysis module.
+    * **SRUM Traffic Validation:** Validates events with LATERAL_MOVEMENT tag against SRUM data, assigns `TRAFFIC_CONFIRMED` (Score +500) when actual traffic is confirmed.
+    * **Execution Confirmation:** Assigns `EXECUTION_CONFIRMED` tag by correlating with Prefetch/ShimCache.
+* **[FIX]** **NoiseFilter Enhancement:** Extended critical tag patterns.
+    * **Protected Tags:** Added `PHANTOM_DRIVE`, `DEFENDER_DISABLE`, `HOSTS_FILE`, `HISTORY_DETECTED`, `CONFIRMED`, `EXECUTION_CONFIRMED`, `REMOVABLE_DRIVE` to protection list.
+    * **Noise Pattern Cleanup:** Removed `win-updates`, `preprovisioner`, `(?i)^A:\\` from noise list.
+* **[FIX]** **Hekate Scope Filter Bypass:** Events from `PowerShell History` now bypass year-based scope filters.
+    * **Effect:** 2023 incidents are no longer excluded when analyzed in 2026.
+* **[Architecture]** **Modular Detector Pipeline:** Extended Hercules detector pipeline.
     * **Order:** WebShell → AntiForensics → Obfuscation → ADS → LNK → Network → UserActivity → ActivityTimeline → **ConsoleHost** → **Correlation** → LotL → NoiseFilter
 
 ### v6.4 - Grimoire Engine (Evidence Shield & Image Hygiene) 🛡️
@@ -500,7 +520,17 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
     * **Reliability:** Added Pydantic schema validation for rules and a dedicated Unit Test framework (`tests/test_rules.py`).
     * **Precision:** Added `negative_context` support to rules (e.g., ignoring `PsExec` in Sysinternals folder).
 * [x] **v6.7:** **Phantom Drive & Console History Detection (ConsoleHostDetector, CorrelationDetector, NoiseFilter Enhancement)**
-* [ ] **v7.0:** **The Oracle (LLM Auto-Summarization & Chat)** - *Planned*
+* [x] **v6.9.6:** **Insider Threat & Encryption Tool Detection (AES/GPG/BitLocker/VHD/Recovery Key Detection)**
+
+---
+
+### 🎯 Future Milestones
+
+| Phase | Version | Codename | Description | Status |
+|-------|---------|----------|-------------|--------|
+| **Phase 1** | v8.0 | **Prometheus** | **Core Library Rustification** - Migration from Polars dependency to native Rust parsers. 10x faster MFT/USN/Registry parsing. Python bindings via PyO3. | 🔜 Planned |
+| **Phase 2** | v9.0 | **Nephele** | **Cloud Artifact Support** - M365/Azure AD/AWS CloudTrail/GCP Audit Log support. Unified timeline for on-prem + cloud correlation analysis. OAuth/API-based automatic collection. | 📋 Roadmap |
+| **Phase 3** | v10.0 | **Oracle** | **LLM Integration** - Auto-summarization of Grimoire reports, natural language queries, interactive investigation chat. Local LLM (Ollama) support for air-gapped environments. | 🔮 Vision |
 
 
 

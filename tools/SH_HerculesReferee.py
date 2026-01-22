@@ -90,7 +90,12 @@ class HerculesReferee:
         self.kape_dir = Path(kape_dir)
         self.raw_dir = Path(raw_dir) if raw_dir else self.kape_dir  # [FIX] Raw Dir for ConsoleHost
         self.triage_mode = triage_mode
-        self.loader = ThemisLoader(["rules/triage_rules.yaml", "rules/sigma_process_creation.yaml"])
+        self.loader = ThemisLoader([
+            "rules/triage_rules.yaml", 
+            "rules/sigma_process_creation.yaml",
+            "rules/filter_rules.yaml",
+            "rules/scoring_rules.yaml"
+        ])
         self.hestia = Hestia()
         self.os_info = "Windows (Unknown Version)"
         
@@ -139,8 +144,8 @@ class HerculesReferee:
 
     def _ingest_ps_scriptblocks(self, df):
         """
-        [v6.7] Ingest critical 4104 PowerShell ScriptBlock events from EvtxECmd CSV.
-        NOTE: Raw Payload is passed directly to Value/Summary for detection purposes.
+        [v6.7 OPTIMIZED] Ingest critical 4104 PowerShell ScriptBlock events from EvtxECmd CSV.
+        Uses vectorized Polars operations instead of row-by-row loop.
         """
         print("    -> [Hercules] Ingesting critical PowerShell ScriptBlocks (4104)...")
         df_evtx = self._load_evtx_csv()
@@ -164,32 +169,24 @@ class HerculesReferee:
             
         print(f"       >> Found {script_block_hits.height} critical ScriptBlock events.")
         
-        rows = script_block_hits.to_dicts()
+        # [OPTIMIZED] Use vectorized select/with_columns instead of to_dicts() + loop
+        ts_col_name = "TimeCreated" if "TimeCreated" in df_evtx.columns else "Timestamp_UTC"
         
-        new_rows = []
-        for row in rows:
-            payload = row.get("Payload", "")
-            content = row.get(content_col, "") or ""
-            
-            ts_col_name = "TimeCreated" if "TimeCreated" in df_evtx.columns else "Timestamp_UTC"
-            new_row = {
-                "Timestamp_UTC": row.get(ts_col_name),
-                "Source": "PowerShell (ScriptBlock)",
-                "Type": "EXECUTION",
-                "Category": "Execution",
-                # Raw payload for detection (original behavior before v6.7.2)
-                "Summary": str(content),
-                "Action": str(content),
-                "Value": str(payload),
-                "Target_Path": str(payload),
-                "Threat_Score": 0,
-                "Tag": "SCRIPTBLOCK_EXEC"
-            }
-            new_rows.append(new_row)
-        
-        ps_df = pl.DataFrame(new_rows)
+        ps_df = script_block_hits.select([
+            pl.col(ts_col_name).alias("Timestamp_UTC"),
+            pl.lit("PowerShell (ScriptBlock)").alias("Source"),
+            pl.lit("EXECUTION").alias("Type"),
+            pl.lit("Execution").alias("Category"),
+            pl.col(content_col).fill_null("").alias("Summary"),
+            pl.col(content_col).fill_null("").alias("Action"),
+            pl.col("Payload").fill_null("").alias("Value") if "Payload" in script_block_hits.columns else pl.lit("").alias("Value"),
+            pl.col("Payload").fill_null("").alias("Target_Path") if "Payload" in script_block_hits.columns else pl.lit("").alias("Target_Path"),
+            pl.lit(0).alias("Threat_Score"),
+            pl.lit("SCRIPTBLOCK_EXEC").alias("Tag")
+        ])
         
         return pl.concat([df, ps_df], how="diagonal")
+
 
 
 
@@ -501,6 +498,21 @@ class HerculesReferee:
                         # Ideally join on ParentPath + FileName, but ParentPath might be missing in Timeline
                         merge_df = chronos_df.select(merge_cols)
                         
+                        # ▼▼▼ [FIX] Deduplicate merge_df to prevent Join Explosion (RAM Killer) ▼▼▼
+                        # Chronos側に同じファイル名が複数あると、Join時に行数が爆発的に増えるため、
+                        # ファイル名ごとにグループ化して「最大スコア」を採用し、ユニークにする。
+                        if merge_df.height > 0:
+                            agg_exprs = [pl.col("Chronos_Score").max()]
+                            if "Threat_Score" in merge_df.columns:
+                                agg_exprs.append(pl.col("Threat_Score").max())
+                            if "Threat_Tag" in merge_df.columns:
+                                # タグは連結する
+                                agg_exprs.append(pl.col("Threat_Tag").fill_null("").str.concat(",").alias("Threat_Tag"))
+                            
+                            # ファイル名で集約（これで merge_df の FileName は一意になる）
+                            merge_df = merge_df.group_by("FileName").agg(agg_exprs)
+                        # ▲▲▲ [FIX END] ▲▲▲
+
                         # Use update/join logic
                         # Left join to timeline. If score exists in Chronos, use it.
                         timeline_df = timeline_df.join(merge_df, on="FileName", how="left", suffix="_chronos")
@@ -850,43 +862,67 @@ class HerculesReferee:
                  .alias("Tag")
             )
 
-        # The Linker (Phase 4 Logic) - kept inline for now as it needs instance state
+        # The Linker (Phase 4 Logic) - Network Correlation Analysis
+        # [OPTIMIZED] Stricter filter + row limit to prevent timeout
         print("    -> [Hercules] Phase 4: Network Correlation Analysis...")
         self.linker.initialize()
-        suspicious_rows = timeline_df.filter(pl.col("Tag").str.contains("SUSPICIOUS") | (pl.col("Threat_Score") >= 50))
+        
+        # [OPTIMIZATION] Much stricter filter: score >= 200 OR explicit SUSPICIOUS tag
+        suspicious_rows = timeline_df.filter(
+            (pl.col("Threat_Score") >= 200) | 
+            pl.col("Tag").str.contains("SUSPICIOUS")
+        ).head(100)  # Limit to 100 most relevant rows
+        
         if suspicious_rows.height > 0:
             confirmed_indices = []
+            print(f"       >> Analyzing {suspicious_rows.height} high-priority rows for network IOCs...")
             for i, row in enumerate(suspicious_rows.iter_rows(named=True)):
                 text_sources = [str(row.get("Target_Path", "")), str(row.get("Message", ""))]
                 iocs = self.linker.extract_iocs(" ".join(text_sources))
                 if iocs and self.linker.check_connection(iocs):
                     confirmed_indices.append(i)
             
-            # Simple content based tagging for now
             if confirmed_indices:
                 print(f"       >> [CRITICAL] {len(confirmed_indices)} confirmed network events!")
+        
         # [Refinement Phase 2] Row Normalization & Deduplication
         print("    -> [Hercules] Normalizing Scores & Deduplicating Rows...")
         
         # 1. Row Deduplication (Merge duplicate events)
         group_cols = [c for c in ["Timestamp_UTC", "Action", "FileName", "Source_File"] if c in timeline_df.columns]
         if group_cols:
+            # [OPTIMIZED] Aggregate tags with str.concat, then deduplicate
             timeline_df = timeline_df.group_by(group_cols).agg([
                 pl.col("Threat_Score").max(),
-                pl.col("Tag").fill_null("").str.concat(",").map_elements(
-                    lambda x: ",".join(sorted(set([t.strip() for t in str(x).split(",") if t.strip()]))),
-                    return_dtype=pl.Utf8
-                ),
+                pl.col("Tag").fill_null("").str.concat(","),  # Aggregate tags
                 pl.exclude("Threat_Score", "Tag", *group_cols).first()
             ])
 
-        # 2. Tag Cleanup (Dedup internal string)
+        # 2. Tag Cleanup - [OPTIMIZED] Use native string operations instead of map_elements
+        # The Tag column is now a concatenated string, so we can split/unique/rejoin
         timeline_df = timeline_df.with_columns(
-            pl.col("Tag").map_elements(
-                lambda x: ",".join(sorted(set([t.strip() for t in str(x).split(",") if t.strip()]))),
-                return_dtype=pl.Utf8
-            ).alias("Tag")
+            pl.col("Tag").fill_null("")
+              .str.replace_all(r"\s*,\s*", ",")  # Normalize commas
+              .str.replace_all(r",+", ",")       # Remove consecutive commas
+              .str.strip_chars(",")              # Remove leading/trailing commas
+              .alias("Tag")
         )
+
+        # [v6.7] Unified Noise Filter using ThemisLoader (YAML-Driven)
+        print("    -> [Hercules] Applying Centralized Noise Filter (YAML-Driven)...")
+        available_cols = timeline_df.columns
+        is_noise = self.loader.get_noise_filter_expr(available_cols)
+        
+        # Only filter if NOT critical
+        is_critical = pl.col("Tag").fill_null("").str.contains("CRITICAL|METASPLOIT|COBALT|MIMIKATZ|BCWIPE|CCLEANER")
+        
+        timeline_df = timeline_df.with_columns(
+            pl.when(is_noise & (~is_critical))
+              .then(0)
+              .otherwise(pl.col("Threat_Score"))
+              .alias("Threat_Score")
+        )
+
 
         # 3. Score Cap (0-300)
         timeline_df = timeline_df.with_columns(
