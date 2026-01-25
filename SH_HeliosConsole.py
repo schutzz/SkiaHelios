@@ -242,13 +242,13 @@ def main():
             print("\n[?] Input Path to Pivot_Config.json:")
             args.deep = input("    > ").strip().strip('"')
 
-    # --- [v2.5] Docx Generation Prompt ---
-    if not args.docx:
-        print("\n[?] Generate Docx Report? (Requires Pandoc) [y/N]:")
-        docx_in = input("    > ").strip().lower()
-        if docx_in == 'y' or docx_in == 'yes':
-            args.docx = True
-            print("    [+] Docx Generation ENABLED")
+    # --- [v2.5] Docx Generation Prompt (DISABLED FOR AUTOMATION) ---
+    # if not args.docx:
+    #     print("\n[?] Generate Docx Report? (Requires Pandoc) [y/N]:")
+    #     docx_in = input("    > ").strip().lower()
+    #     if docx_in == 'y' or docx_in == 'yes':
+    #         args.docx = True
+    #         print("    [+] Docx Generation ENABLED")
 
     # [FIX] Output Directory Construction
     # args.case is now sanitized, so this path will be relative and valid
@@ -393,6 +393,44 @@ def main():
          plutos_cmd.extend(["--start", scan_start, "--end", scan_end])
 
     run_stage(plutos_cmd, "PLUTOS (Network & Lateral)")
+
+    # [7.6] Gaiaproof (PoL & Anti-Forensics)
+    gaiaproof_out_blanks = out_dir / "Gaiaproof_Unnatural_Blanks.csv"
+    gaiaproof_out_af = out_dir / "Gaiaproof_AntiForensics_Hits.csv"
+    
+    gaiaproof_cmd = [
+        "python", "-m", "tools.SH_Gaiaproof",
+        "--evtx", str(master_timeline), # Using master timeline as proxy for logs if needed, or specific EvtxECmd output
+        # In standard flow, we might need to point to specific CSVs. For now, try to find them.
+    ]
+    
+    # Attempt to locate specific PoL artifacts
+    srum_files = list(kape_csv_dir.glob("**/*SRUDB*.csv")) + list(kape_csv_dir.glob("**/*Srum*.csv"))
+    if srum_files:
+        gaiaproof_cmd.extend(["--srum", str(srum_files[0])])
+    
+    # We already found USN for Chronos
+    if usn_files:
+        gaiaproof_cmd.extend(["--usn", str(usn_files[0])])
+        
+    # We can point to Master Timeline for Logs or raw Evtx CSV
+    # Gaiaproof normalize_logs expects EvtxECmd style CSV
+    evtx_files = list(kape_csv_dir.glob("**/*EvtxECmd*.csv"))
+    if evtx_files:
+        gaiaproof_cmd.extend(["--evtx", str(evtx_files[0])])
+        
+    if shim_files:
+        gaiaproof_cmd.extend(["--registry", str(shim_files[0])])
+        
+    pf_files_csv = list(kape_csv_dir.glob("**/*PECmd*.csv"))
+    # Also check pf_files from Chronos block if found
+    if not pf_files_csv and pf_files: pf_files_csv = pf_files
+
+    if pf_files_csv:
+         gaiaproof_cmd.extend(["--prefetch", str(pf_files_csv[0])])
+
+    if srum_files or usn_files or evtx_files:
+        run_stage(gaiaproof_cmd, "GAIAPROOF (Unnatural Blanks)")
     
     if getattr(args, 'enable_yara_webshell', False):
         yara_out = out_dir / "YARA_WebShell_Results.csv"

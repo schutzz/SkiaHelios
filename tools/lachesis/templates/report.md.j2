@@ -80,18 +80,8 @@
 {% endif %}
 
 {# [P3'] Hypothesis Injection for CTF/Missing Trace #}
-{% if drop_items and not phishing_lnks %}
-### 🕵️‍♂️ Initial Access Hypothesis (No Direct Trace Found)
-明確な流入経路（LNK/Zone.Identifier）が確認できませんでしたが、検出されたアーティファクトから以下の可能性が強く推測されます：
-
-1.  **Public Exploit (XAMPP/DVWA)**: 
-    - 検出された `dvwa`, `xampp`, `webshell.php` の存在から、公開されている脆弱性（SQLi, File Upload）を悪用した可能性があります。
-2.  **RDP Brute Force**: 
-    - `Event ID 4625 (Logon Failure)` や `Change Password` の痕跡が確認されている場合、総当たり攻撃による管理者権限奪取の可能性があります。
-3.  **Lateral Movement (SMB/Admin Share)**:
-    - `dsadd.exe` や `ftk imager.exe` のようなツールが確認されている場合、既に侵害された他端末からの横展開も疑われます。
-
-> **Recommendation:** `Event ID 4688` (Process Creation) の欠損を確認し、Webサーバーのアクセスログ（Apache access.log）を重点的に調査してください。
+{% if initial_access_hypothesis %}
+{{ initial_access_hypothesis | safe }}
 {% endif %}
 
 ---

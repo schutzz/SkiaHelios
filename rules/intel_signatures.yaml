@@ -34,8 +34,10 @@ anti_forensics:
   - (?i)MpCmdRun.*-AddExclusion
   - (?i)bcdedit.*/set.*recoveryenabled.*no
   log_deletion:
-  - (?i)\b1102\b
-  - (?i)\b104\b
+  # Event ID 1102 (Security Log Clear) - require EventLog context to avoid SyncEngine false positives (.1102. = timestamp 11:02)
+  - (?i)(event\s*(id)?[:=\s]*1102|eventlog.*1102|security.*log.*clear.*1102)
+  # Event ID 104 (Log Clear) - require EventLog context to avoid SyncEngine false positives
+  - (?i)(event\s*(id)?[:=\s]*104|eventlog.*104|104.*log.*clear)
   - (?i)wevtutil.*cl
   - (?i)clear-eventlog
   - (?i)clearev
@@ -1007,9 +1009,9 @@ webshell_detector:
     - description: "Manifest Files"
       pattern: "\\.(mum|cat|manifest)$"
     - description: "GUID System Files (Pure GUID or prefix)"
-      pattern: "^\\{[0-9a-fA-F\\-]{8,}\\}"
+      pattern: "\\{[0-9a-fA-F\\-]{8,}"
     - description: "GUID Suffix (e.g., file.ext.{GUID})"
-      pattern: "\\.\\{[0-9a-fA-F\\-]+\\}$"
+      pattern: "\\.\\{[0-9a-fA-F\\-]+"
     - description: "Windows Component Signatures"
       pattern: "^[0-9a-f]{8,}_.*31bf3856ad364e35"
     - description: "Boot Manager UI (前方一致)"

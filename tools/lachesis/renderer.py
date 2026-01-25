@@ -14,13 +14,12 @@ HIDDEN_TAGS = {"VOID", "NOISE", "CHECKED", "SYSTEM_NOISE", "BENIGN", "IGNORE"}
 
 # [v2.0] WebShell Allowlist - システムファイルを WEBSHELL カテゴリから除外
 WEBSHELL_ALLOWLIST_PATTERNS = [
-    r"\.cdf-ms$",                          # SxS コンポーネントストア
-    r"\.(mum|cat|manifest)$",              # マニフェストファイル
-    r"^\{[0-9a-fA-F\-]{8,}\}",              # GUID ファイル名 (前方一致)
-    r"\.\{[0-9a-fA-F\-]+\}$",              # GUID サフィックス
-    r"^[0-9a-f]{8,}_.*31bf3856ad364e35",   # Windows コンポーネント署名
-    r"(?i)^bootmgr\.exe\.mui",             # Boot Manager UI
-    r"\.pf$",                              # Prefetch ファイル
+    r"\.cdf-ms",                           # SxS コンポーネントストア
+    r"\.(mum|cat|manifest|cdf-ms)",         # マニフェスト/カタログ
+    r"\{[0-9a-fA-F\-]{8,}",                # GUID ファイル名 (閉じ括弧なしを許容)
+    r"[0-9a-f]{8,}_.*31bf3856ad364e35",    # Windows コンポーネント署名
+    r"(?i)bootmgr\.exe\.mui",              # Boot Manager UI
+    r"\.pf",                               # Prefetch ファイル
     r"(?i)[\\/]winsxs[\\/]",               # WinSxS パス
     r"(?i)[\\/]servicing[\\/]",            # Servicing パス
 ]
@@ -322,6 +321,11 @@ class LachesisRenderer:
                 if "VOID_VISUALIZA" in t_str: 
                      ioc['Time'] = "-"
 
+            # [Grimoire v10.1] Pre-apply categorization to avoid Reporting Glitch
+            # Ensures all "WEBSHELL" allowlist filters are applied BEFORE stats/findings
+            for ioc in refined_iocs:
+                self._get_event_category(ioc) 
+
             # [Fix] Pre-calculate technical findings using CLEANED IOCs
             tech_findings = self._prepare_technical_findings_from_list(refined_iocs, analyzer, origin_stories)
             init_access = tech_findings.get("INITIAL ACCESS", [])
@@ -359,6 +363,7 @@ class LachesisRenderer:
                 "high_interest_lnks": high_lnks[:5], # Rule 3: Top 5 restrict
                 "generic_lnks": gen_lnks[:5],        # Rule 3: Top 5 restrict
                 "appendix_lnks": high_lnks[5:] + gen_lnks[5:], # Move to Appendix
+                "initial_access_hypothesis": self._generate_initial_access_hypothesis(refined_iocs, analyzer),
                 "attack_chain_mermaid": "",  # [FIX] Removed duplicate - mermaid_timeline already shows in Executive Summary
                 "plutos_section": self._render_plutos_section_text(dfs_for_ioc, analyzer),
                 "stats": self._prepare_stats(analyzer, analysis_data, dfs_for_ioc, refined_iocs),
@@ -413,6 +418,74 @@ class LachesisRenderer:
             print(f"    [!] UserReporter warning: {e}")
             import traceback
             traceback.print_exc()
+
+    def _generate_initial_access_hypothesis(self, refined_iocs, analyzer):
+        """
+        [Grimoire v10.2] Generates a dynamic Initial Access Hypothesis 
+        based on confirmed evidence found in refined_iocs.
+        """
+        hypothesis_points = []
+        
+        # Categorize Evidence for Hypothesis
+        webshell_files = []
+        rdp_evidence = False
+        lateral_tools = []
+        phantom_evidence = []
+        cleanup_tools = []
+        
+        for ioc in refined_iocs:
+            val = str(ioc.get('Value', '')).lower()
+            path = str(ioc.get('Path', '')).lower()
+            tag = str(ioc.get('Tag', '')).upper()
+            
+            # 1. WebShell
+            if "WEBSHELL" in tag or any(kw in val for kw in ["xampp", "dvwa", "php", "jsp", "asp"]):
+                if not any(kw in val for kw in ["log", "txt", "pf"]): # Exclude logs/prefetch from file list
+                     webshell_files.append(ioc.get('Value'))
+            
+            # 2. RDP/Brute Force
+            if "4625" in val or "LOGIN_FAILURE" in tag or "BRUTE" in tag:
+                rdp_evidence = True
+                
+            # 3. Lateral Movement
+            if "LATERAL" in tag or any(kw in val for kw in ["psexec", "winrm", "remcom"]):
+                lateral_tools.append(ioc.get('Value'))
+                
+            # 4. Phantom Drive / External Media
+            if "A:\\" in ioc.get('Value', '') or "PHANTOM" in tag:
+                phantom_evidence.append(ioc.get('Value'))
+                
+            # 5. Cleanup / Wiping
+            if "ANTI" in tag or "WIPE" in tag or any(kw in val for kw in ["sdelete", "bcwipe", "ccleaner"]):
+                cleanup_tools.append(ioc.get('Value'))
+
+        # Construct Markdown Points
+        if webshell_files:
+            files_str = ", ".join([f"`{f}`" for f in list(set(webshell_files))[:3]])
+            hypothesis_points.append(self.txt.get("hypo_webshell").format(files=files_str))
+        
+        if rdp_evidence:
+            hypothesis_points.append(self.txt.get("hypo_rdp"))
+            
+        if lateral_tools:
+            files_str = ", ".join([f"`{f}`" for f in list(set(lateral_tools))[:3]])
+            hypothesis_points.append(self.txt.get("hypo_lateral").format(files=files_str))
+            
+        if phantom_evidence:
+            hypothesis_points.append(self.txt.get("hypo_phantom"))
+            
+        if len(cleanup_tools) >= 2: # Significant wiping activity
+            hypothesis_points.append(self.txt.get("hypo_cleanup"))
+
+        if not hypothesis_points:
+            return ""
+
+        # Assemble Final Section
+        md = self.txt.get("hypo_header")
+        md += "\n" + "".join(hypothesis_points)
+        md += self.txt.get("hypo_rec")
+        
+        return md
 
     def _group_all_iocs(self, iocs, analyzer=None, threshold=300):
         refined_iocs = [] # [Hybrid Fix] Dynamic Noise Filter Integration
@@ -530,6 +603,15 @@ class LachesisRenderer:
             "mysql\\\\mysql\\\\",
             "catalina\\\\",
             ".class",
+            # [v6.9.7] Office / M365 JS Cache (Often mistaken for Web Recon)
+            "powerpoint-copilot",
+            "powerpoint-slide-builder",
+            "word-copilot",
+            "excel-copilot",
+            "onenote-copilot",
+            "ui-strings-json",
+            "sccserviceciq",
+            ".tbres",
         ]
         
         # Escape literal patterns but keep regex strings as is
@@ -1140,6 +1222,9 @@ class LachesisRenderer:
         
         temp_groups = {}
         for ev in events:
+            # Skip hidden/void events
+            if "VOID" in str(ev.get('Tag', '')) or "IGNORE" in str(ev.get('Tag', '')): continue
+            
             # [v7.0 User Request] Raised threshold from 50 to 500 to filter diagnostic noise
             if ev.get('Score', 0) < 500 and "CRITICAL" not in str(ev.get('Type', '')): continue
             cat = self._get_event_category(ev)
@@ -1266,8 +1351,12 @@ class LachesisRenderer:
         return processed
 
     def _prepare_technical_findings_from_list(self, ioc_list, analyzer, origin_stories):
-        # [Fix] Apply global threshold (500) to Detailed Findings too.
-        high_conf_events = [ioc for ioc in ioc_list if (int(ioc.get('Score', 0) or 0) >= 500) or analyzer.is_force_include_ioc(ioc)]
+        # [Fix] Apply global threshold (500) and ignore VOID events
+        high_conf_events = [
+            ioc for ioc in ioc_list 
+            if (int(ioc.get('Score', 0) or 0) >= 500 or analyzer.is_force_include_ioc(ioc))
+            and "VOID" not in str(ioc.get('Tag', ''))
+        ]
         
         # [Rule 🅱️ Grouped display] Structure: { category: [ {Insight: "Comment", Artifacts: [ioc1, ioc2]}, ... ] }
         cat_groups = {}
@@ -1437,6 +1526,11 @@ class LachesisRenderer:
         crit_breakdown = []
         grouped = {}
         for ev in target_iocs:
+            # [Fix] Hide VOID and low-score events (below display threshold) from stats
+            if "VOID" in str(ev.get('Tag', '')):
+                continue
+            if ev.get('Score', 0) < 300 and "CRITICAL" not in str(ev.get('Type', '')):
+                continue
             cat = self._get_event_category(ev)
             grouped.setdefault(cat, []).append(ev)
         for cat, items in grouped.items():
@@ -1444,6 +1538,10 @@ class LachesisRenderer:
             impact = "Evidence destruction" if "ANTI" in cat else "Evasion" if "TIME" in cat else "Compromise"
             crit_breakdown.append({"Type": cat, "Count": len(items), "MaxScore": max_score, "Impact": impact})
             
+        # [Fix] Consistency: Ensure top-level crit_count matches the sum of crit_breakdown
+        crit_count = sum([b['Count'] for b in crit_breakdown])
+        crit_ratio = (crit_count / total_processed * 100) if total_processed > 0 else 0
+ 
         med_breakdown = {}
         for m in analysis_data["medium_events"]:
              c = m.get('Category', 'Unknown')
@@ -1488,13 +1586,14 @@ class LachesisRenderer:
         if "WEBSHELL" in typ or "WEBSHELL" in tag:
             # ファイル名を取得して allowlist チェック
             filename = str(ev.get('Value', '') or ev.get('FileName', '') or ev.get('Target_Path', ''))
-            path = str(ev.get('ParentPath', '') or ev.get('Full_Path', ''))
-            combined = f"{path}/{filename}"
+            path = str(ev.get('ParentPath', '') or ev.get('Full_Path', '') or ev.get('Path', ''))
+            combined = f"{path}/{filename}".replace("\\", "/")
             
-            # allowlist にマッチする場合は OTHER ACTIVITY に分類
+            # allowlist にマッチする場合はノイズとして扱う
             for pattern in WEBSHELL_ALLOWLIST_PATTERNS:
-                if re.search(pattern, filename) or re.search(pattern, combined):
-                    return "OTHER ACTIVITY"  # WEBSHELL ではなく一般アクティビティに
+                if re.search(pattern, filename, re.IGNORECASE) or re.search(pattern, combined, re.IGNORECASE):
+                    ev['Tag'] = str(ev.get('Tag', '')) + ",VOID" # 強制的に非表示タグを付与
+                    return "OTHER ACTIVITY" 
             return "WEBSHELL"
         
         if "LATERAL" in typ or "LATERAL" in tag: return "LATERAL MOVEMENT"

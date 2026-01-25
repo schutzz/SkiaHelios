@@ -1,4 +1,4 @@
-# SkiaHelios v6.9.6 - Grimoire Engine (Insider Threat & Encryption Detection)
+# SkiaHelios v6.9.7 - Grimoire Engine (Village Protocol & Eraser Detection)
 
 ![SkiaHelios CI](https://github.com/schutzz/SkiaHelios/actions/workflows/test.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
@@ -15,7 +15,7 @@
 
 Unlike traditional monolithic tools, it uses a specialized **"Triad Architecture" (Clotho-Atropos-Lachesis)** orchestrated by **"Hekate"**, supported by **"Chronos" (The Time Lord)**, **"Hercules" (The Referee)**, the **"PlutosGate" (Network & Recon Hunter)**, and the **"YARA WebShell Scanner"** to detect advanced threats including **Account Takeover**, **Privilege Escalation**, **Evidence Wiping**, **Web Intrusion Chains**, **Cross-Artifact Tampering**, **Removable Drive Execution (Phantom Drive)**, and **Encryption Tool Abuse (Insider Threat)**.
 
-**Current Version:** v6.9.6 (Insider Threat & Encryption Detection)
+**Current Version:** v6.9.7 (Village Protocol & Eraser Detection)
 
 ---
 
@@ -245,6 +245,20 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
 ---
 
 ## 📜 Complete Changelog
+
+### v6.9.7 - Village Protocol & Eraser Detection 🧹🏠
+* **[NEW]** **Eraser (Heidi Computers) Detection:**
+    * **USN Rename Storm:** Detects characteristic 'Rename Storms' (Multiple Renames + Delete in <2s) caused by Eraser's overwrite algorithms (Score 1500, `CRITICAL_ERASER_PATTERN`).
+    * **XML Task List:** Process signatures and `Task List.ersx` artifacts added to threat definitions.
+* **[NEW]** **Village Protocol (Cross-Artifact Surveillance):**
+    * **Finger Pointing (Phase 1):** Correlates `Unnatural Blanks` (Log Silence) with Prefetch execution data. Identifies *who* ran `wevtutil`/`net stop`/`vssadmin` just before the lights went out.
+    * **The Massacre (Phase 2):** Detects "Wiping Bursts" (>1000 file deletions per minute) in USN Journal (Score 1200, `CRITICAL_WIPING_BURST`).
+    * **Village Map (Phase 5):** Generates a visual Mermaid Gantt chart visualizing "Survival Proof" (System Activity) vs "Silence" (Log Gaps) vs "Triggers" (Suspect Executions).
+* **[Optimize]** **Gaiaproof Engine v2.0:**
+    * **Speed:** Replaced iterative loops with `join_asof` for millisecond-level correlation of Prefetch vs Silence windows.
+    * **Stability:** Switched from `str.concat` to boolean aggregation in USN clustering to prevent memory exhaust on massive journals.
+    * **Noise:** Silenced per-row scanning logs; alerts are now cluster-based.
+* **[Fix]** **Raw Artifact Handling:** Fixed a bug where source filenames (`$J`, `SRUDB`) were incorrectly aliased as evidence filenames in Anti-Forensics scanning.
 
 ### v6.9.6 - Insider Threat & Encryption Tool Detection 🔐🛡️
 * **[NEW]** **Encryption Tool Detection (Case 9 Fix):**
@@ -528,9 +542,10 @@ python SH_HeliosConsole.py --deep "Helios_Output\Case2\Pivot_Config.json"
 
 | Phase | Version | Codename | Description | Status |
 |-------|---------|----------|-------------|--------|
-| **Phase 1** | v8.0 | **Prometheus** | **Core Library Rustification** - Migration from Polars dependency to native Rust parsers. 10x faster MFT/USN/Registry parsing. Python bindings via PyO3. | 🔜 Planned |
-| **Phase 2** | v9.0 | **Nephele** | **Cloud Artifact Support** - M365/Azure AD/AWS CloudTrail/GCP Audit Log support. Unified timeline for on-prem + cloud correlation analysis. OAuth/API-based automatic collection. | 📋 Roadmap |
-| **Phase 3** | v10.0 | **Oracle** | **LLM Integration** - Auto-summarization of Grimoire reports, natural language queries, interactive investigation chat. Local LLM (Ollama) support for air-gapped environments. | 🔮 Vision |
+| **Phase 1** | v7.0 | **Demiurge** | **Hybrid Architecture (Project Demiurge)** - "False KAPE" implementation. Direct Raw Artifact Ingestion (Dirty Hives, PS History) via Artemis-Core. Zero-Copy DF Handover via PyO3. | 🏗️ In Progress |
+| **Phase 2** | v8.0 | **Prometheus** | **Core Library Rustification** - Full migration from Polars dependency to native Rust parsers for ALL artifacts. 10x faster parsing. | 🔜 Planned |
+| **Phase 3** | v9.0 | **Nephele** | **Cloud Artifact Support** - M365/Azure AD/AWS CloudTrail/GCP Audit Log support. Unified timeline for on-prem + cloud. | 📋 Roadmap |
+| **Phase 4** | v10.0 | **Oracle** | **LLM Integration** - Auto-summarization of Grimoire reports, natural language queries. Local LLM (Ollama) support. | 🔮 Vision |
 
 
 

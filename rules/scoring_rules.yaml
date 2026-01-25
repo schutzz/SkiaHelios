@@ -140,11 +140,14 @@ threat_scores:
     target: "FileName"
     match_mode: "contains"
 
-  - pattern: "c99"
+  # WebShell patterns - require file extension or word boundary to avoid hex hash false positives
+  # NG: ...abc99def... (part of hash)  OK: c99.php, web_c99.php, c99shell.asp
+  - pattern: "(?i)(^|[^0-9a-f])c99([^0-9a-f]|\\.(php|asp|aspx|jsp|cgi|pl))"
     score: 800
     tags: ["WEBSHELL", "CRITICAL_WEBSHELL"]
     target: "FileName"
-    match_mode: "contains"
+    match_mode: "regex"
+    description: "c99 WebShell - classic PHP backdoor"
 
   - pattern: "webshell"
     score: 800
@@ -164,11 +167,14 @@ threat_scores:
     target: "FileName"
     match_mode: "contains"
 
-  - pattern: "r57"
+  # r57 also needs hex exclusion - same issue as c99
+  - pattern: "(?i)(^|[^0-9a-f])r57([^0-9a-f]|\\.(php|asp|aspx|jsp|cgi|pl))"
     score: 800
     tags: ["WEBSHELL", "CRITICAL_WEBSHELL"]
     target: "FileName"
-    match_mode: "contains"
+    match_mode: "regex"
+    description: "r57 WebShell - classic PHP backdoor"
+
 
   # ═══════════════════════════════════════════════════════════════
   # Sysinternals / Admin Tools (Context-Aware)

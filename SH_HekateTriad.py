@@ -20,6 +20,60 @@ from tools.SH_ClothoReader import ClothoReader
 #  Status: Case 7 Structure + Case 2 Logic (Restored)
 # ============================================================
 
+def generate_village_map(events):
+    """
+    [Village Protocol Phase 4]
+    Generates a Mermaid Gantt chart string visualizing the silence vs activity.
+    """
+    gantt = [
+        "```mermaid",
+        "gantt",
+        "    title Village Protocol: Silence & The Activity",
+        "    dateFormat YYYY-MM-DD HH:mm",
+        "    axisFormat %H:%M",
+        "    section Survival Proof",
+    ]
+    
+    # Extract PoL Events (SRUM/USN) - Simply grouped
+    # This assumes events are already processed. 
+    # For a prettier chart, we might need raw interval data, but let's approximate from Events.
+    # Actually, the 'events' list here is discrete. 
+    # Better approach: Scan for Start/End if available, or just plot points.
+    
+    # Filter for Gaiaproof events that have Time
+    gp_events = [e for e in events if e.get('Source') == 'Gaiaproof' and e.get('Time')]
+    
+    # Plot Silence Windows (Red)
+    has_gap = False
+    for e in gp_events:
+        if "FS_SILENCE" in e.get('Tag', '') or "LOG_GAP" in e.get('Tag', ''):
+             # Try to parse description for duration or just plot a fixed block
+             # Description format: "Active but FS Silent: PoL in window=..." (Window=5m usually)
+             t_str = e['Time'][:16] # YYYY-MM-DD HH:mm
+             gantt.append(f"    WARNING: SILENCE  :crit, gap, {t_str}, 5m")
+             has_gap = True
+
+    gantt.append("    section Activity")
+    # Plot Activity (Prefetch / SRUM Hits)
+    # We use 'Likely_Cause' enrichment in FS_SILENCE events if available
+    for e in gp_events:
+         if "FS_SILENCE" in e.get('Tag', '') and e.get('Action'):
+             # If Action field has Cause info (requires modification in Gaiaproof to map Likely_Cause to Action or Summary)
+             # Currently Likely_Cause is in CSV but Hekate event builder needs to map it.
+             pass
+             
+    # Plot Trigger Events (Eraser, etc)
+    for e in events:
+        if "ANTI_FORENSICS" in e.get('Tag', '') and e.get('Source') != 'Gaiaproof':
+             t_str = e['Time'][:16]
+             tool = e.get('FileName', 'Tool')
+             gantt.append(f"    Trigger: {tool} :active, {t_str}, 1m")
+
+    gantt.append("```")
+    
+    if not has_gap: return ""
+    return "\n".join(gantt)
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--case", required=True)
@@ -35,6 +89,7 @@ def main():
     parser.add_argument("--hercules", help="Hercules Judged Timeline CSV")
     parser.add_argument("--chronos", help="Chronos Anomalies CSV")
     parser.add_argument("--aion", help="AION Persistence CSV")
+    parser.add_argument("--gaiaproof", help="Gaiaproof Unnatural Blanks CSV")
     
     # Source Dirs
     parser.add_argument("--kape", help="KAPE Raw Directory")
@@ -145,8 +200,30 @@ def main():
                     dfs['Chronos'] = pl.concat([dfs['Chronos'], rollback_hits], how="diagonal")
         except Exception as e:
             print(f"    [!] USN Injection Failed: {e}")
+        except Exception as e:
+            print(f"    [!] USN Injection Failed: {e}")
 
-    # [FIX] Ensure Timeline and Hercules are loaded correctly (Clotho Override)
+    # [NEW] Gaiaproof Injection
+    gaiaproof_files = {
+        "Blanks": "Gaiaproof_Unnatural_Blanks.csv",
+        "AntiForensics": "Gaiaproof_AntiForensics_Hits.csv",
+        "USNGaps": "Gaiaproof_USN_GROTESQUE.csv",
+        "FSSilence": "Gaiaproof_FS_Silence.csv",
+        "WipingBurst": "Gaiaproof_Wiping_Burst.csv", # [Village Protocol]
+        "Eraser": "Gaiaproof_Eraser_Adversary.csv"   # [Eraser Protocol]
+    }
+    
+    for key, fname in gaiaproof_files.items():
+        # Search for file in outdir OR parent (Helios_Output root)
+        candidates = [Path(args.outdir) / fname, Path(args.outdir).parent / fname]
+        
+        for fpath in candidates:
+            if fpath.exists():
+                try:
+                    print(f"    [+] Loading Gaiaproof Report ({key}): {fpath.name}")
+                    dfs[f'Gaiaproof_{key}'] = pl.read_csv(str(fpath), ignore_errors=True, infer_schema_length=0)
+                    break # Found it
+                except: pass
     if (dfs.get('Timeline') is None or dfs.get('Timeline').height == 0) and args.timeline and os.path.exists(args.timeline):
         print(f"    [!] Manually loading Timeline from {args.timeline}")
         try:
@@ -301,8 +378,127 @@ def main():
                         verdict_flags.add("TIMESTOMP")
                     
                     events.append(ev)
+                    
+                    events.append(ev)
 
-    # [3] AION Persistence Integration (RESTORED LOGIC)
+    # [2.5] Gaiaproof Events
+    # Blanks / FS Silence -> "LOG_WIPE_SUSPICION"
+    # AF Hits -> "ANTI_FORENSICS"
+    # USN Gaps -> "DISK_WIPING"
+    
+    if dfs.get('Gaiaproof_Blanks') is not None:
+        df_gp = dfs['Gaiaproof_Blanks']
+        for row in df_gp.iter_rows(named=True):
+             ev = {
+                "Time": row.get('PoL_Time'),
+                "Category": "ANTI",
+                "Summary": f"Unnatural Blank (Log Gap): {row.get('Description')}",
+                "Source": "Gaiaproof",
+                "Criticality": 500, # Max Criticality
+                "Score": 500,
+                "Tag": "LOG_WIPING_SUSPICION",
+                "Keywords": ["Log Cleared"],
+                "Action": "Log Deletion Suspected"
+            }
+             events.append(ev)
+             verdict_flags.add("ANTI-FORENSICS")
+
+    if dfs.get('Gaiaproof_FSSilence') is not None:
+        df_gp = dfs['Gaiaproof_FSSilence']
+        for row in df_gp.iter_rows(named=True):
+             ev = {
+                "Time": row.get('PoL_Time'),
+                "Category": "ANTI",
+                "Summary": f"FileSystem Silence: {row.get('Description')}",
+                "Source": "Gaiaproof",
+                "Criticality": 600, # Raised to High/Critical
+                "Score": 600,
+                "Tag": "FS_SILENCE",
+                "Keywords": ["Timestomp", "Wiping"],
+                "Action": "Metadata Manipulation Suspected",
+                "Likely_Cause": row.get('Likely_Cause') # [Village Protocol] Capture enriched cause
+            }
+             # [Village Protocol] Append Cause to Summary for visibility
+             if row.get('Likely_Cause'):
+                 ev['Summary'] += f" [Trigger: {row.get('Likely_Cause')}]"
+                 
+             events.append(ev)
+             verdict_flags.add("ANTI-FORENSICS")
+
+    if dfs.get('Gaiaproof_USNGaps') is not None:
+        df_gp = dfs['Gaiaproof_USNGaps']
+        for row in df_gp.iter_rows(named=True):
+             gap_size = row.get('Gap_Size')
+             ev = {
+                "Time": row.get('Gap_Start_Time'),
+                "Category": "ANTI",
+                "Summary": f"USN Sequence Gap (Size: {gap_size})",
+                "Source": "Gaiaproof",
+                "Criticality": 600,
+                "Score": 600,
+                "Tag": "USN_WIPING",
+                "Keywords": ["USN", "Deletion"],
+                "Action": "Journal Tampering"
+            }
+             events.append(ev)
+             verdict_flags.add("ANTI-FORENSICS")
+             
+    # [Village Protocol Phase 2] Burst Detection
+    if dfs.get('Gaiaproof_Wiping_Burst') is not None:
+        df_gp = dfs['Gaiaproof_Wiping_Burst']
+        for row in df_gp.iter_rows(named=True):
+             ev = {
+                "Time": row.get('Time'),
+                "Category": "ANTI",
+                "Summary": f"Mass Wiping Burst ({row.get('Delete_Count')} files)",
+                "Source": "Gaiaproof",
+                "Criticality": 1200,
+                "Score": 1200,
+                "Tag": "WIPING_BURST",
+                "Keywords": ["Mass Deletion"],
+                "Action": row.get('Description')
+            }
+             events.append(ev)
+             verdict_flags.add("ANTI-FORENSICS")
+             verdict_flags.add("WIPING")
+
+    # [Eraser Protocol]
+    if dfs.get('Gaiaproof_Eraser') is not None:
+        df_gp = dfs['Gaiaproof_Eraser']
+        for row in df_gp.iter_rows(named=True):
+             ev = {
+                "Time": row.get('PoL_Time'),
+                "Category": "ANTI",
+                "Summary": f"Eraser Rename Storm ({row.get('FileName')})",
+                "Source": "Gaiaproof",
+                "Criticality": 1500,
+                "Score": 1500, # Extremely High Severity
+                "Tag": "ANTI_FORENSICS_TOOL",
+                "Keywords": ["Eraser", "Rename Storm"],
+                "Action": row.get('Description')
+            }
+             events.append(ev)
+             verdict_flags.add("ANTI-FORENSICS")
+             verdict_flags.add("ERASER")
+
+    if dfs.get('Gaiaproof_AntiForensics') is not None:
+        df_gp = dfs['Gaiaproof_AntiForensics']
+        for row in df_gp.iter_rows(named=True):
+             tool_name = row.get('FileName') or row.get('Executable') or "Unknown Tool"
+             ev = {
+                "Time": row.get('TimeCreated') or row.get('PoL_Time') or row.get('UpdateTimestamp') or "0000-00-00 00:00:00",
+                "Category": "ANTI",
+                "Summary": f"Anti-Forensics Tool Detected: {tool_name}",
+                "Source": "Gaiaproof",
+                "Criticality": 1000, # Highest
+                "Score": 1000,
+                "Tag": "ANTI_FORENSICS_TOOL",
+                "Keywords": [tool_name],
+                "FileName": tool_name,
+                "Action": "Evidence Destruction Tool Execution"
+            }
+             events.append(ev)
+             verdict_flags.add("ANTI-FORENSICS")
     if dfs.get('AION') is not None:
         print("    [*] Integrating AION Persistence events...")
         df_aion = dfs['AION']
@@ -613,7 +809,10 @@ def main():
                 "CRITICAL" in tag or 
                 "PARADOX" in tag or 
                 "VOID" in tag or
-                "PERSISTENCE" in tag
+                "PERSISTENCE" in tag or
+                "FS_SILENCE" in tag or
+                "WIPING" in tag or
+                "ANTI_FORENSICS" in tag
             )
 
             # [User Request] Adjusted Filtering Threshold
@@ -633,8 +832,16 @@ def main():
             filtered_events.append(e)
             
         events = filtered_events
-        print(f"    -> Events Filtered: {len(valid_times)} -> {len(events)}")
+        
+        # [DEBUG] Gaiaproof Survival Check
+        gp_count = sum(1 for e in events if e.get('Source') == 'Gaiaproof')
+        print(f"    [DEBUG] Gaiaproof Events Survived: {gp_count}")
+        for e in events:
+             if e.get('Source') == 'Gaiaproof':
+                 print(f"       -> GP Event: {e.get('Summary')} | Score: {e.get('Score')}")
 
+        print(f"    -> Events Filtered: {len(valid_times)} -> {len(events)}")
+    
     events.sort(key=lambda x: x['Time'] if x['Time'] else "0000")
 
     # [DEBUG] Check for SetMACE to FILE
@@ -653,7 +860,8 @@ def main():
         "lateral_summary": "Confirmed" if "LATERAL" in verdict_flags else "",
         # [FIX] Pass enforced scope to Lachesis to filter raw DataFrame artifacts
         "scope_start": start_scope,
-        "scope_end": end_scope
+        "scope_end": end_scope,
+        "village_map": generate_village_map(events) # [Village Protocol]
     }
 
     lang_suffix = args.lang if args.lang else "jp"

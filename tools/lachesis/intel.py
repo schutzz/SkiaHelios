@@ -81,6 +81,14 @@ TEXT_RES = {
         "phishing_lnk_detected": "- **{count}** suspicious LNK files (shortcuts) were detected in Recent folders and similar locations.\n",
         "phishing_table_header": "\n| Sample LNK | Access Time (UTC) | Origin Trace |\n|---|---|---|\n",
         "no_vector_found": "No clear external intrusion vector was automatically detected.\n\n",
+        # Initial Access Hypothesis
+        "hypo_header": "### 🕵️‍♂️ Initial Access Hypothesis (No Direct Trace Found)\nAlthough a clear entry vector (LNK/Zone.Identifier) was not identified, the following possibilities are strongly suspected based on detected artifacts:\n",
+        "hypo_webshell": "1. **Public Exploit (Web Vulnerability)**:\n   - Presence of server-side artifacts (`{files}`) suggests exploitation of public vulnerabilities (SQLi, File Upload, etc.).\n",
+        "hypo_rdp": "2. **RDP / Password Auth Attack**:\n   - Login failure traces or administrative tool activities suggest credential-based intrusion through RDP or other administrative services.\n",
+        "hypo_lateral": "3. **Lateral Movement (Internal Pivot)**:\n   - Identification of internal reconnaissance tools (`{files}`) suggest the attacker moved from another already compromised host within the network.\n",
+        "hypo_phantom": "4. **Removable Media / Phantom Drive**:\n   - Execution from external media or virtual drives (`A:\\`, etc.) suggests local physical access or use of ISO/VHD delivery methods.\n",
+        "hypo_cleanup": "5. **Post-Intrusion Evidence Cleanup**:\n   - Extensive use of wiping tools suggests the attacker successfully achieved their goal and attempted to erase the initial entry traces.\n",
+        "hypo_rec": "\n> **Recommendation:** Verify `Event ID 4688` (Process Creation) for missing gaps and prioritize reviewing web server access logs (Apache/IIS) or RDP logon logs.\n",
         "plutos_no_activity": "No suspicious network activity or lateral movement traces were detected.\n",
     },
     "jp": {
@@ -155,6 +163,14 @@ TEXT_RES = {
         "phishing_lnk_detected": "- Recentフォルダ等において、**{count}件** の不審なLNKファイル（ショートカット）へのアクセスが検知されています。\n",
         "phishing_table_header": "\n| サンプルLNK | アクセス時刻 (UTC) | 流入元 (Origin Trace) |\n|---|---|---|\n",
         "no_vector_found": "明確な外部侵入ベクターは自動検知されませんでした。\n\n",
+        # Initial Access Hypothesis
+        "hypo_header": "### 🕵️‍♂️ 推定される初期侵入シナリオ (Initial Access Hypothesis)\n明確な流入経路（LNK/Zone.Identifier）は確認されませんでしたが、検出されたアーティファクトから以下の可能性が強く推測されます：\n",
+        "hypo_webshell": "1. **公開脆弱性の悪用 (Webサーバー経由)**:\n   - `{files}` 等のサーバー側アーティファクトの存在から、公開されているWeb脆弱性（SQLi, File Upload等）を悪用された可能性があります。\n",
+        "hypo_rdp": "2. **RDP / パスワード認証攻撃**:\n   - ログイン失敗の痕跡や管理者ツールの活動から、RDPやその他の管理サービスを介した認証情報の悪用による侵入が疑われます。\n",
+        "hypo_lateral": "3. **横展開による侵入 (Internal Pivot)**:\n   - 内部探索ツール（`{files}`等）の検知から、ネットワーク内の既に侵害された他端末からの流入が疑われます。\n",
+        "hypo_phantom": "4. **外部メディア / 仮想ドライブの利用**:\n   - 外部メディアや仮想ドライブ（`A:\\`等）からの実行痕跡から、物理的な接触またはISO/VHD形式でのファイル持ち込みが疑われます。\n",
+        "hypo_cleanup": "5. **侵害成功後の証拠隠滅活動**:\n   - 広範囲なワイピングツールの使用から、攻撃者は目的を達成した後、初期侵入の痕跡を意図的に消去した可能性があります。\n",
+        "hypo_rec": "\n> **Recommendation:** `Event ID 4688` (プロセス作成) の欠損状況を確認し、Webサーバーのアクセスログ（Apache/IIS）やRDPログインログの重点的な調査を推奨します。\n",
         "plutos_no_activity": "不審なネットワーク活動や横展開の痕跡は検出されませんでした。\n",
     }
 }
@@ -300,6 +316,7 @@ class IntelManager:
         renderer_specific = [
             # WinSxS and System Components (Renderer-side specifics)
             r"_none_",  # WinSxS hash pattern: xxx_10.0.17134.1_none_xxx
+            r"31bf3856ad364e35",  # Microsoft Component Signature
             r"_10.0.",  # Windows version pattern in component names
             r"microsoft\.windows\.contentdeliverymanager",
             r"microsoft\.windows\.cortana",

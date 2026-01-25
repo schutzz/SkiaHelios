@@ -1,0 +1,188 @@
+# ============================================================
+#  SH_Gaiaproof アンチフォレンジック・ツール定義書
+#  antiforensic_definitions.yaml v1.0 (Japanese)
+#  Mission: 痕跡の隠蔽、データのワイピング、ログ改ざんツールの検知
+# ============================================================
+
+anti_forensics_tools:
+  # ═══════════════════════════════════════════════════════════════
+  # ファイル・ディスクワイパー (File & Disk Wipers)
+  # ═══════════════════════════════════════════════════════════════
+  - id: AF_WIPER_001
+    name: SDelete
+    category: File Wiper
+    vendor: Sysinternals
+    severity: CRITICAL
+    description: "ファイルデータ領域を上書きし、MFTエントリ名を26段階(A-Z)で再帰的にリネームして痕跡を抹消する。"
+    signatures:
+      processes:
+        - executable: sdelete.exe
+        - executable: sdelete64.exe
+      registry:
+        - key: "HKCU\\Software\\Sysinternals\\SDelete"
+          value: "EulaAccepted"
+      filesystem:
+        - filename_pattern: ".*AAAA.*" # ロジック側でA-Zシーケンスの詳細を補完するが、簡易検知用に定義
+          location_hint: "USN_Journal"
+          description: "SDelete特有の26段階リネームパターン (AAAA... から ZZZZ...)"
+      event_ids:
+        - id: 4688
+          command_line_args: ["-p", "-z", "-c", "-s", "-q"]
+
+  - id: AF_WIPER_002
+    name: BCWipe
+    category: File Wiper
+    vendor: Jetico
+    severity: CRITICAL
+    description: "エンタープライズ向けワイピングツール。「Transparent Wiping」機能により削除操作をインターセプトして実行する。"
+    signatures:
+      processes:
+        - executable: BCWipe.exe
+        - executable: BCWipeTM.exe # Transparent Wiping Task Manager
+      registry:
+        - key: "HKLM\\SOFTWARE\\Jetico\\BCWipe"
+        - key: "HKLM\\SYSTEM\\CurrentControlSet\\Services\\BCWipe"
+      filesystem:
+        - filename_pattern: ".*\\.wiped$"
+          location_hint: "MFT"
+          description: "ワイピング中に使用される一時的な拡張子"
+
+  - id: AF_WIPER_003
+    name: Eraser
+    category: File Wiper
+    vendor: Heidi Computers
+    severity: HIGH
+    description: "Windows用の高度なセキュリティツール。機密データを完全に削除するために使用される。"
+    signatures:
+      processes:
+        - executable: Eraser # Matched loosely (case-insensitive substring)
+        - executable: EraserUtil
+      registry:
+        - key: "HKCU\\Software\\Eraser\\Eraser 6"
+      filesystem:
+        - filename_pattern: "Task List.ersx"
+          location_hint: "AppData"
+          description: "Eraserのスケジュール設定ファイル"
+
+  - id: AF_WIPER_004
+    name: DBAN (Darik's Boot and Nuke)
+    category: Disk Wiper
+    vendor: Geep
+    severity: CRITICAL
+    description: "ハードディスク全体の内容を自動的に削除・上書きするブートディスク。"
+    signatures:
+      # ライブシステム上での検知は困難だが、ISOファイルの痕跡を探す
+      filesystem:
+        - filename_pattern: "dban.*\\.iso"
+          location_hint: "Downloads"
+
+  # ═══════════════════════════════════════════════════════════════
+  # プライバシークリーナー (Privacy Cleaners)
+  # ═══════════════════════════════════════════════════════════════
+  - id: AF_CLEAN_001
+    name: CCleaner
+    category: Privacy Cleaner
+    vendor: Piriform
+    severity: MEDIUM
+    description: "システム最適化・プライバシーツール。イベントログやMFT空き領域のワイプにも使用可能。"
+    signatures:
+      processes:
+        - executable: CCleaner.exe
+        - executable: CCleaner64.exe
+      registry:
+        - key: "HKCU\\Software\\Piriform\\CCleaner"
+          value: "WipeFreeSpace" # 空き領域ワイプが有効な場合
+      filesystem:
+        - filename_pattern: "ccleaner.ini"
+          location_hint: "Program Files"
+      event_ids:
+        - id: 1102
+          description: "CCleanerによってトリガーされたログ消去"
+
+  - id: AF_CLEAN_002
+    name: BleachBit
+    category: Privacy Cleaner
+    vendor: BleachBit
+    severity: HIGH
+    description: "オープンソースのシステムクリーナー。未割り当て領域や各種ログを強力にワイプする。"
+    signatures:
+      processes:
+        - executable: bleachbit.exe
+        - executable: bleachbit_console.exe
+      filesystem:
+        - filename_pattern: "BleachBit.ini"
+          location_hint: "AppData"
+        - filename_pattern: ".*\\.tmp"
+          location_hint: "Temp" 
+          description: "ワイピング実行時にBleachBitが生成する特有の一時ファイル"
+
+  - id: AF_CLEAN_003
+    name: Glary Utilities
+    category: Privacy Cleaner
+    vendor: Glarysoft
+    severity: MEDIUM
+    description: "PCのクリーンアップとメンテナンスを行う統合ユーティリティ。"
+    signatures:
+      processes:
+        - executable: GlaryUtilities.exe
+        - executable: Integrator.exe
+      registry:
+        - key: "HKCU\\Software\\GlarySoft\\Glary Utilities 5"
+
+  # ═══════════════════════════════════════════════════════════════
+  # ログ操作・改ざん (Log Manipulation & Timestomping)
+  # ═══════════════════════════════════════════════════════════════
+  - id: AF_LOG_001
+    name: wevtutil (Log Clear)
+    category: Log Hiding
+    vendor: Microsoft (Abuse)
+    severity: HIGH
+    description: "イベントログを消去するために悪用されるWindows標準ツール。"
+    signatures:
+      processes:
+        - executable: wevtutil.exe
+      event_ids:
+        - id: 4688
+          command_line_args: ["cl", "clear-log", "sl", "set-log"]
+        - id: 1102
+          description: "監査ログの消去 (Audit Log Cleared)"
+        - id: 104
+          description: "ログファイルの消去 (Log File Cleared)"
+
+  - id: AF_TIME_001
+    name: Timestomp (Metasploit/Generic)
+    category: Timestomping
+    vendor: Various
+    severity: HIGH
+    description: "ファイルのタイムスタンプ (MACE) を改ざんし、活動時間を隠蔽する。"
+    signatures:
+      filesystem:
+        - filename_pattern: ".*"
+          location_hint: "MFT"
+          description: "$SI 作成時刻 < $FN 作成時刻 の不整合"
+      processes:
+        - executable: timestomp.exe
+
+  - id: AF_LOG_002
+    name: LogKiller / EventCleaner
+    category: Log Hiding
+    vendor: Unknown
+    severity: CRITICAL
+    description: "ログサービスの停止やログの一括消去に特化した攻撃ツール。"
+    signatures:
+      processes:
+        - executable: LogKiller.exe
+        - executable: EventCleaner.exe
+      event_ids:
+        - id: 7036
+          description: "EventLog サービスの停止"
+
+  - id: AF_LOG_003
+    name: Phrozen Maintainer
+    category: Privacy Cleaner
+    vendor: Phrozen
+    severity: HIGH
+    description: "フォレンジック調査への対抗措置 (Anti-Forensic) を目的としたツール。"
+    signatures:
+      processes:
+        - executable: maintainer.exe
